@@ -84,7 +84,7 @@ def run_encoding_analysis(neural_activity, scenes, neural_meta, fig_dir="figures
                                  scoring='accuracy')
     control_acc = log_scores.mean()
     print(f"  Behavior prediction accuracy: {control_acc:.2%} (±{log_scores.std():.2%})")
-    print("  (High accuracy proves physics labels are informative)")
+    print("  (High accuracy expected: KE label is a deterministic function of physics labels)")
 
     # --- Subsampling curve ---
     print("\nComputing subsampling curve...")

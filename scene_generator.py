@@ -7,9 +7,9 @@ for analysis (never used in neural generation).
 
 Key design choices that make pixels insufficient for behavior prediction:
   1. An opaque wall occludes ~half the objects from the camera's view
-  2. Behavior label uses peak displacement during the simulation, not final
-     position — objects that bounced back look stationary in the final frame
-     but the physics engine tracked their full trajectory
+  2. Behavior label (KE) uses final velocities — invisible in pixels
+  3. Initial renders miss velocity and occluded objects, so initial pixel
+     features cannot predict the final-frame pixel configuration
 """
 
 import os
@@ -17,6 +17,7 @@ import tempfile
 import numpy as np
 import pybullet as p
 import pybullet_data
+import matplotlib.pyplot as plt
 
 from config import N_OBJECTS, IMAGE_SIZE, N_TIMESTEPS
 
@@ -67,8 +68,8 @@ def _create_scene(physics_client, rng):
     frictions = []
     is_occluded = []  # True if object is behind the wall
 
-    # Ensure at least 2 objects on each side
-    # First 2 go in front (visible), next 2 go behind (occluded), rest random
+    # Object placement: object 0 is launcher (visible), object 1 is visible,
+    # object 2 is occluded (behind wall). Additional objects alternate randomly.
     for i in range(N_OBJECTS):
         mass = rng.uniform(0.1, 10.0)
         friction = rng.uniform(0.1, 1.0)
@@ -90,11 +91,11 @@ def _create_scene(physics_client, rng):
                                             rgbaColor=color,
                                             physicsClientId=physics_client)
 
-        # Placement: first 2 visible, next 2 occluded, rest random
-        if i < 2:
+        # Placement: 0=visible launcher, 1=visible, 2=occluded, rest random
+        if i == 0 or i == 1:
             y = rng.uniform(-1.5, -0.3)  # in front of wall (visible)
             occluded = False
-        elif i < 4:
+        elif i == 2:
             y = rng.uniform(0.3, 1.5)    # behind wall (occluded)
             occluded = True
         else:
@@ -172,19 +173,21 @@ def _collect_physics_labels(body_ids, masses, frictions, physics_client):
     return np.array(labels, dtype=np.float32)
 
 
-def _compute_total_peak_displacement(peak_displacements):
+def _compute_total_kinetic_energy(body_ids, masses, physics_client):
     """
-    Sum of peak displacements for all non-launcher objects.
+    Total kinetic energy of all objects: KE = Σ 0.5 * mass_i * |lin_vel_i|².
 
-    This is a continuous physics-trajectory quantity that depends on:
-      - Which objects were hit (collision dynamics)
-      - How far they traveled at any point during the simulation (not just final)
-      - Objects behind the occluder (invisible to camera)
+    Directly computable from physics API labels (mass + final linear velocity).
+    Not recoverable from pixel renders (pixels carry no velocity signal).
 
     Returns a float. The binary behavior label is computed as a median split
     across all scenes after generation.
     """
-    return float(peak_displacements[1:].sum())  # skip launcher (index 0)
+    ke = 0.0
+    for i, bid in enumerate(body_ids):
+        lin_vel, _ = p.getBaseVelocity(bid, physicsClientId=physics_client)
+        ke += 0.5 * masses[i] * float(np.dot(lin_vel, lin_vel))
+    return ke
 
 
 def _render_scene(physics_client):
@@ -275,9 +278,12 @@ def generate_scenes(n_scenes, seed, bullet_k):
     Generate n_scenes PyBullet scenes, returning program states and analysis labels.
 
     Returns dict with:
-      'program_states': ndarray [n_scenes x D]
-      'physics_labels': ndarray [n_scenes x 75]   (from API, not in neural model)
-      'behavior_labels': ndarray [n_scenes]        (binary)
+      'program_states':         ndarray [n_scenes x D]   — final render + bullet blob
+      'physics_labels':         ndarray [n_scenes x 15*N_OBJECTS]  — final-state API labels
+      'initial_physics_labels': ndarray [n_scenes x 15*N_OBJECTS]  — t=0 API labels
+      'initial_renders':        ndarray [n_scenes x IMAGE_SIZE**2*4]  — t=0 RGBA bytes
+      'behavior_labels':        ndarray [n_scenes]       — binary, KE median split
+      'kinetic_energies':       ndarray [n_scenes]       — continuous final KE
       'metadata': dict with dimension info
     """
     rng = np.random.default_rng(seed)
@@ -290,9 +296,12 @@ def generate_scenes(n_scenes, seed, bullet_k):
     total_bytes = render_bytes_total + bullet_k
     D = total_bytes  # each byte becomes one float32
 
+    physics_dim = 15 * N_OBJECTS
     program_states = np.zeros((n_scenes, D), dtype=np.float32)
-    physics_labels = np.zeros((n_scenes, 15 * N_OBJECTS), dtype=np.float32)
-    total_peak_disps = np.zeros(n_scenes, dtype=np.float32)
+    physics_labels = np.zeros((n_scenes, physics_dim), dtype=np.float32)
+    initial_physics_labels = np.zeros((n_scenes, physics_dim), dtype=np.float32)
+    initial_renders = np.zeros((n_scenes, rgba_bytes_count), dtype=np.float32)
+    kinetic_energies = np.zeros(n_scenes, dtype=np.float32)
 
     for i in range(n_scenes):
         if (i + 1) % 100 == 0 or i == 0:
@@ -303,22 +312,21 @@ def generate_scenes(n_scenes, seed, bullet_k):
         scene_rng = np.random.default_rng(scene_seed)
 
         body_ids, masses, frictions, is_occluded = _create_scene(pc, scene_rng)
-        initial_positions = _get_initial_positions(body_ids, pc)
 
-        # Step physics while tracking peak displacement per object
-        peak_displacements = np.zeros(len(body_ids))
-        for t in range(N_TIMESTEPS):
+        # Capture initial state (t=0) before stepping
+        initial_physics_labels[i] = _collect_physics_labels(body_ids, masses, frictions, pc)
+        init_rgba_bytes, _, _ = _render_scene(pc)
+        initial_renders[i] = np.frombuffer(init_rgba_bytes, dtype=np.uint8).astype(np.float32)
+
+        # Step physics
+        for _ in range(N_TIMESTEPS):
             p.stepSimulation(physicsClientId=pc)
-            current_positions = _get_current_positions(body_ids, pc)
-            for j in range(len(body_ids)):
-                disp = np.linalg.norm(current_positions[j] - initial_positions[j])
-                peak_displacements[j] = max(peak_displacements[j], disp)
 
-        # Collect analysis labels (NOT used in neural generation)
+        # Collect final-state analysis labels (NOT used in neural generation)
         physics_labels[i] = _collect_physics_labels(body_ids, masses, frictions, pc)
-        total_peak_disps[i] = _compute_total_peak_displacement(peak_displacements)
+        kinetic_energies[i] = _compute_total_kinetic_energy(body_ids, masses, pc)
 
-        # Render (final frame only — misses mid-simulation movement and occluded objects)
+        # Render final frame
         rgba_bytes, depth_bytes, seg_bytes = _render_scene(pc)
 
         # Save bullet state
@@ -331,11 +339,11 @@ def generate_scenes(n_scenes, seed, bullet_k):
 
         p.disconnect(pc)
 
-    # Behavior label: median split on total peak displacement.
-    # Guaranteed 50/50 balance. Depends on trajectory (not final state)
-    # and on occluded objects (not visible in render).
-    median_disp = np.median(total_peak_disps)
-    behavior_labels = (total_peak_disps > median_disp).astype(np.int32)
+    # Behavior label: median split on total final kinetic energy.
+    # KE is directly recoverable from physics labels (mass + lin_vel).
+    # Pixels carry no velocity signal → render model stays at chance.
+    median_ke = np.median(kinetic_energies)
+    behavior_labels = (kinetic_energies > median_ke).astype(np.int32)
 
     # Metadata
     pixel_end = rgba_bytes_count  # RGBA is first in concatenation
@@ -348,12 +356,53 @@ def generate_scenes(n_scenes, seed, bullet_k):
 
     behavior_rate = behavior_labels.mean()
     print(f"  Scene generation complete.")
-    print(f"    Behavior label rate: {behavior_rate:.2%} (median-split on total peak displacement)")
-    print(f"    Median total peak displacement: {median_disp:.3f}")
+    print(f"    Behavior label rate: {behavior_rate:.2%} (median-split on final KE)")
+    print(f"    Median final KE: {median_ke:.4f}")
 
     return {
         'program_states': program_states,
         'physics_labels': physics_labels,
+        'initial_physics_labels': initial_physics_labels,
+        'initial_renders': initial_renders,
         'behavior_labels': behavior_labels,
+        'kinetic_energies': kinetic_energies,
         'metadata': metadata,
     }
+
+
+def save_sample_renders(scenes, fig_dir, n_samples=16):
+    """
+    Save a grid of n_samples scenes showing initial (t=0) and final (t=N) renders.
+
+    Helps assess scene visual complexity and feasibility of next-frame pixel prediction.
+    Saved to {fig_dir}/sample_scenes.png.
+    """
+    initial_renders = scenes['initial_renders']
+    program_states = scenes['program_states']
+    pixel_indices = scenes['metadata']['pixel_indices']
+
+    n = min(n_samples, len(initial_renders))
+    fig, axes = plt.subplots(n, 2, figsize=(4, 2 * n))
+    if n == 1:
+        axes = axes[np.newaxis, :]
+
+    axes[0, 0].set_title('t = 0 (initial)', fontsize=9)
+    axes[0, 1].set_title(f't = {N_TIMESTEPS} (final)', fontsize=9)
+
+    for i in range(n):
+        # Initial RGBA
+        init_rgba = initial_renders[i].astype(np.uint8).reshape(IMAGE_SIZE, IMAGE_SIZE, 4)
+        # Final RGBA (first slice of program_states)
+        final_rgba = program_states[i, pixel_indices].astype(np.uint8).reshape(IMAGE_SIZE, IMAGE_SIZE, 4)
+
+        axes[i, 0].imshow(init_rgba)
+        axes[i, 0].axis('off')
+        axes[i, 1].imshow(final_rgba)
+        axes[i, 1].axis('off')
+
+    plt.tight_layout(pad=0.3)
+    os.makedirs(fig_dir, exist_ok=True)
+    fig_path = os.path.join(fig_dir, 'sample_scenes.png')
+    plt.savefig(fig_path, dpi=120, bbox_inches='tight')
+    plt.close()
+    print(f"Sample renders saved: {fig_path}")

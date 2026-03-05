@@ -10,8 +10,8 @@ import os
 import sys
 import time
 
-from config import N_SCENES, RANDOM_SEED
-from scene_generator import calibrate_bullet_size, generate_scenes
+from config import N_SCENES, RANDOM_SEED, BEHAVIORAL_OBJECTIVE
+from scene_generator import calibrate_bullet_size, generate_scenes, save_sample_renders
 from neural_model import generate_neural_activity, print_variance_diagnostic
 from analyses.encoding import run_encoding_analysis
 from analyses.rsa import run_rsa_analysis
@@ -32,22 +32,24 @@ def print_summary(encoding_results, rsa_results, dissociation_results):
     partial = rsa_results['partial_neural_physics']
     r2_rend = dissociation_results['mean_r2_render']
     r2_phys = dissociation_results['mean_r2_physics']
-    beh_rend = dissociation_results['render_behavior_acc']
-    beh_phys = dissociation_results['physics_behavior_acc']
+    beh_rend = dissociation_results['render_behavioral_score']
+    beh_phys = dissociation_results['physics_behavioral_score']
+    metric = dissociation_results['metric_label']
+    obj = dissociation_results['objective']
 
     print(f"""
 Encoding Model:
   Mean ΔR² (adding physics to pixels): {dr2:.6f}  ← near zero
-  Control accuracy (physics → behavior): {ctrl:.2%}  ← high
+  Control accuracy (physics → KE label): {ctrl:.2%}  ← high
 
 RSA:
   Neural ↔ Render:             r = {nr:.4f}  ← high
   Neural ↔ Physics:            r = {np_:.4f}  ← low
   Neural ↔ Physics | Render:   r = {partial:.4f}  ← near zero
 
-Dissociation:
-  Render model:  R² = {r2_rend:.4f}  |  Behavior = {beh_rend:.2%}
-  Physics model: R² = {r2_phys:.4f}  |  Behavior = {beh_phys:.2%}
+Dissociation  (objective: {obj}):
+  Render model:  R² = {r2_rend:.4f}  |  {metric} = {beh_rend:.4f}
+  Physics model: R² = {r2_phys:.4f}  |  {metric} = {beh_phys:.4f}
   The model that explains the brain can't explain the world.
   The model that explains the world can't be found in the brain.
 """)
@@ -70,6 +72,7 @@ def main():
     # Step 2: Generate scenes
     print(f"\n[2/6] Generating {N_SCENES} scenes...")
     scenes = generate_scenes(N_SCENES, RANDOM_SEED, bullet_k)
+    save_sample_renders(scenes, fig_dir)
 
     # Step 3: Generate neural activity
     print(f"\n[3/6] Generating neural activity...")
@@ -85,8 +88,10 @@ def main():
     rsa_results = run_rsa_analysis(neural, scenes, neural_meta, fig_dir=fig_dir)
 
     # Step 6: Dissociation analysis
-    print(f"\n[6/6] Running dissociation analysis...")
-    dissociation_results = run_dissociation_analysis(neural, scenes, neural_meta, fig_dir=fig_dir)
+    print(f"\n[6/6] Running dissociation analysis (objective: {BEHAVIORAL_OBJECTIVE})...")
+    dissociation_results = run_dissociation_analysis(
+        neural, scenes, neural_meta, objective=BEHAVIORAL_OBJECTIVE, fig_dir=fig_dir
+    )
 
     # Dynamics stub
     run_dynamics_analysis()
