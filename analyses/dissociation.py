@@ -18,6 +18,8 @@ import numpy as np
 from sklearn.decomposition import PCA
 from sklearn.linear_model import RidgeCV, LogisticRegressionCV
 from sklearn.model_selection import cross_val_score
+from sklearn.neural_network import MLPRegressor
+from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 import matplotlib.pyplot as plt
 
@@ -27,6 +29,15 @@ from config import PIXEL_PCA_DIM, BEHAVIORAL_OBJECTIVE
 # ---------------------------------------------------------------------------
 # Behavioral sufficiency scorers
 # ---------------------------------------------------------------------------
+
+def _make_mlp():
+    """Two-layer MLP pipeline with internal scaling. Captures nonlinear mappings."""
+    return make_pipeline(
+        StandardScaler(),
+        MLPRegressor(hidden_layer_sizes=(256, 256), activation='relu',
+                     max_iter=500, random_state=42,
+                     early_stopping=True, validation_fraction=0.1),
+    )
 
 def _score_next_frame_pixels(pixel_pca_initial, physics_initial_scaled, final_pixel_pca):
     """
@@ -40,15 +51,9 @@ def _score_next_frame_pixels(pixel_pca_initial, physics_initial_scaled, final_pi
 
     Returns (render_score, physics_score, metric_label, chance_line).
     """
-    ridge = RidgeCV(alphas=np.logspace(-2, 6, 20))
-    render_r2 = cross_val_score(ridge, pixel_pca_initial, final_pixel_pca, cv=5, scoring='r2').mean()
-    physics_r2 = cross_val_score(
-        ridge,
-        np.concatenate([physics_initial_scaled, pixel_pca_initial], axis=1),
-        final_pixel_pca,
-        cv=5,
-        scoring='r2'
-    ).mean()
+    phys_plus_pix = np.concatenate([physics_initial_scaled, pixel_pca_initial], axis=1)
+    render_r2 = cross_val_score(_make_mlp(), pixel_pca_initial, final_pixel_pca, cv=5, scoring='r2').mean()
+    physics_r2 = cross_val_score(_make_mlp(), phys_plus_pix, final_pixel_pca, cv=5, scoring='r2').mean()
     return render_r2, physics_r2, "Next-frame pred. R²", None
 
 
@@ -74,13 +79,13 @@ def _save_predicted_frames(
     n = min(n_samples, len(initial_renders))
     phys_plus_pix = np.concatenate([physics_initial_scaled, pixel_pca_initial], axis=1)
 
-    ridge = RidgeCV(alphas=np.logspace(-2, 6, 20))
+    render_model = _make_mlp()
+    render_model.fit(pixel_pca_initial, final_pixel_pca)
+    render_pred_pca = render_model.predict(pixel_pca_initial[:n])
 
-    ridge.fit(pixel_pca_initial, final_pixel_pca)
-    render_pred_pca = ridge.predict(pixel_pca_initial[:n])
-
-    ridge.fit(phys_plus_pix, final_pixel_pca)
-    physics_pred_pca = ridge.predict(phys_plus_pix[:n])
+    physics_model = _make_mlp()
+    physics_model.fit(phys_plus_pix, final_pixel_pca)
+    physics_pred_pca = physics_model.predict(phys_plus_pix[:n])
 
     def pca_to_img(pred_pca):
         pred_scaled = pca_final.inverse_transform(pred_pca)
