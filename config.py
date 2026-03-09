@@ -8,8 +8,9 @@ RANDOM_SEED = 42
 RSA_SUBSAMPLE = 500     # scenes for RDM (n^2 pairwise matrix)
 BULLET_BYTES_K = None   # set automatically in scene_generator calibration pass
 PIXEL_PCA_DIM = 500     # for encoding analysis only (analysis-side tractability)
+BEHAVIORAL_PCA_DIM = 50 # for next-frame behavioral task (MLP output dim; must be < hidden layer size)
 
 # Behavioral sufficiency objective for dissociation analysis.
 # "next_frame_pixels": Ridge R² predicting final-frame pixels from initial state
 # "kinetic_energy":    logistic accuracy predicting KE-based binary label
-BEHAVIORAL_OBJECTIVE = "next_frame_pixels"
+BEHAVIORAL_OBJECTIVE = "kinetic_energy"
