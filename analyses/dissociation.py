@@ -17,7 +17,7 @@ Two behavioral sufficiency objectives are supported (set in config.py):
 import numpy as np
 from sklearn.decomposition import PCA
 from sklearn.linear_model import RidgeCV, LogisticRegressionCV
-from sklearn.model_selection import cross_val_score, KFold
+from sklearn.model_selection import cross_val_score
 from sklearn.preprocessing import StandardScaler
 import matplotlib.pyplot as plt
 
@@ -40,20 +40,76 @@ def _score_next_frame_pixels(pixel_pca_initial, physics_initial_scaled, final_pi
 
     Returns (render_score, physics_score, metric_label, chance_line).
     """
-    alphas = np.logspace(-2, 6, 20)
-    kf = KFold(n_splits=5, shuffle=True, random_state=42)
-
-    def mean_cv_r2(X, Y):
-        r2s = []
-        for train, test in kf.split(X):
-            ridge = RidgeCV(alphas=alphas)
-            ridge.fit(X[train], Y[train])
-            r2s.append(ridge.score(X[test], Y[test]))
-        return float(np.mean(r2s))
-
-    render_r2 = mean_cv_r2(pixel_pca_initial, final_pixel_pca)
-    physics_r2 = mean_cv_r2(physics_initial_scaled, final_pixel_pca)
+    ridge = RidgeCV(alphas=np.logspace(-2, 6, 20))
+    render_r2 = cross_val_score(ridge, pixel_pca_initial, final_pixel_pca, cv=5, scoring='r2').mean()
+    physics_r2 = cross_val_score(
+        ridge,
+        np.concatenate([physics_initial_scaled, pixel_pca_initial], axis=1),
+        final_pixel_pca,
+        cv=5,
+        scoring='r2'
+    ).mean()
     return render_r2, physics_r2, "Next-frame pred. R²", None
+
+
+def _save_predicted_frames(
+    pixel_pca_initial, physics_initial_scaled,
+    final_pixel_pca, scaler_pix, pca_final,
+    initial_renders, program_states, pixel_indices,
+    fig_dir, n_samples=8
+):
+    """
+    Train each model on all data, reconstruct predicted final frames to pixel
+    space, and save a grid figure.
+
+    Grid: n_samples rows × 4 cols
+      Col 0: initial frame (t=0, model input)
+      Col 1: render model prediction
+      Col 2: physics model prediction
+      Col 3: actual final frame (t=N, ground truth)
+    Saved to {fig_dir}/predicted_frames.png.
+    """
+    from config import IMAGE_SIZE
+
+    n = min(n_samples, len(initial_renders))
+    phys_plus_pix = np.concatenate([physics_initial_scaled, pixel_pca_initial], axis=1)
+
+    ridge = RidgeCV(alphas=np.logspace(-2, 6, 20))
+
+    ridge.fit(pixel_pca_initial, final_pixel_pca)
+    render_pred_pca = ridge.predict(pixel_pca_initial[:n])
+
+    ridge.fit(phys_plus_pix, final_pixel_pca)
+    physics_pred_pca = ridge.predict(phys_plus_pix[:n])
+
+    def pca_to_img(pred_pca):
+        pred_scaled = pca_final.inverse_transform(pred_pca)
+        pred_pixels = scaler_pix.inverse_transform(pred_scaled)
+        return np.clip(pred_pixels, 0, 255).astype(np.uint8).reshape(n, IMAGE_SIZE, IMAGE_SIZE, 4)
+
+    render_imgs = pca_to_img(render_pred_pca)
+    physics_imgs = pca_to_img(physics_pred_pca)
+    init_imgs = initial_renders[:n].astype(np.uint8).reshape(n, IMAGE_SIZE, IMAGE_SIZE, 4)
+    final_imgs = program_states[:n, pixel_indices].astype(np.uint8).reshape(n, IMAGE_SIZE, IMAGE_SIZE, 4)
+
+    col_titles = ['t=0 (input)', 'Render model\nprediction', 'Physics model\nprediction', 't=N (actual)']
+    cols = [init_imgs, render_imgs, physics_imgs, final_imgs]
+
+    fig, axes = plt.subplots(n, 4, figsize=(8, 2 * n))
+    if n == 1:
+        axes = axes[np.newaxis, :]
+
+    for col_idx, (title, imgs) in enumerate(zip(col_titles, cols)):
+        axes[0, col_idx].set_title(title, fontsize=8)
+        for row_idx in range(n):
+            axes[row_idx, col_idx].imshow(imgs[row_idx])
+            axes[row_idx, col_idx].axis('off')
+
+    plt.tight_layout(pad=0.3)
+    fig_path = f"{fig_dir}/predicted_frames.png"
+    plt.savefig(fig_path, dpi=120, bbox_inches='tight')
+    plt.close()
+    print(f"Predicted frames saved: {fig_path}")
 
 
 def _score_kinetic_energy(pixel_pca, physics_scaled, behavior_labels):
@@ -62,17 +118,10 @@ def _score_kinetic_energy(pixel_pca, physics_scaled, behavior_labels):
 
     Returns (render_score, physics_score, metric_label, chance_line).
     """
-    log_reg_render = LogisticRegressionCV(cv=5, max_iter=1000, random_state=42)
-    render_scores = cross_val_score(
-        log_reg_render, pixel_pca, behavior_labels, cv=5, scoring='accuracy'
-    )
-
-    log_reg_physics = LogisticRegressionCV(cv=5, max_iter=1000, random_state=42)
-    physics_scores = cross_val_score(
-        log_reg_physics, physics_scaled, behavior_labels, cv=5, scoring='accuracy'
-    )
-
-    return render_scores.mean(), physics_scores.mean(), "Behavior accuracy", 0.5
+    log_reg = LogisticRegressionCV(cv=5, max_iter=1000, random_state=42)
+    render_r2 = cross_val_score(log_reg, pixel_pca, behavior_labels, cv=5, scoring='accuracy').mean()
+    physics_r2 = cross_val_score(log_reg, physics_scaled, behavior_labels, cv=5, scoring='accuracy').mean()
+    return render_r2, physics_r2, "Behavior accuracy", 0.5
 
 
 # ---------------------------------------------------------------------------
@@ -162,13 +211,18 @@ def run_dissociation_analysis(neural_activity, scenes, neural_meta,
         render_score, physics_score, metric_label, chance = _score_next_frame_pixels(
             pixel_pca_initial, physics_initial_scaled, final_pixel_pca
         )
-        render_std = physics_std = None  # std not returned for R² scorer
+
+        _save_predicted_frames(
+            pixel_pca_initial, physics_initial_scaled,
+            final_pixel_pca, scaler_pix, pca_final,
+            initial_renders, program_states, pixel_indices,
+            fig_dir
+        )
 
     elif objective == "kinetic_energy":
         render_score, physics_score, metric_label, chance = _score_kinetic_energy(
             pixel_pca, physics_scaled, behavior_labels
         )
-        render_std = physics_std = None
 
     else:
         raise ValueError(f"Unknown objective: {objective!r}. "
@@ -177,7 +231,7 @@ def run_dissociation_analysis(neural_activity, scenes, neural_meta,
     print(f"  Render  → {metric_label}: {render_score:.4f}")
     print(f"  Physics → {metric_label}: {physics_score:.4f}")
 
-    print(f"\n  DISSOCIATION:")
+    print("\n  DISSOCIATION:")
     print(f"    Render model:  R² = {mean_r2_render:.4f}  |  {metric_label} = {render_score:.4f}")
     print(f"    Physics model: R² = {mean_r2_physics:.4f}  |  {metric_label} = {physics_score:.4f}")
 
