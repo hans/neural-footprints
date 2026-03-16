@@ -39,53 +39,65 @@ def _make_mlp():
                      early_stopping=True, validation_fraction=0.1),
     )
 
-def _score_next_frame_pixels(pixel_pca_initial, physics_initial_scaled, final_pixel_pca):
+def _score_next_frame_pixels(pixel_pca_initial, final_pixel_pca,
+                              scene_configs, initial_physics_labels,
+                              program_states, pixel_indices, n_oracle=200):
     """
-    Ridge regression R² predicting final-frame pixel PCs from t=0 features.
+    Behavioral sufficiency for next-frame pixel prediction.
 
-    Features (t=0):
-      - pixel_pca_initial:        PCA of initial RGBA pixels
-      - physics_initial_scaled:   standardized initial physics labels
-
-    Target: final_pixel_pca — PCA of final RGBA pixels.
+    Render model score:  MLP cross-val R² predicting final-frame pixel PCA
+                         from initial pixel PCA (missing velocity/occlusion info).
+    Physics model score: Oracle R² — re-simulate each scene from initial physics
+                         state and compare rendered pixels to actual final pixels.
+                         Since physics is deterministic, this approaches 1.0.
 
     Returns (render_score, physics_score, metric_label, chance_line).
     """
-    phys_plus_pix = np.concatenate([physics_initial_scaled, pixel_pca_initial], axis=1)
-    render_r2 = cross_val_score(_make_mlp(), pixel_pca_initial, final_pixel_pca, cv=5, scoring='r2').mean()
-    physics_r2 = cross_val_score(_make_mlp(), phys_plus_pix, final_pixel_pca, cv=5, scoring='r2').mean()
+    from scene_generator import resimulate_scene
+
+    # Render model: MLP cross-val R² in PCA space
+    render_r2 = cross_val_score(_make_mlp(), pixel_pca_initial, final_pixel_pca,
+                                cv=5, scoring='r2').mean()
+
+    # Physics model: oracle re-simulation R² in raw pixel space
+    n = min(n_oracle, len(scene_configs))
+    actual = program_states[:n, pixel_indices].astype(np.float32)
+    predicted = np.stack([
+        resimulate_scene(scene_configs[i], initial_physics_labels[i]).reshape(-1).astype(np.float32)
+        for i in range(n)
+    ])
+    ss_res = np.sum((actual - predicted) ** 2)
+    ss_tot = np.sum((actual - actual.mean(axis=0, keepdims=True)) ** 2)
+    physics_r2 = float(1.0 - ss_res / ss_tot) if ss_tot > 0 else 1.0
+
     return render_r2, physics_r2, "Next-frame pred. R²", None
 
 
 def _save_predicted_frames(
-    pixel_pca_initial, physics_initial_scaled,
-    final_pixel_pca, scaler_pix, pca_final,
+    pixel_pca_initial, final_pixel_pca, scaler_pix, pca_final,
     initial_renders, program_states, pixel_indices,
+    scene_configs, initial_physics_labels,
     fig_dir, n_samples=8
 ):
     """
-    Train each model on all data, reconstruct predicted final frames to pixel
-    space, and save a grid figure.
+    Compare render model (learned MLP) vs. physics model (oracle re-simulation).
 
     Grid: n_samples rows × 4 cols
-      Col 0: initial frame (t=0, model input)
-      Col 1: render model prediction
-      Col 2: physics model prediction
+      Col 0: initial frame (t=0, input)
+      Col 1: render model prediction (MLP from pixel PCA — blurry, missing velocity)
+      Col 2: physics model prediction (oracle re-simulation — pixel-perfect)
       Col 3: actual final frame (t=N, ground truth)
     Saved to {fig_dir}/predicted_frames.png.
     """
     from config import IMAGE_SIZE
+    from scene_generator import resimulate_scene
 
     n = min(n_samples, len(initial_renders))
-    phys_plus_pix = np.concatenate([physics_initial_scaled, pixel_pca_initial], axis=1)
 
+    # Render model: MLP trained on initial pixel PCA → final pixel PCA
     render_model = _make_mlp()
     render_model.fit(pixel_pca_initial, final_pixel_pca)
     render_pred_pca = render_model.predict(pixel_pca_initial[:n])
-
-    physics_model = _make_mlp()
-    physics_model.fit(phys_plus_pix, final_pixel_pca)
-    physics_pred_pca = physics_model.predict(phys_plus_pix[:n])
 
     def pca_to_img(pred_pca):
         pred_scaled = pca_final.inverse_transform(pred_pca)
@@ -93,7 +105,13 @@ def _save_predicted_frames(
         return np.clip(pred_pixels, 0, 255).astype(np.uint8).reshape(n, IMAGE_SIZE, IMAGE_SIZE, 4)
 
     render_imgs = pca_to_img(render_pred_pca)
-    physics_imgs = pca_to_img(physics_pred_pca)
+
+    # Physics model: oracle re-simulation from stored initial state
+    physics_imgs = np.stack([
+        resimulate_scene(scene_configs[j], initial_physics_labels[j])
+        for j in range(n)
+    ])
+
     init_imgs = initial_renders[:n].astype(np.uint8).reshape(n, IMAGE_SIZE, IMAGE_SIZE, 4)
     final_imgs = program_states[:n, pixel_indices].astype(np.uint8).reshape(n, IMAGE_SIZE, IMAGE_SIZE, 4)
 
@@ -160,6 +178,7 @@ def run_dissociation_analysis(neural_activity, scenes, neural_meta,
     initial_renders = scenes['initial_renders']
     behavior_labels = scenes['behavior_labels']
     pixel_indices = scenes['metadata']['pixel_indices']
+    scene_configs = scenes['scene_configs']
 
     n_scenes, n_neurons = neural_activity.shape
 
@@ -196,33 +215,22 @@ def run_dissociation_analysis(neural_activity, scenes, neural_meta,
     print(f"  Render model mean R²:  {mean_r2_render:.4f}")
     print(f"  Physics model mean R²: {mean_r2_physics:.4f}")
 
+    # --- Pixel PCA for render model visualization (always needed) ---
+    scaler_init_pix = StandardScaler()
+    init_pix_scaled = scaler_init_pix.fit_transform(initial_renders)
+    pca_init = PCA(n_components=BEHAVIORAL_PCA_DIM, whiten=True, random_state=42)
+    pixel_pca_initial = pca_init.fit_transform(init_pix_scaled)
+    pca_final = PCA(n_components=BEHAVIORAL_PCA_DIM, whiten=True, random_state=42)
+    final_pixel_pca = pca_final.fit_transform(pixel_scaled)
+
     # --- Behavioral sufficiency ---
     print(f"Computing behavioral sufficiency ({objective})...")
 
     if objective == "next_frame_pixels":
-        # Features: initial state (t=0). Target: final-frame pixel PCs.
-        scaler_init_pix = StandardScaler()
-        init_pix_scaled = scaler_init_pix.fit_transform(initial_renders)
-        # Use smaller whitened PCA for behavioral task: BEHAVIORAL_PCA_DIM << hidden layer size
-        # avoids output bottleneck; whiten=True normalizes component scale for MLP training.
-        pca_init = PCA(n_components=BEHAVIORAL_PCA_DIM, whiten=True, random_state=42)
-        pixel_pca_initial = pca_init.fit_transform(init_pix_scaled)
-
-        scaler_init_phys = StandardScaler()
-        physics_initial_scaled = scaler_init_phys.fit_transform(initial_physics_labels)
-
-        pca_final = PCA(n_components=BEHAVIORAL_PCA_DIM, whiten=True, random_state=42)
-        final_pixel_pca = pca_final.fit_transform(pixel_scaled)
-
         render_score, physics_score, metric_label, chance = _score_next_frame_pixels(
-            pixel_pca_initial, physics_initial_scaled, final_pixel_pca
-        )
-
-        _save_predicted_frames(
-            pixel_pca_initial, physics_initial_scaled,
-            final_pixel_pca, scaler_pix, pca_final,
-            initial_renders, program_states, pixel_indices,
-            fig_dir
+            pixel_pca_initial, final_pixel_pca,
+            scene_configs, initial_physics_labels,
+            program_states, pixel_indices
         )
 
     elif objective == "kinetic_energy":
@@ -233,6 +241,15 @@ def run_dissociation_analysis(neural_activity, scenes, neural_meta,
     else:
         raise ValueError(f"Unknown objective: {objective!r}. "
                          "Use 'next_frame_pixels' or 'kinetic_energy'.")
+
+    # --- Visual illustration: oracle physics vs. render MLP ---
+    print("Saving predicted frame visualization...")
+    _save_predicted_frames(
+        pixel_pca_initial, final_pixel_pca, scaler_pix, pca_final,
+        initial_renders, program_states, pixel_indices,
+        scene_configs, initial_physics_labels,
+        fig_dir
+    )
 
     print(f"  Render  → {metric_label}: {render_score:.4f}")
     print(f"  Physics → {metric_label}: {physics_score:.4f}")

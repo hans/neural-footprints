@@ -67,6 +67,7 @@ def _create_scene(physics_client, rng):
     masses = []
     frictions = []
     is_occluded = []  # True if object is behind the wall
+    shape_configs = []
 
     # Object placement: object 0 is launcher (visible), object 1 is visible,
     # object 2 is occluded (behind wall). Additional objects alternate randomly.
@@ -77,19 +78,21 @@ def _create_scene(physics_client, rng):
 
         # Random shape: sphere or box
         if rng.random() < 0.5:
-            radius = rng.uniform(0.1, 0.4)
+            radius = float(rng.uniform(0.1, 0.4))
             col_shape = p.createCollisionShape(p.GEOM_SPHERE, radius=radius,
                                                physicsClientId=physics_client)
             vis_shape = p.createVisualShape(p.GEOM_SPHERE, radius=radius,
                                             rgbaColor=color,
                                             physicsClientId=physics_client)
+            shape_cfg = {'shape': 'sphere', 'params': {'radius': radius}, 'color': list(color)}
         else:
-            half_extents = list(rng.uniform(0.1, 0.4, size=3))
+            half_extents = [float(v) for v in rng.uniform(0.1, 0.4, size=3)]
             col_shape = p.createCollisionShape(p.GEOM_BOX, halfExtents=half_extents,
                                                physicsClientId=physics_client)
             vis_shape = p.createVisualShape(p.GEOM_BOX, halfExtents=half_extents,
                                             rgbaColor=color,
                                             physicsClientId=physics_client)
+            shape_cfg = {'shape': 'box', 'params': {'half_extents': half_extents}, 'color': list(color)}
 
         # Placement: 0=visible launcher, 1=visible, 2=occluded, rest random
         if i == 0 or i == 1:
@@ -126,6 +129,7 @@ def _create_scene(physics_client, rng):
         masses.append(mass)
         frictions.append(friction)
         is_occluded.append(occluded)
+        shape_configs.append(shape_cfg)
 
     # Apply initial velocity to the first object (launcher — always visible)
     launch_vel = list(rng.uniform(-3.0, 3.0, size=3))
@@ -133,7 +137,7 @@ def _create_scene(physics_client, rng):
     p.resetBaseVelocity(body_ids[0], linearVelocity=launch_vel,
                         physicsClientId=physics_client)
 
-    return body_ids, masses, frictions, is_occluded
+    return body_ids, masses, frictions, is_occluded, shape_configs
 
 
 def _get_initial_positions(body_ids, physics_client):
@@ -221,6 +225,86 @@ def _render_scene(physics_client):
     return rgba_bytes, depth_bytes, seg_bytes
 
 
+def resimulate_scene(shape_configs, initial_physics_row):
+    """
+    Rebuild a scene from stored shape configs + initial physics state, step
+    N_TIMESTEPS, and return the rendered RGBA image as uint8 [IMAGE_SIZE, IMAGE_SIZE, 4].
+
+    Used for oracle physics-model prediction: given the full initial state
+    (position, velocity, mass, friction, shape, color), the simulation is
+    deterministic and produces a pixel-perfect final frame.
+
+    Args:
+        shape_configs:       list of dicts (one per object) with keys
+                             'shape' ('sphere'|'box'), 'params', 'color'
+        initial_physics_row: 1-D array of length 15*N_OBJECTS:
+                             per object: pos(3), orn(4), lin_vel(3), ang_vel(3), mass(1), friction(1)
+    """
+    pc = p.connect(p.DIRECT)
+    p.setAdditionalSearchPath(pybullet_data.getDataPath(), physicsClientId=pc)
+    p.setGravity(0, 0, -9.81, physicsClientId=pc)
+    p.loadURDF("plane.urdf", physicsClientId=pc)
+
+    wall_vis = p.createVisualShape(
+        p.GEOM_BOX,
+        halfExtents=[WALL_WIDTH / 2, WALL_THICKNESS / 2, WALL_HEIGHT / 2],
+        rgbaColor=[0.5, 0.5, 0.5, 1.0],
+        physicsClientId=pc,
+    )
+    p.createMultiBody(
+        baseMass=0,
+        baseCollisionShapeIndex=-1,
+        baseVisualShapeIndex=wall_vis,
+        basePosition=[0, WALL_Y, WALL_HEIGHT / 2],
+        physicsClientId=pc,
+    )
+
+    for i, cfg in enumerate(shape_configs):
+        off = i * 15
+        pos = initial_physics_row[off:off + 3].tolist()
+        orn = initial_physics_row[off + 3:off + 7].tolist()
+        lin_vel = initial_physics_row[off + 7:off + 10].tolist()
+        ang_vel = initial_physics_row[off + 10:off + 13].tolist()
+        mass = float(initial_physics_row[off + 13])
+        friction = float(initial_physics_row[off + 14])
+        color = cfg['color']
+
+        if cfg['shape'] == 'sphere':
+            col = p.createCollisionShape(p.GEOM_SPHERE,
+                                         radius=cfg['params']['radius'],
+                                         physicsClientId=pc)
+            vis = p.createVisualShape(p.GEOM_SPHERE,
+                                      radius=cfg['params']['radius'],
+                                      rgbaColor=color, physicsClientId=pc)
+        else:
+            col = p.createCollisionShape(p.GEOM_BOX,
+                                         halfExtents=cfg['params']['half_extents'],
+                                         physicsClientId=pc)
+            vis = p.createVisualShape(p.GEOM_BOX,
+                                      halfExtents=cfg['params']['half_extents'],
+                                      rgbaColor=color, physicsClientId=pc)
+
+        body_id = p.createMultiBody(
+            baseMass=mass,
+            baseCollisionShapeIndex=col,
+            baseVisualShapeIndex=vis,
+            basePosition=pos,
+            baseOrientation=orn,
+            physicsClientId=pc,
+        )
+        p.changeDynamics(body_id, -1, lateralFriction=friction, physicsClientId=pc)
+        p.resetBaseVelocity(body_id, linearVelocity=lin_vel,
+                            angularVelocity=ang_vel, physicsClientId=pc)
+
+    for _ in range(N_TIMESTEPS):
+        p.stepSimulation(physicsClientId=pc)
+
+    rgba_bytes, _, _ = _render_scene(pc)
+    p.disconnect(pc)
+
+    return np.frombuffer(rgba_bytes, dtype=np.uint8).reshape(IMAGE_SIZE, IMAGE_SIZE, 4)
+
+
 def _save_bullet_state(physics_client):
     """Save bullet state to temp file, read back as raw bytes."""
     tmp_path = os.path.join(tempfile.gettempdir(), "scene_state.bullet")
@@ -256,7 +340,7 @@ def calibrate_bullet_size(n_samples=50, seed=0):
         pc = p.connect(p.DIRECT)
         scene_seed = rng.integers(0, 2**31)
         scene_rng = np.random.default_rng(scene_seed)
-        body_ids, masses, frictions, is_occluded = _create_scene(pc, scene_rng)
+        body_ids, masses, frictions, is_occluded, _ = _create_scene(pc, scene_rng)
 
         # Step physics
         for _ in range(N_TIMESTEPS):
@@ -302,6 +386,7 @@ def generate_scenes(n_scenes, seed, bullet_k):
     initial_physics_labels = np.zeros((n_scenes, physics_dim), dtype=np.float32)
     initial_renders = np.zeros((n_scenes, rgba_bytes_count), dtype=np.float32)
     kinetic_energies = np.zeros(n_scenes, dtype=np.float32)
+    all_scene_configs = []
 
     for i in range(n_scenes):
         if (i + 1) % 100 == 0 or i == 0:
@@ -311,7 +396,8 @@ def generate_scenes(n_scenes, seed, bullet_k):
         scene_seed = rng.integers(0, 2**31)
         scene_rng = np.random.default_rng(scene_seed)
 
-        body_ids, masses, frictions, is_occluded = _create_scene(pc, scene_rng)
+        body_ids, masses, frictions, is_occluded, shape_configs = _create_scene(pc, scene_rng)
+        all_scene_configs.append(shape_configs)
 
         # Capture initial state (t=0) before stepping
         initial_physics_labels[i] = _collect_physics_labels(body_ids, masses, frictions, pc)
@@ -366,6 +452,7 @@ def generate_scenes(n_scenes, seed, bullet_k):
         'initial_renders': initial_renders,
         'behavior_labels': behavior_labels,
         'kinetic_energies': kinetic_energies,
+        'scene_configs': all_scene_configs,
         'metadata': metadata,
     }
 

@@ -13,4 +13,4 @@ BEHAVIORAL_PCA_DIM = 50 # for next-frame behavioral task (MLP output dim; must b
 # Behavioral sufficiency objective for dissociation analysis.
 # "next_frame_pixels": Ridge R² predicting final-frame pixels from initial state
 # "kinetic_energy":    logistic accuracy predicting KE-based binary label
-BEHAVIORAL_OBJECTIVE = "kinetic_energy"
+BEHAVIORAL_OBJECTIVE = "next_frame_pixels"
