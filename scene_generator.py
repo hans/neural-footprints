@@ -1,15 +1,14 @@
 """
 Scene generation using PyBullet.
 
-Generates physics scenes with an occluding wall, captures raw program state
-(render buffers + saveBullet blob), and collects API-level physics labels
-for analysis (never used in neural generation).
+Generates physics scenes with a central vertical occluding pillar, captures
+raw program state (render buffers + saveBullet blob), and collects API-level
+physics labels for analysis (never used in neural generation).
 
 Key design choices that make pixels insufficient for behavior prediction:
-  1. An opaque wall occludes ~half the objects from the camera's view
+  1. A central pillar at x=0 may occlude the object in the final frame
   2. Behavior label (KE) uses final velocities — invisible in pixels
-  3. Initial renders miss velocity and occluded objects, so initial pixel
-     features cannot predict the final-frame pixel configuration
+  3. Initial pixels cannot predict whether the object ends up behind the pillar
 """
 
 import os
@@ -22,23 +21,24 @@ import matplotlib.pyplot as plt
 from config import N_OBJECTS, IMAGE_SIZE, N_TIMESTEPS
 
 
-# Objects with y > WALL_Y are behind the wall and occluded from camera
-WALL_Y = 0.0
-WALL_THICKNESS = 0.05
-WALL_HEIGHT = 2.0
-WALL_WIDTH = 4.0
+# Central vertical pillar at x=0 — occluder from camera's perspective
+PILLAR_X = 0.0
+PILLAR_WIDTH = 0.6    # total width in x
+PILLAR_DEPTH = 2.0    # total depth in y — covers full object y range
+PILLAR_HEIGHT = 1.5   # total height in z
+PILLAR_Y_CENTER = -1.0
+PILLAR_Z_CENTER = 0.75
 
 
 def _create_scene(physics_client, rng):
     """
-    Spawn ground plane + occluding wall + N_OBJECTS rigid bodies.
+    Spawn ground plane + central occluding pillar + single rigid body.
 
-    Objects are placed on both sides of the wall:
-      - y < 0: visible to camera (camera is at y=-3)
-      - y > 0: occluded behind wall
+    The object starts clearly to the left or right of the pillar (x=0) and
+    moves with a random x-only velocity. Depending on direction and speed,
+    it may end up behind the pillar in the final frame.
 
-    At least 2 objects are placed on each side to ensure the behavior label
-    is non-trivially dependent on occluded objects.
+    Varying per scene: shape (sphere/box), color, x-velocity direction.
     """
     p.setAdditionalSearchPath(pybullet_data.getDataPath(), physicsClientId=physics_client)
     p.setGravity(0, 0, -9.81, physicsClientId=physics_client)
@@ -46,95 +46,79 @@ def _create_scene(physics_client, rng):
     # Ground plane
     p.loadURDF("plane.urdf", physicsClientId=physics_client)
 
-    # Occluding wall at y=0: VISUAL ONLY (no collision shape).
+    # Central vertical pillar at x=0: VISUAL ONLY (no collision).
     # Objects pass through it freely — physics is unaffected.
-    # But the camera (at y=-3) cannot see objects behind it (y > 0).
-    wall_vis = p.createVisualShape(
+    # Camera (at y=-3) cannot see objects behind it when they cross x=0.
+    pillar_vis = p.createVisualShape(
         p.GEOM_BOX,
-        halfExtents=[WALL_WIDTH / 2, WALL_THICKNESS / 2, WALL_HEIGHT / 2],
+        halfExtents=[PILLAR_WIDTH / 2, PILLAR_DEPTH / 2, PILLAR_HEIGHT / 2],
         rgbaColor=[0.5, 0.5, 0.5, 1.0],
         physicsClientId=physics_client,
     )
     p.createMultiBody(
-        baseMass=0,  # static
+        baseMass=0,
         baseCollisionShapeIndex=-1,  # no collision — visual only
-        baseVisualShapeIndex=wall_vis,
-        basePosition=[0, WALL_Y, WALL_HEIGHT / 2],
+        baseVisualShapeIndex=pillar_vis,
+        basePosition=[PILLAR_X, PILLAR_Y_CENTER, PILLAR_Z_CENTER],
         physicsClientId=physics_client,
     )
 
     body_ids = []
     masses = []
     frictions = []
-    is_occluded = []  # True if object is behind the wall
+    is_occluded = []
     shape_configs = []
 
-    # Object placement: object 0 is launcher (visible), object 1 is visible,
-    # object 2 is occluded (behind wall). Additional objects alternate randomly.
-    for i in range(N_OBJECTS):
-        mass = rng.uniform(0.1, 10.0)
-        friction = rng.uniform(0.1, 1.0)
-        color = list(rng.uniform(0.1, 1.0, size=3)) + [1.0]
+    mass = rng.uniform(0.5, 5.0)
+    friction = rng.uniform(0.1, 1.0)
+    color = list(rng.uniform(0.1, 1.0, size=3)) + [1.0]
 
-        # Random shape: sphere or box
-        if rng.random() < 0.5:
-            radius = float(rng.uniform(0.1, 0.4))
-            col_shape = p.createCollisionShape(p.GEOM_SPHERE, radius=radius,
-                                               physicsClientId=physics_client)
-            vis_shape = p.createVisualShape(p.GEOM_SPHERE, radius=radius,
-                                            rgbaColor=color,
-                                            physicsClientId=physics_client)
-            shape_cfg = {'shape': 'sphere', 'params': {'radius': radius}, 'color': list(color)}
-        else:
-            half_extents = [float(v) for v in rng.uniform(0.1, 0.4, size=3)]
-            col_shape = p.createCollisionShape(p.GEOM_BOX, halfExtents=half_extents,
-                                               physicsClientId=physics_client)
-            vis_shape = p.createVisualShape(p.GEOM_BOX, halfExtents=half_extents,
-                                            rgbaColor=color,
-                                            physicsClientId=physics_client)
-            shape_cfg = {'shape': 'box', 'params': {'half_extents': half_extents}, 'color': list(color)}
+    # Random shape: sphere or box
+    if rng.random() < 0.5:
+        radius = float(rng.uniform(0.1, 0.35))
+        col_shape = p.createCollisionShape(p.GEOM_SPHERE, radius=radius,
+                                           physicsClientId=physics_client)
+        vis_shape = p.createVisualShape(p.GEOM_SPHERE, radius=radius,
+                                        rgbaColor=color,
+                                        physicsClientId=physics_client)
+        shape_cfg = {'shape': 'sphere', 'params': {'radius': radius}, 'color': list(color)}
+    else:
+        half_extents = [float(v) for v in rng.uniform(0.1, 0.35, size=3)]
+        col_shape = p.createCollisionShape(p.GEOM_BOX, halfExtents=half_extents,
+                                           physicsClientId=physics_client)
+        vis_shape = p.createVisualShape(p.GEOM_BOX, halfExtents=half_extents,
+                                        rgbaColor=color,
+                                        physicsClientId=physics_client)
+        shape_cfg = {'shape': 'box', 'params': {'half_extents': half_extents}, 'color': list(color)}
 
-        # Placement: 0=visible launcher, 1=visible, 2=occluded, rest random
-        if i == 0 or i == 1:
-            y = rng.uniform(-1.5, -0.3)  # in front of wall (visible)
-            occluded = False
-        elif i == 2:
-            y = rng.uniform(0.3, 1.5)    # behind wall (occluded)
-            occluded = True
-        else:
-            if rng.random() < 0.5:
-                y = rng.uniform(-1.5, -0.3)
-                occluded = False
-            else:
-                y = rng.uniform(0.3, 1.5)
-                occluded = True
+    # Start clearly on one side of the pillar; random y depth and z height
+    side = rng.choice([-1, 1])
+    x = side * rng.uniform(0.6, 1.5)
+    y = rng.uniform(-1.5, -0.5)
+    z = rng.uniform(0.4, 0.8)
+    pos = [x, y, z]
+    orn = p.getQuaternionFromEuler([0.0, 0.0, 0.0])
 
-        x = rng.uniform(-1.5, 1.5)
-        z = rng.uniform(0.3, 1.0)
-        pos = [x, y, z]
-        orn = p.getQuaternionFromEuler(list(rng.uniform(0, np.pi, size=3)))
+    body_id = p.createMultiBody(
+        baseMass=mass,
+        baseCollisionShapeIndex=col_shape,
+        baseVisualShapeIndex=vis_shape,
+        basePosition=pos,
+        baseOrientation=orn,
+        physicsClientId=physics_client,
+    )
+    p.changeDynamics(body_id, -1, lateralFriction=friction,
+                     physicsClientId=physics_client)
 
-        body_id = p.createMultiBody(
-            baseMass=mass,
-            baseCollisionShapeIndex=col_shape,
-            baseVisualShapeIndex=vis_shape,
-            basePosition=pos,
-            baseOrientation=orn,
-            physicsClientId=physics_client,
-        )
-        p.changeDynamics(body_id, -1, lateralFriction=friction,
-                         physicsClientId=physics_client)
+    body_ids.append(body_id)
+    masses.append(mass)
+    frictions.append(friction)
+    is_occluded.append(False)
+    shape_configs.append(shape_cfg)
 
-        body_ids.append(body_id)
-        masses.append(mass)
-        frictions.append(friction)
-        is_occluded.append(occluded)
-        shape_configs.append(shape_cfg)
-
-    # Apply initial velocity to the first object (launcher — always visible)
-    launch_vel = list(rng.uniform(-3.0, 3.0, size=3))
-    launch_vel[2] = abs(launch_vel[2])  # upward component
-    p.resetBaseVelocity(body_ids[0], linearVelocity=launch_vel,
+    # x-only velocity (left or right); gravity handles vertical fall
+    x_vel = float(rng.uniform(-5.0, 5.0))
+    p.resetBaseVelocity(body_ids[0], linearVelocity=[x_vel, 0.0, 0.0],
                         physicsClientId=physics_client)
 
     return body_ids, masses, frictions, is_occluded, shape_configs
@@ -245,17 +229,17 @@ def resimulate_scene(shape_configs, initial_physics_row):
     p.setGravity(0, 0, -9.81, physicsClientId=pc)
     p.loadURDF("plane.urdf", physicsClientId=pc)
 
-    wall_vis = p.createVisualShape(
+    pillar_vis = p.createVisualShape(
         p.GEOM_BOX,
-        halfExtents=[WALL_WIDTH / 2, WALL_THICKNESS / 2, WALL_HEIGHT / 2],
+        halfExtents=[PILLAR_WIDTH / 2, PILLAR_DEPTH / 2, PILLAR_HEIGHT / 2],
         rgbaColor=[0.5, 0.5, 0.5, 1.0],
         physicsClientId=pc,
     )
     p.createMultiBody(
         baseMass=0,
         baseCollisionShapeIndex=-1,
-        baseVisualShapeIndex=wall_vis,
-        basePosition=[0, WALL_Y, WALL_HEIGHT / 2],
+        baseVisualShapeIndex=pillar_vis,
+        basePosition=[PILLAR_X, PILLAR_Y_CENTER, PILLAR_Z_CENTER],
         physicsClientId=pc,
     )
 
