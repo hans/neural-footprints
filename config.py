@@ -14,3 +14,9 @@ BEHAVIORAL_PCA_DIM = 50 # for next-frame behavioral task (MLP output dim; must b
 # "next_frame_pixels": Ridge R² predicting final-frame pixels from initial state
 # "kinetic_energy":    logistic accuracy predicting KE-based binary label
 BEHAVIORAL_OBJECTIVE = "next_frame_pixels"
+
+# Predictive Processing model hyperparameters
+PP_HIDDEN_DIM = 256      # hidden layer width for InverseModel
+PP_PIXEL_PCA_DIM = 50    # pixel PCA dim for two-frame input (keep small for 2000 scenes)
+PP_EARLY_FRAME = 5       # simulation step at which to capture the second input frame
+PP_DROPOUT_RATE = 0.2    # dropout probability (active during both training and MC inference)

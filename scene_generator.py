@@ -18,7 +18,7 @@ import pybullet as p
 import pybullet_data
 import matplotlib.pyplot as plt
 
-from config import N_OBJECTS, IMAGE_SIZE, N_TIMESTEPS
+from config import N_OBJECTS, IMAGE_SIZE, N_TIMESTEPS, PP_EARLY_FRAME
 
 
 # Central vertical pillar at x=0 — occluder from camera's perspective
@@ -369,6 +369,7 @@ def generate_scenes(n_scenes, seed, bullet_k):
     physics_labels = np.zeros((n_scenes, physics_dim), dtype=np.float32)
     initial_physics_labels = np.zeros((n_scenes, physics_dim), dtype=np.float32)
     initial_renders = np.zeros((n_scenes, rgba_bytes_count), dtype=np.float32)
+    early_renders = np.zeros((n_scenes, rgba_bytes_count), dtype=np.float32)
     kinetic_energies = np.zeros(n_scenes, dtype=np.float32)
     all_scene_configs = []
 
@@ -388,8 +389,12 @@ def generate_scenes(n_scenes, seed, bullet_k):
         init_rgba_bytes, _, _ = _render_scene(pc)
         initial_renders[i] = np.frombuffer(init_rgba_bytes, dtype=np.uint8).astype(np.float32)
 
-        # Step physics
-        for _ in range(N_TIMESTEPS):
+        # Step physics — capture early frame for predictive processing two-frame input
+        for _ in range(PP_EARLY_FRAME):
+            p.stepSimulation(physicsClientId=pc)
+        early_rgba_bytes, _, _ = _render_scene(pc)
+        early_renders[i] = np.frombuffer(early_rgba_bytes, dtype=np.uint8).astype(np.float32)
+        for _ in range(N_TIMESTEPS - PP_EARLY_FRAME):
             p.stepSimulation(physicsClientId=pc)
 
         # Collect final-state analysis labels (NOT used in neural generation)
@@ -434,6 +439,7 @@ def generate_scenes(n_scenes, seed, bullet_k):
         'physics_labels': physics_labels,
         'initial_physics_labels': initial_physics_labels,
         'initial_renders': initial_renders,
+        'early_renders': early_renders,
         'behavior_labels': behavior_labels,
         'kinetic_energies': kinetic_energies,
         'scene_configs': all_scene_configs,

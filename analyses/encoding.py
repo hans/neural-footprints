@@ -15,7 +15,7 @@ import matplotlib.pyplot as plt
 from config import PIXEL_PCA_DIM
 
 
-def run_encoding_analysis(neural_activity, scenes, neural_meta, fig_dir="figures"):
+def run_encoding_analysis(neural_activity, scenes, neural_meta, inferred_physics=None, fig_dir="figures"):
     """
     Run encoding model analysis.
 
@@ -23,8 +23,9 @@ def run_encoding_analysis(neural_activity, scenes, neural_meta, fig_dir="figures
     2. Ridge regression: neural ~ pixel_PCA -> R² per neuron
     3. Ridge regression: neural ~ pixel_PCA + physics_labels -> R²
     4. DeltaR² should be tiny
-    5. Subsampling curve: vary neurons sampled, plot DeltaR² + significance
-    6. Control: logistic regression physics_labels -> behavior_label
+    5. If inferred_physics provided: neural ~ inferred_physics and ~ pixels + inferred_physics
+    6. Subsampling curve: vary neurons sampled, plot DeltaR² + significance
+    7. Control: logistic regression physics_labels -> behavior_label
     """
     print("\n" + "=" * 60)
     print("SIMULATION 1: Encoding Model False Negatives")
@@ -49,6 +50,12 @@ def run_encoding_analysis(neural_activity, scenes, neural_meta, fig_dir="figures
     # --- Standardize physics labels ---
     scaler_phys = StandardScaler()
     physics_scaled = scaler_phys.fit_transform(physics_labels)
+
+    # --- Standardize inferred physics if provided ---
+    inferred_scaled = None
+    if inferred_physics is not None:
+        scaler_inf = StandardScaler()
+        inferred_scaled = scaler_inf.fit_transform(inferred_physics)
 
     # --- Encoding model: pixels only ---
     print("\nFitting encoding model: neural ~ pixel_PCA ...")
@@ -76,6 +83,31 @@ def run_encoding_analysis(neural_activity, scenes, neural_meta, fig_dir="figures
     print(f"\n  Mean R² (pixels only):    {mean_r2_pix:.4f}")
     print(f"  Mean R² (pixels+physics): {mean_r2_comb:.4f}")
     print(f"  Mean ΔR²:                 {mean_delta:.6f}")
+
+    # --- Encoding models with inferred physics ---
+    r2_inferred = None
+    r2_pixels_plus_inferred = None
+    delta_r2_inferred = None
+    if inferred_scaled is not None:
+        print("\nFitting encoding model: neural ~ inferred_physics ...")
+        r2_inferred = np.zeros(n_neurons)
+        for j in range(n_neurons):
+            ridge = RidgeCV(alphas=alphas)
+            ridge.fit(inferred_scaled, neural_activity[:, j])
+            r2_inferred[j] = ridge.score(inferred_scaled, neural_activity[:, j])
+
+        print("Fitting encoding model: neural ~ pixel_PCA + inferred_physics ...")
+        combined_inferred = np.hstack([pixel_pca, inferred_scaled])
+        r2_pixels_plus_inferred = np.zeros(n_neurons)
+        for j in range(n_neurons):
+            ridge = RidgeCV(alphas=alphas)
+            ridge.fit(combined_inferred, neural_activity[:, j])
+            r2_pixels_plus_inferred[j] = ridge.score(combined_inferred, neural_activity[:, j])
+
+        delta_r2_inferred = r2_pixels_plus_inferred - r2_pixels_only
+        print(f"\n  Mean R² (inferred physics only):   {r2_inferred.mean():.4f}")
+        print(f"  Mean R² (pixels+inferred physics): {r2_pixels_plus_inferred.mean():.4f}")
+        print(f"  Mean ΔR² (inferred):               {delta_r2_inferred.mean():.6f}")
 
     # --- Control: physics_labels -> behavior_label ---
     print("\nControl: logistic regression physics_labels -> behavior_label ...")
@@ -109,21 +141,38 @@ def run_encoding_analysis(neural_activity, scenes, neural_meta, fig_dir="figures
         # Fraction of subsamples where mean ΔR² > 0
         subsample_sig_fracs.append((deltas > 0).mean())
 
-    # --- Figure 1: R² bar plot ---
-    fig, axes = plt.subplots(1, 3, figsize=(15, 5))
-
-    ax = axes[0]
-    bars = ax.bar(['Pixels only', 'Pixels + Physics'],
-                  [mean_r2_pix, mean_r2_comb],
-                  yerr=[r2_pixels_only.std() / np.sqrt(n_neurons),
-                        r2_combined.std() / np.sqrt(n_neurons)],
-                  color=['#4878CF', '#D65F5F'], capsize=5)
-    ax.set_ylabel('Mean R²')
-    ax.set_title('Encoding Model: R² ± Physics Labels')
-    # Annotate ΔR²
-    ymax = max(mean_r2_pix, mean_r2_comb) * 1.1
-    ax.annotate(f'ΔR² = {mean_delta:.6f}', xy=(0.5, ymax),
-                ha='center', fontsize=10, style='italic')
+    # --- Figure: R² bar plot ---
+    if r2_inferred is not None:
+        fig, axes = plt.subplots(1, 3, figsize=(18, 5))
+        ax = axes[0]
+        bar_labels = ['Pixels\nonly', 'Pixels +\ntrue physics', 'Inferred\nphysics only', 'Pixels +\ninferred physics']
+        bar_means = [mean_r2_pix, mean_r2_comb, r2_inferred.mean(), r2_pixels_plus_inferred.mean()]
+        bar_errs = [
+            r2_pixels_only.std() / np.sqrt(n_neurons),
+            r2_combined.std() / np.sqrt(n_neurons),
+            r2_inferred.std() / np.sqrt(n_neurons),
+            r2_pixels_plus_inferred.std() / np.sqrt(n_neurons),
+        ]
+        colors = ['#4878CF', '#D65F5F', '#8C8C8C', '#6ACC65']
+        ax.bar(bar_labels, bar_means, yerr=bar_errs, color=colors, capsize=5)
+        ax.set_ylabel('Mean R²')
+        ax.set_title('Encoding Model: R² Comparison')
+        ymax = max(bar_means) * 1.15
+        ax.annotate(f'ΔR² (true physics) = {mean_delta:.6f}', xy=(0.5, ymax),
+                    ha='center', fontsize=9, style='italic')
+    else:
+        fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+        ax = axes[0]
+        bars = ax.bar(['Pixels only', 'Pixels + Physics'],
+                      [mean_r2_pix, mean_r2_comb],
+                      yerr=[r2_pixels_only.std() / np.sqrt(n_neurons),
+                            r2_combined.std() / np.sqrt(n_neurons)],
+                      color=['#4878CF', '#D65F5F'], capsize=5)
+        ax.set_ylabel('Mean R²')
+        ax.set_title('Encoding Model: R² ± Physics Labels')
+        ymax = max(mean_r2_pix, mean_r2_comb) * 1.1
+        ax.annotate(f'ΔR² = {mean_delta:.6f}', xy=(0.5, ymax),
+                    ha='center', fontsize=10, style='italic')
 
     # --- Figure 2: Subsampling curve ---
     ax = axes[1]
@@ -154,6 +203,9 @@ def run_encoding_analysis(neural_activity, scenes, neural_meta, fig_dir="figures
         'r2_pixels_only': r2_pixels_only,
         'r2_combined': r2_combined,
         'delta_r2': delta_r2,
+        'r2_inferred': r2_inferred,
+        'r2_pixels_plus_inferred': r2_pixels_plus_inferred,
+        'delta_r2_inferred': delta_r2_inferred,
         'control_accuracy': control_acc,
         'subsample_means': subsample_means,
         'subsample_neuron_counts': neuron_counts,
