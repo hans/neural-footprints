@@ -37,7 +37,7 @@ def evaluate(encoding_results, rsa_results, dissociation_results, pp_results=Non
     # --- Encoding Model ---
     dr2 = encoding_results['delta_r2'].mean()
     ctrl = encoding_results['control_accuracy']
-    r2_pixels = encoding_results['r2_pixels'].mean()
+    r2_pixels = encoding_results['r2_pixels_only'].mean()
 
     lines.append(f"\n{BOLD}Encoding Model{RESET}")
     check(
