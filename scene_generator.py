@@ -421,12 +421,12 @@ def generate_scenes(n_scenes, seed, bullet_k):
     behavior_labels = (kinetic_energies > median_ke).astype(np.int32)
 
     # Metadata
-    pixel_end = rgba_bytes_count  # RGBA is first in concatenation
+    pixel_end = render_bytes_total  # RGBA + depth + segmentation
     metadata = {
         'D_render_bytes': render_bytes_total,
         'D_physics_bytes': bullet_k,
         'D_total': D,
-        'pixel_indices': slice(0, pixel_end),  # RGBA slice in float32 vector
+        'pixel_indices': slice(0, pixel_end),  # full render slice in float32 vector
     }
 
     behavior_rate = behavior_labels.mean()
@@ -469,8 +469,9 @@ def save_sample_renders(scenes, fig_dir, n_samples=16):
     for i in range(n):
         # Initial RGBA
         init_rgba = initial_renders[i].astype(np.uint8).reshape(IMAGE_SIZE, IMAGE_SIZE, 4)
-        # Final RGBA (first slice of program_states)
-        final_rgba = program_states[i, pixel_indices].astype(np.uint8).reshape(IMAGE_SIZE, IMAGE_SIZE, 4)
+        # Final RGBA (first 64×64×4 bytes of program_states)
+        rgba_count = IMAGE_SIZE * IMAGE_SIZE * 4
+        final_rgba = program_states[i, :rgba_count].astype(np.uint8).reshape(IMAGE_SIZE, IMAGE_SIZE, 4)
 
         axes[i, 0].imshow(init_rgba)
         axes[i, 0].axis('off')
