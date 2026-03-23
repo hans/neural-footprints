@@ -34,6 +34,36 @@ def evaluate(encoding_results, rsa_results, dissociation_results, pp_results=Non
             passed_total += 1
         lines.append(_check(name, passed, actual_str, threshold_str))
 
+    # --- Predictive Processing (prerequisite: inverse model quality) ---
+    inverse_ok = True
+    if pp_results is not None:
+        lines.append(f"\n{BOLD}Predictive Processing{RESET}")
+        inverse_ok = pp_results['inverse_mean_r2'] > 0.30
+        check(
+            "Inverse model recovers physics from pixels",
+            inverse_ok,
+            f"R² = {pp_results['inverse_mean_r2']:.4f}",
+            "expect > 0.30 — prerequisite for PP chain and inferred-physics checks",
+        )
+        check(
+            "PP chain predicts better than render-only",
+            pp_results['pp_r2'] > pp_results['render_r2'],
+            f"PP R² = {pp_results['pp_r2']:.4f} vs render-only R² = {pp_results['render_r2']:.4f}",
+            "expect PP > render-only" + ("" if inverse_ok else " (depends on inverse model)"),
+        )
+        check(
+            "Inferred physics invisible to neural regression",
+            pp_results['neural_r2_inferred_physics'] < 0.10,
+            f"R² = {pp_results['neural_r2_inferred_physics']:.4f}",
+            "expect < 0.10",
+        )
+        check(
+            "Pixel PCA explains neural activity at t=0",
+            pp_results['neural_r2_t0'] > 0.20,
+            f"R² = {pp_results['neural_r2_t0']:.4f}",
+            "expect > 0.20",
+        )
+
     # --- Encoding Model ---
     dr2 = encoding_results['delta_r2'].mean()
     ctrl = encoding_results['control_accuracy']
@@ -65,7 +95,7 @@ def evaluate(encoding_results, rsa_results, dissociation_results, pp_results=Non
             "Inferred physics adds negligible variance",
             dr2_inf < 0.03,
             f"ΔR² = {dr2_inf:.6f}",
-            "expect < 0.03",
+            "expect < 0.03" + ("" if inverse_ok else " (depends on inverse model)"),
         )
 
     # --- RSA ---
@@ -106,7 +136,7 @@ def evaluate(encoding_results, rsa_results, dissociation_results, pp_results=Non
             "Neural ↔ Inferred physics | Render near zero",
             abs(partial_ni) < 0.05,
             f"r = {partial_ni:.4f}",
-            "expect |r| < 0.05",
+            "expect |r| < 0.05" + ("" if inverse_ok else " (depends on inverse model)"),
         )
 
     # --- Dissociation ---
@@ -136,34 +166,6 @@ def evaluate(encoding_results, rsa_results, dissociation_results, pp_results=Non
         f"{metric} = {beh_rend:.4f}",
         "expect low" if obj == "next_frame_pixels" else "expect < 0.70",
     )
-
-    # --- Predictive Processing ---
-    if pp_results is not None:
-        lines.append(f"\n{BOLD}Predictive Processing{RESET}")
-        check(
-            "PP chain predicts physics (R² > render-only)",
-            pp_results['pp_r2'] > pp_results['render_r2'],
-            f"PP R² = {pp_results['pp_r2']:.4f} vs render-only R² = {pp_results['render_r2']:.4f}",
-            "expect PP > render-only",
-        )
-        check(
-            "Inverse model recovers physics from pixels",
-            pp_results['inverse_mean_r2'] > 0.30,
-            f"R² = {pp_results['inverse_mean_r2']:.4f}",
-            "expect > 0.30",
-        )
-        check(
-            "Inferred physics invisible to neural regression",
-            pp_results['neural_r2_inferred_physics'] < 0.10,
-            f"R² = {pp_results['neural_r2_inferred_physics']:.4f}",
-            "expect < 0.10",
-        )
-        check(
-            "Pixel PCA explains neural activity at t=0",
-            pp_results['neural_r2_t0'] > 0.20,
-            f"R² = {pp_results['neural_r2_t0']:.4f}",
-            "expect > 0.20",
-        )
 
     # --- Summary ---
     if passed_total == total:

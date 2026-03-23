@@ -97,9 +97,12 @@ class InverseModel:
         self.input_scaler_ = None
         self.phys_scaler_ = None
         self.per_dim_r2_ = None
+        self.valid_dims_ = None       # bool mask: which physics dims have variance
+        self.full_physics_dim_ = None # original dimensionality before filtering
+        self.const_values_ = None     # mean values for constant dims (used in predict)
 
     def fit(self, pixel_pca_two_frame, physics_labels,
-            n_epochs=150, batch_size=64, lr=1e-3, val_frac=0.15, patience=15):
+            n_epochs=150, batch_size=64, lr=1e-3, val_frac=0.15, patience=30):
         """
         Train InverseModel with MC dropout.
 
@@ -108,11 +111,39 @@ class InverseModel:
         pixel_pca_two_frame : ndarray [n × 2*PP_PIXEL_PCA_DIM]
         physics_labels : ndarray [n × physics_dim]  (initial_physics_labels)
         """
+        self.full_physics_dim_ = physics_labels.shape[1]
+
+        # Filter to pixel-observable dims: position and velocity components
+        # that both vary across scenes AND are in principle inferable from pixels.
+        # Per object (stride 15): pos(0:3), orn(3:7), lin_vel(7:10), ang_vel(10:13),
+        #                         mass(13), friction(14)
+        # Observable from two-frame pixels: position (directly visible) and
+        # velocity (from inter-frame displacement). Mass and friction are
+        # intrinsic properties not recoverable from pixel observations.
+        observable_offsets = list(range(0, 3)) + list(range(7, 10))  # pos + lin_vel
+        observable_indices = []
+        for i in range(N_OBJECTS):
+            observable_indices.extend([i * 15 + j for j in observable_offsets])
+
+        std_per_dim = physics_labels.std(axis=0)
+        has_variance = std_per_dim > 1e-4
+        observable_mask = np.zeros(self.full_physics_dim_, dtype=bool)
+        observable_mask[observable_indices] = True
+
+        self.valid_dims_ = observable_mask & has_variance
+        self.const_values_ = physics_labels.mean(axis=0)
+        n_valid = self.valid_dims_.sum()
+        n_observable = observable_mask.sum()
+        print(f"    InverseModel: {n_valid}/{n_observable} observable physics dims have variance "
+              f"({self.full_physics_dim_} total)")
+
+        physics_valid = physics_labels[:, self.valid_dims_]
+
         # Scale inputs and targets
         self.input_scaler_ = StandardScaler()
         X = self.input_scaler_.fit_transform(pixel_pca_two_frame)
         self.phys_scaler_ = StandardScaler()
-        y = self.phys_scaler_.fit_transform(physics_labels)
+        y = self.phys_scaler_.fit_transform(physics_valid)
 
         # Train / val split
         X_tr, X_val, y_tr, y_val = train_test_split(
@@ -124,6 +155,9 @@ class InverseModel:
         self.net_ = InverseMLPNet(input_dim, output_dim)
 
         optimizer = torch.optim.Adam(self.net_.parameters(), lr=lr)
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer, factor=0.5, patience=10
+        )
         loss_fn = nn.MSELoss()
 
         X_tr_t = torch.tensor(X_tr, dtype=torch.float32)
@@ -150,6 +184,8 @@ class InverseModel:
             with torch.no_grad():
                 val_loss = loss_fn(self.net_(X_val_t), y_val_t).item()
 
+            scheduler.step(val_loss)
+
             if val_loss < best_val_loss:
                 best_val_loss = val_loss
                 best_state = {k: v.clone() for k, v in self.net_.state_dict().items()}
@@ -163,7 +199,7 @@ class InverseModel:
         if best_state is not None:
             self.net_.load_state_dict(best_state)
 
-        # Per-dim R² on val set (in standardized physics space)
+        # Per-dim R² on val set (in standardized physics space, valid dims only)
         self.net_.eval()
         with torch.no_grad():
             y_pred_val = self.net_(X_val_t).numpy()
@@ -174,11 +210,19 @@ class InverseModel:
               f"max={self.per_dim_r2_.max():.4f}")
         return self
 
+    def _expand_to_full(self, valid_predictions):
+        """Expand valid-dim predictions back to full physics dimensionality."""
+        n = valid_predictions.shape[0]
+        full = np.tile(self.const_values_, (n, 1))
+        full[:, self.valid_dims_] = valid_predictions
+        return full
+
     def predict(self, pixel_pca_two_frame):
         """
         Deterministic prediction (model.eval(), dropout off).
 
-        Returns physics in original (unscaled) units.
+        Returns physics in original (unscaled) units, full dimensionality.
+        Constant dims are filled with their training-set mean.
         """
         self.net_.eval()
         X = torch.tensor(
@@ -186,7 +230,8 @@ class InverseModel:
         )
         with torch.no_grad():
             pred_scaled = self.net_(X).numpy()
-        return self.phys_scaler_.inverse_transform(pred_scaled)
+        valid_preds = self.phys_scaler_.inverse_transform(pred_scaled)
+        return self._expand_to_full(valid_preds)
 
     def predict_stochastic(self, pixel_pca_two_frame, n_samples=8):
         """
@@ -199,7 +244,7 @@ class InverseModel:
 
         Returns
         -------
-        samples : ndarray [n_samples × n × physics_dim]  in original units
+        samples : ndarray [n_samples × n × physics_dim]  in original units (full dims)
         """
         self.net_.train()
         X = torch.tensor(
@@ -211,7 +256,8 @@ class InverseModel:
                 samples_scaled.append(self.net_(X).numpy())
         self.net_.eval()  # restore eval mode after sampling
         samples = np.stack([
-            self.phys_scaler_.inverse_transform(s) for s in samples_scaled
+            self._expand_to_full(self.phys_scaler_.inverse_transform(s))
+            for s in samples_scaled
         ])  # [n_samples × n × physics_dim]
         return samples
 
@@ -475,8 +521,16 @@ def run_predictive_processing_analysis(neural_activity, scenes,
     print(f"  Oracle R²: {oracle_r2:.4f}")
 
     # --- 7. PP chain R² (InverseModel mean → PyBullet) ---
+    # Inferred physics supplies observable dims (position, velocity);
+    # unobservable intrinsic properties (mass, friction, orientation, ang_vel)
+    # come from ground truth since they cannot be recovered from pixels.
     print(f"\nComputing PP chain R² ({n_oracle} test scenes, deterministic mean)...")
     inferred_mean_oracle = inv_model.predict(pixel_pca_two_frame[oracle_test_idx])
+    for j in range(n_oracle):
+        gt = initial_physics[oracle_test_idx[j]]
+        # Copy non-observable dims from ground truth
+        non_observable = ~inv_model.valid_dims_
+        inferred_mean_oracle[j, non_observable] = gt[non_observable]
     pp_preds = np.stack([
         resimulate_scene(scene_configs[oracle_test_idx[j]], inferred_mean_oracle[j]).reshape(-1).astype(np.float32)
         for j in range(n_oracle)
@@ -516,10 +570,13 @@ def run_predictive_processing_analysis(neural_activity, scenes,
 
     # --- 10. Figures ---
     print("\nSaving figures...")
+    # Expand per-dim R² back to full 15*N_OBJECTS for the grouped bar chart
+    full_per_dim_r2 = np.zeros(inv_model.full_physics_dim_)
+    full_per_dim_r2[inv_model.valid_dims_] = inv_model.per_dim_r2_
     _save_figures(
         prior_r2, oracle_r2, pp_r2, render_r2,
         neural_r2_t0, neural_r2_two_frame, neural_r2_inv_physics,
-        inv_model.per_dim_r2_,
+        full_per_dim_r2,
         fig_dir
     )
     _save_pp_frames(

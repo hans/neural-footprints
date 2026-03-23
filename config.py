@@ -19,4 +19,4 @@ BEHAVIORAL_OBJECTIVE = "next_frame_pixels"
 PP_HIDDEN_DIM = 256      # hidden layer width for InverseModel
 PP_PIXEL_PCA_DIM = 50    # pixel PCA dim for two-frame input (keep small for 2000 scenes)
 PP_EARLY_FRAME = 5       # simulation step at which to capture the second input frame
-PP_DROPOUT_RATE = 0.2    # dropout probability (active during both training and MC inference)
+PP_DROPOUT_RATE = 0.1    # dropout probability (active during both training and MC inference)

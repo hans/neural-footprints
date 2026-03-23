@@ -110,14 +110,27 @@ that captures causal structure but is still methodologically invisible.
 ### Architecture
 
 ```
-Stage 1 (InverseModel): pixel_pca_t0 + pixel_pca_t5 → inferred_physics [n × 15]
+Stage 1 (InverseModel): pixel_pca_t0 + pixel_pca_t5 → inferred_physics [n × 4]
   - Two-frame input: optical flow encodes velocity information
-  - PyTorch MLP: 100 → 256 (ReLU, Dropout) → 256 (ReLU, Dropout) → 15
+  - PyTorch MLP: 100 → 256 (ReLU, Dropout) → 256 (ReLU, Dropout) → observable dims
   - MC dropout active at inference for uncertainty estimation
+  - Predicts only pixel-observable dims (position, variable velocity components)
+  - Intrinsic properties (mass, friction) and constant dims (orientation,
+    angular velocity) are not predicted — they cannot be recovered from pixels
 
 Stage 2 (Forward): inferred_physics → PyBullet resimulation → final_pixels
   - Deterministic physics engine (not learned)
+  - Unobservable intrinsic properties (mass, friction, orientation, angular
+    velocity) are supplied from ground truth for resimulation
 ```
+
+**Observable vs unobservable physics dims:** Not all physics labels are recoverable
+from pixel observations. Position and (non-zero) velocity are visible in rendered
+frames; mass, friction, orientation (constant at t=0), and angular velocity (zero
+at t=0) are not. The InverseModel trains only on observable dims to avoid diluting
+its R² with fundamentally unpredictable targets. For resimulation, ground-truth
+values are used for unobservable dims since they are structural scene properties
+(like shape and color, which are already supplied via `scene_configs`).
 
 ### What it tests
 
@@ -249,7 +262,7 @@ BEHAVIORAL_OBJECTIVE = "next_frame_pixels"  # or "kinetic_energy"
 PP_HIDDEN_DIM = 256       # InverseModel hidden layer width
 PP_PIXEL_PCA_DIM = 50     # two-frame pixel PCA dimension
 PP_EARLY_FRAME = 5        # timestep for second input frame
-PP_DROPOUT_RATE = 0.2     # MC dropout probability
+PP_DROPOUT_RATE = 0.1     # MC dropout probability
 ```
 
 ---
