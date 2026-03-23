@@ -16,7 +16,7 @@ Two behavioral sufficiency objectives are supported (set in config.py):
 
 import numpy as np
 from sklearn.decomposition import PCA
-from sklearn.linear_model import RidgeCV, LogisticRegressionCV
+from sklearn.linear_model import LogisticRegressionCV
 from sklearn.model_selection import cross_val_score
 from sklearn.neural_network import MLPRegressor
 from sklearn.pipeline import make_pipeline
@@ -24,6 +24,7 @@ from sklearn.preprocessing import StandardScaler
 import matplotlib.pyplot as plt
 
 from config import PIXEL_PCA_DIM, BEHAVIORAL_PCA_DIM, BEHAVIORAL_OBJECTIVE
+from analyses.utils import mean_neural_r2
 
 
 # ---------------------------------------------------------------------------
@@ -151,7 +152,7 @@ def _score_kinetic_energy(pixel_pca, physics_scaled, behavior_labels):
 # Main analysis
 # ---------------------------------------------------------------------------
 
-def run_dissociation_analysis(neural_activity, scenes, neural_meta,
+def run_dissociation_analysis(neural_activity, scenes,
                                objective=None, fig_dir="figures"):
     """
     Compute and plot the R² vs. behavioral sufficiency dissociation.
@@ -195,22 +196,8 @@ def run_dissociation_analysis(neural_activity, scenes, neural_meta,
 
     # --- Neural R² ---
     print("Computing neural R² for each model...")
-    alphas = np.logspace(-2, 6, 20)
-
-    r2_render = np.zeros(n_neurons)
-    for j in range(n_neurons):
-        ridge = RidgeCV(alphas=alphas)
-        ridge.fit(pixel_pca, neural_activity[:, j])
-        r2_render[j] = ridge.score(pixel_pca, neural_activity[:, j])
-
-    r2_physics = np.zeros(n_neurons)
-    for j in range(n_neurons):
-        ridge = RidgeCV(alphas=alphas)
-        ridge.fit(physics_scaled, neural_activity[:, j])
-        r2_physics[j] = ridge.score(physics_scaled, neural_activity[:, j])
-
-    mean_r2_render = r2_render.mean()
-    mean_r2_physics = r2_physics.mean()
+    mean_r2_render, r2_render = mean_neural_r2(pixel_pca, neural_activity)
+    mean_r2_physics, r2_physics = mean_neural_r2(physics_scaled, neural_activity)
 
     print(f"  Render model mean R²:  {mean_r2_render:.4f}")
     print(f"  Physics model mean R²: {mean_r2_physics:.4f}")

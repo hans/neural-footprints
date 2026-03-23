@@ -24,7 +24,6 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
 from sklearn.decomposition import PCA
-from sklearn.linear_model import RidgeCV
 from sklearn.metrics import r2_score
 from sklearn.model_selection import train_test_split
 from sklearn.neural_network import MLPRegressor
@@ -36,6 +35,7 @@ from config import (
     PP_HIDDEN_DIM, PP_PIXEL_PCA_DIM, PP_DROPOUT_RATE,
     N_OBJECTS, IMAGE_SIZE,
 )
+from analyses.utils import mean_neural_r2
 
 
 # ---------------------------------------------------------------------------
@@ -288,20 +288,6 @@ def _pixel_r2(predicted_rgba, actual_raw_pixels):
     return float(1.0 - ss_res / ss_tot) if ss_tot > 0 else 1.0
 
 
-def _mean_neural_r2(features, neural_activity):
-    """
-    Ridge regression R² per neuron, averaged over neurons.
-    Mirrors pattern in dissociation.run_dissociation_analysis (lines 200-210).
-    """
-    alphas = np.logspace(-2, 6, 20)
-    r2s = np.zeros(neural_activity.shape[1])
-    for j in range(neural_activity.shape[1]):
-        ridge = RidgeCV(alphas=alphas)
-        ridge.fit(features, neural_activity[:, j])
-        r2s[j] = ridge.score(features, neural_activity[:, j])
-    return float(r2s.mean()), r2s
-
-
 # ---------------------------------------------------------------------------
 # Physics label grouping for InverseModel quality plot
 # ---------------------------------------------------------------------------
@@ -392,7 +378,7 @@ def _save_pp_frames(pixel_pca_two_frame, inv_model,
 # Main analysis
 # ---------------------------------------------------------------------------
 
-def run_predictive_processing_analysis(neural_activity, scenes, neural_meta,
+def run_predictive_processing_analysis(neural_activity, scenes,
                                         fig_dir="figures"):
     """
     Train and evaluate the full predictive processing pipeline.
@@ -401,7 +387,6 @@ def run_predictive_processing_analysis(neural_activity, scenes, neural_meta,
     ----------
     neural_activity : ndarray [n_scenes × N_NEURONS]
     scenes : dict  (from scene_generator.generate_scenes(), includes 'early_renders')
-    neural_meta : dict
     fig_dir : str
 
     Returns
@@ -521,9 +506,9 @@ def run_predictive_processing_analysis(neural_activity, scenes, neural_meta,
     print("\nComputing neural R² for PP representations...")
     inferred_physics_all = inv_model.predict(pixel_pca_two_frame)
 
-    neural_r2_t0, _            = _mean_neural_r2(pixel_pca_t0, neural_activity)
-    neural_r2_two_frame, _     = _mean_neural_r2(pixel_pca_two_frame, neural_activity)
-    neural_r2_inv_physics, _   = _mean_neural_r2(inferred_physics_all, neural_activity)
+    neural_r2_t0, _            = mean_neural_r2(pixel_pca_t0, neural_activity)
+    neural_r2_two_frame, _     = mean_neural_r2(pixel_pca_two_frame, neural_activity)
+    neural_r2_inv_physics, _   = mean_neural_r2(inferred_physics_all, neural_activity)
 
     print(f"  Neural R²  t=0 pixel PCA:     {neural_r2_t0:.4f}")
     print(f"  Neural R²  two-frame PCA:     {neural_r2_two_frame:.4f}")

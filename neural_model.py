@@ -68,32 +68,3 @@ def generate_neural_activity(program_states, seed):
     return neural_activity, metadata
 
 
-def print_variance_diagnostic(scene_metadata, neural_metadata):
-    """
-    Print the key diagnostic: how much variance comes from render vs physics slices.
-
-    This ratio is NOT set by a parameter — it is printed as a finding.
-    """
-    D_render = scene_metadata['D_render_bytes']
-    D_physics = scene_metadata['D_physics_bytes']
-    D_total = scene_metadata['D_total']
-
-    var_per_dim = neural_metadata['var_per_dim']
-
-    render_var = var_per_dim[:D_render].sum()
-    physics_var = var_per_dim[D_render:].sum()
-    total_var = neural_metadata['total_var']
-
-    render_frac = render_var / total_var * 100
-    physics_frac = physics_var / total_var * 100
-    ratio = D_render / D_physics
-
-    print("\n" + "=" * 60)
-    print("VARIANCE DIAGNOSTIC (key result)")
-    print("=" * 60)
-    print(f"Program state: D_render={D_render}, D_physics={D_physics}, ratio={ratio:.1f}x")
-    print(f"Variance fraction from render slice:  {render_frac:.1f}%")
-    print(f"Variance fraction from physics slice: {physics_frac:.1f}%")
-    print(f"Total standardized variance: {total_var:.1f}")
-    print(f"Signal std: {neural_metadata['signal_std']:.4f}")
-    print("=" * 60 + "\n")

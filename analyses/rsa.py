@@ -46,7 +46,7 @@ def _partial_spearman(x, y, z):
     return corr, pval
 
 
-def run_rsa_analysis(neural_activity, scenes, neural_meta, inferred_physics=None, fig_dir="figures"):
+def run_rsa_analysis(neural_activity, scenes, inferred_physics=None, fig_dir="figures"):
     """
     Run RSA analysis on a subsample of scenes.
 

@@ -7,15 +7,16 @@ produces negligible improvement in R², despite physics being causally operative
 
 import numpy as np
 from sklearn.decomposition import PCA
-from sklearn.linear_model import RidgeCV, LogisticRegressionCV
+from sklearn.linear_model import LogisticRegressionCV
 from sklearn.model_selection import cross_val_score
 from sklearn.preprocessing import StandardScaler
 import matplotlib.pyplot as plt
 
 from config import PIXEL_PCA_DIM
+from analyses.utils import RIDGE_ALPHAS, mean_neural_r2
 
 
-def run_encoding_analysis(neural_activity, scenes, neural_meta, inferred_physics=None, fig_dir="figures"):
+def run_encoding_analysis(neural_activity, scenes, inferred_physics=None, fig_dir="figures"):
     """
     Run encoding model analysis.
 
@@ -59,21 +60,12 @@ def run_encoding_analysis(neural_activity, scenes, neural_meta, inferred_physics
 
     # --- Encoding model: pixels only ---
     print("\nFitting encoding model: neural ~ pixel_PCA ...")
-    alphas = np.logspace(-2, 6, 20)
-    r2_pixels_only = np.zeros(n_neurons)
-    for j in range(n_neurons):
-        ridge = RidgeCV(alphas=alphas)
-        ridge.fit(pixel_pca, neural_activity[:, j])
-        r2_pixels_only[j] = ridge.score(pixel_pca, neural_activity[:, j])
+    _, r2_pixels_only = mean_neural_r2(pixel_pca, neural_activity)
 
     # --- Encoding model: pixels + physics labels ---
     print("Fitting encoding model: neural ~ pixel_PCA + physics_labels ...")
     combined = np.hstack([pixel_pca, physics_scaled])
-    r2_combined = np.zeros(n_neurons)
-    for j in range(n_neurons):
-        ridge = RidgeCV(alphas=alphas)
-        ridge.fit(combined, neural_activity[:, j])
-        r2_combined[j] = ridge.score(combined, neural_activity[:, j])
+    _, r2_combined = mean_neural_r2(combined, neural_activity)
 
     delta_r2 = r2_combined - r2_pixels_only
     mean_r2_pix = r2_pixels_only.mean()
@@ -90,19 +82,11 @@ def run_encoding_analysis(neural_activity, scenes, neural_meta, inferred_physics
     delta_r2_inferred = None
     if inferred_scaled is not None:
         print("\nFitting encoding model: neural ~ inferred_physics ...")
-        r2_inferred = np.zeros(n_neurons)
-        for j in range(n_neurons):
-            ridge = RidgeCV(alphas=alphas)
-            ridge.fit(inferred_scaled, neural_activity[:, j])
-            r2_inferred[j] = ridge.score(inferred_scaled, neural_activity[:, j])
+        _, r2_inferred = mean_neural_r2(inferred_scaled, neural_activity)
 
         print("Fitting encoding model: neural ~ pixel_PCA + inferred_physics ...")
         combined_inferred = np.hstack([pixel_pca, inferred_scaled])
-        r2_pixels_plus_inferred = np.zeros(n_neurons)
-        for j in range(n_neurons):
-            ridge = RidgeCV(alphas=alphas)
-            ridge.fit(combined_inferred, neural_activity[:, j])
-            r2_pixels_plus_inferred[j] = ridge.score(combined_inferred, neural_activity[:, j])
+        _, r2_pixels_plus_inferred = mean_neural_r2(combined_inferred, neural_activity)
 
         delta_r2_inferred = r2_pixels_plus_inferred - r2_pixels_only
         print(f"\n  Mean R² (inferred physics only):   {r2_inferred.mean():.4f}")
