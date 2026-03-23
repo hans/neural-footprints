@@ -35,13 +35,13 @@ def run_encoding_analysis(neural_activity, scenes, inferred_physics=None, fig_di
     program_states = scenes['program_states']
     physics_labels = scenes['physics_labels']
     behavior_labels = scenes['behavior_labels']
-    pixel_indices = scenes['metadata']['pixel_indices']
+    render_indices = scenes['metadata']['render_indices']
 
     n_scenes, n_neurons = neural_activity.shape
 
-    # --- Extract and PCA-reduce pixel slice ---
-    print(f"\nExtracting pixel slice and reducing to {PIXEL_PCA_DIM} PCA components...")
-    pixel_data = program_states[:, pixel_indices]
+    # --- Extract and PCA-reduce full render slice (RGBA + depth + seg) ---
+    print(f"\nExtracting render slice and reducing to {PIXEL_PCA_DIM} PCA components...")
+    pixel_data = program_states[:, render_indices]
     scaler_pix = StandardScaler()
     pixel_scaled = scaler_pix.fit_transform(pixel_data)
     pca = PCA(n_components=PIXEL_PCA_DIM, random_state=42)

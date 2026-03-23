@@ -179,13 +179,14 @@ def run_dissociation_analysis(neural_activity, scenes,
     initial_renders = scenes['initial_renders']
     behavior_labels = scenes['behavior_labels']
     pixel_indices = scenes['metadata']['pixel_indices']
+    render_indices = scenes['metadata']['render_indices']
     scene_configs = scenes['scene_configs']
 
     n_scenes, n_neurons = neural_activity.shape
 
     # --- Prepare final-frame render features (used for neural R²) ---
-    print("\nPreparing render features (pixel PCA of final frame)...")
-    pixel_data = program_states[:, pixel_indices]
+    print("\nPreparing render features (render PCA of final frame)...")
+    pixel_data = program_states[:, render_indices]
     scaler_pix = StandardScaler()
     pixel_scaled = scaler_pix.fit_transform(pixel_data)
     pca = PCA(n_components=PIXEL_PCA_DIM, random_state=42)

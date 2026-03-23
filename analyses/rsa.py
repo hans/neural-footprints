@@ -61,7 +61,7 @@ def run_rsa_analysis(neural_activity, scenes, inferred_physics=None, fig_dir="fi
 
     program_states = scenes['program_states']
     physics_labels = scenes['physics_labels']
-    pixel_indices = scenes['metadata']['pixel_indices']
+    render_indices = scenes['metadata']['render_indices']
 
     n_scenes = program_states.shape[0]
     n_sub = min(RSA_SUBSAMPLE, n_scenes)
@@ -72,7 +72,7 @@ def run_rsa_analysis(neural_activity, scenes, inferred_physics=None, fig_dir="fi
     sub_idx.sort()
 
     neural_sub = neural_activity[sub_idx]
-    pixel_sub = program_states[sub_idx][:, pixel_indices]
+    pixel_sub = program_states[sub_idx][:, render_indices]
     physics_sub = physics_labels[sub_idx]
 
     # PCA-reduce pixel data for tractability

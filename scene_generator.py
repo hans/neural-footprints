@@ -421,12 +421,12 @@ def generate_scenes(n_scenes, seed, bullet_k):
     behavior_labels = (kinetic_energies > median_ke).astype(np.int32)
 
     # Metadata
-    pixel_end = render_bytes_total  # RGBA + depth + segmentation
     metadata = {
         'D_render_bytes': render_bytes_total,
         'D_physics_bytes': bullet_k,
         'D_total': D,
-        'pixel_indices': slice(0, pixel_end),  # full render slice in float32 vector
+        'pixel_indices': slice(0, rgba_bytes_count),       # RGBA only (for visualization / pixel prediction)
+        'render_indices': slice(0, render_bytes_total),    # RGBA + depth + seg (for encoding models)
     }
 
     behavior_rate = behavior_labels.mean()
