@@ -66,10 +66,7 @@ def run_encoding_analysis(neural_activity, scenes, neural_meta, fig_dir="figures
     # --- Extract and PCA-reduce pixel slice ---
     print(f"\nExtracting pixel slice and reducing to {pixel_pca_dim} PCA components...")
     pixel_data = program_states[:, pixel_indices]
-    scaler_pix = StandardScaler()
-    pixel_scaled = scaler_pix.fit_transform(pixel_data)
-    pca = PCA(n_components=pixel_pca_dim, random_state=42)
-    pixel_pca = pca.fit_transform(pixel_scaled)
+    pixel_pca, pca = pca_reduce_pixels(pixel_data, pixel_pca_dim)
     print(f"  PCA explained variance: {pca.explained_variance_ratio_.sum():.2%}")
 
     # --- Standardize physics labels ---
@@ -78,21 +75,12 @@ def run_encoding_analysis(neural_activity, scenes, neural_meta, fig_dir="figures
 
     # --- Encoding model: pixels only ---
     print("\nFitting encoding model: neural ~ pixel_PCA ...")
-    alphas = np.logspace(-2, 6, 20)
-    r2_pixels_only = np.zeros(n_neurons)
-    for j in range(n_neurons):
-        ridge = RidgeCV(alphas=alphas)
-        ridge.fit(pixel_pca, neural_activity[:, j])
-        r2_pixels_only[j] = ridge.score(pixel_pca, neural_activity[:, j])
+    r2_pixels_only = ridge_r2_per_neuron(pixel_pca, neural_activity)
 
     # --- Encoding model: pixels + physics labels ---
     print("Fitting encoding model: neural ~ pixel_PCA + physics_labels ...")
     combined = np.hstack([pixel_pca, physics_scaled])
-    r2_combined = np.zeros(n_neurons)
-    for j in range(n_neurons):
-        ridge = RidgeCV(alphas=alphas)
-        ridge.fit(combined, neural_activity[:, j])
-        r2_combined[j] = ridge.score(combined, neural_activity[:, j])
+    r2_combined = ridge_r2_per_neuron(combined, neural_activity)
 
     delta_r2 = r2_combined - r2_pixels_only
     mean_r2_pix = r2_pixels_only.mean()

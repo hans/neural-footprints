@@ -20,7 +20,8 @@ def _check(name, passed, actual_str, threshold_str):
     return f"  [{icon}] {name}: {actual_str}  {DIM}({threshold_str}){RESET}"
 
 
-def evaluate(encoding_results, rsa_results, dissociation_results, pp_results=None):
+def evaluate(encoding_results, rsa_results, dissociation_results,
+             pp_results=None, dynamics_results=None):
     """Run all checks and print colored evaluation report. Returns (n_passed, n_total)."""
 
     lines = []
@@ -168,6 +169,32 @@ def evaluate(encoding_results, rsa_results, dissociation_results, pp_results=Non
         f"{metric} = {beh_rend:.4f}",
         "expect low" if obj == "next_frame_pixels" else "expect < 0.70",
     )
+
+    # --- Dynamics (future brain state) ---
+    if dynamics_results is not None:
+        r2_phys_fwd = dynamics_results['mean_r2_physics_forward']
+        r2_pix_fwd = dynamics_results['mean_r2_pixel_forward']
+        fwd_gap = dynamics_results['forward_gap']
+
+        lines.append(f"\n{BOLD}Future Brain State (Dynamics){RESET}")
+        check(
+            "Physics forward model predicts future brain state",
+            r2_phys_fwd > 0.30,
+            f"R² = {r2_phys_fwd:.4f}",
+            "expect > 0.30",
+        )
+        check(
+            "Physics forward beats pixel forward",
+            r2_phys_fwd > r2_pix_fwd,
+            f"physics R² = {r2_phys_fwd:.4f} vs pixel R² = {r2_pix_fwd:.4f}",
+            "expect physics > pixel",
+        )
+        check(
+            "Forward model gap is substantial",
+            fwd_gap > 0.10,
+            f"gap = {fwd_gap:.4f}",
+            "expect > 0.10",
+        )
 
     # --- Summary ---
     if passed_total == total:

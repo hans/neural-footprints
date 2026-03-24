@@ -9,6 +9,7 @@ rule all:
         "figures/dissociation.png",
         "figures/predicted_frames.png",
         "figures/pca_analysis.png",
+        "figures/dynamics_analysis.png",
         "figures/sample_scenes.png",
 
 
@@ -83,11 +84,24 @@ rule pca:
         "scripts/run_pca.py"
 
 
+rule dynamics:
+    input:
+        scenes="data/scenes.npz",
+        neural="data/neural.npz",
+        encoding="outputs/encoding_results.json",
+    output:
+        results="outputs/dynamics_results.json",
+        figure="figures/dynamics_analysis.png",
+    script:
+        "scripts/run_dynamics.py"
+
+
 rule evaluate:
     input:
         encoding="outputs/encoding_results.json",
         rsa="outputs/rsa_results.json",
         dissociation="outputs/dissociation_results.json",
+        dynamics="outputs/dynamics_results.json",
     output:
         "outputs/evaluation.json",
     script:
