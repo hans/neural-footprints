@@ -12,7 +12,7 @@ from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
 import matplotlib.pyplot as plt
 
-from config import RSA_SUBSAMPLE, PIXEL_PCA_DIM
+from config import RSA_SUBSAMPLE as _CFG_RSA_SUBSAMPLE, PIXEL_PCA_DIM as _CFG_PIXEL_PCA_DIM
 
 
 def _compute_rdm(data):
@@ -46,7 +46,8 @@ def _partial_spearman(x, y, z):
     return corr, pval
 
 
-def run_rsa_analysis(neural_activity, scenes, neural_meta, fig_dir="figures"):
+def run_rsa_analysis(neural_activity, scenes, neural_meta, fig_dir="figures",
+                     *, rsa_subsample=None, pixel_pca_dim=None):
     """
     Run RSA analysis on a subsample of scenes.
 
@@ -54,6 +55,11 @@ def run_rsa_analysis(neural_activity, scenes, neural_meta, fig_dir="figures"):
     2. Spearman correlations: neural<->render (high), neural<->physics (low)
     3. Partial correlation: neural<->physics | render -> near zero
     """
+    if rsa_subsample is None:
+        rsa_subsample = _CFG_RSA_SUBSAMPLE
+    if pixel_pca_dim is None:
+        pixel_pca_dim = _CFG_PIXEL_PCA_DIM
+
     print("\n" + "=" * 60)
     print("SIMULATION 2: RSA Dominated by Render Structure")
     print("=" * 60)
@@ -63,7 +69,7 @@ def run_rsa_analysis(neural_activity, scenes, neural_meta, fig_dir="figures"):
     pixel_indices = scenes['metadata']['pixel_indices']
 
     n_scenes = program_states.shape[0]
-    n_sub = min(RSA_SUBSAMPLE, n_scenes)
+    n_sub = min(rsa_subsample, n_scenes)
 
     # Subsample scenes for tractability
     rng = np.random.default_rng(123)
@@ -76,10 +82,10 @@ def run_rsa_analysis(neural_activity, scenes, neural_meta, fig_dir="figures"):
 
     # PCA-reduce pixel data for tractability
     print(f"\nSubsampled {n_sub} scenes for RSA.")
-    print(f"PCA-reducing pixel data to {PIXEL_PCA_DIM} components...")
+    print(f"PCA-reducing pixel data to {pixel_pca_dim} components...")
     scaler = StandardScaler()
     pixel_scaled = scaler.fit_transform(pixel_sub)
-    pca = PCA(n_components=min(PIXEL_PCA_DIM, pixel_scaled.shape[0] - 1), random_state=42)
+    pca = PCA(n_components=min(pixel_pca_dim, pixel_scaled.shape[0] - 1), random_state=42)
     pixel_pca = pca.fit_transform(pixel_scaled)
 
     # Standardize physics

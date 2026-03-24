@@ -1,0 +1,11 @@
+n_scenes: 2000
+n_objects: 1
+image_size: 64
+n_neurons: 500
+n_timesteps: 30
+noise_level: 0.3
+random_seed: 42
+rsa_subsample: 500
+pixel_pca_dim: 500
+behavioral_pca_dim: 50
+behavioral_objective: "next_frame_pixels"

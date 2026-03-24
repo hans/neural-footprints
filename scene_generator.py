@@ -18,7 +18,7 @@ import pybullet as p
 import pybullet_data
 import matplotlib.pyplot as plt
 
-from config import N_OBJECTS, IMAGE_SIZE, N_TIMESTEPS
+from config import N_OBJECTS, IMAGE_SIZE, N_TIMESTEPS as _CFG_N_TIMESTEPS
 
 
 # Central vertical pillar at x=0 — occluder from camera's perspective
@@ -209,7 +209,7 @@ def _render_scene(physics_client):
     return rgba_bytes, depth_bytes, seg_bytes
 
 
-def resimulate_scene(shape_configs, initial_physics_row):
+def resimulate_scene(shape_configs, initial_physics_row, *, n_timesteps=None):
     """
     Rebuild a scene from stored shape configs + initial physics state, step
     N_TIMESTEPS, and return the rendered RGBA image as uint8 [IMAGE_SIZE, IMAGE_SIZE, 4].
@@ -224,6 +224,8 @@ def resimulate_scene(shape_configs, initial_physics_row):
         initial_physics_row: 1-D array of length 15*N_OBJECTS:
                              per object: pos(3), orn(4), lin_vel(3), ang_vel(3), mass(1), friction(1)
     """
+    if n_timesteps is None:
+        n_timesteps = _CFG_N_TIMESTEPS
     pc = p.connect(p.DIRECT)
     p.setAdditionalSearchPath(pybullet_data.getDataPath(), physicsClientId=pc)
     p.setGravity(0, 0, -9.81, physicsClientId=pc)
@@ -280,7 +282,7 @@ def resimulate_scene(shape_configs, initial_physics_row):
         p.resetBaseVelocity(body_id, linearVelocity=lin_vel,
                             angularVelocity=ang_vel, physicsClientId=pc)
 
-    for _ in range(N_TIMESTEPS):
+    for _ in range(n_timesteps):
         p.stepSimulation(physicsClientId=pc)
 
     rgba_bytes, _, _ = _render_scene(pc)
@@ -315,8 +317,10 @@ def _build_program_state(rgba_bytes, depth_bytes, seg_bytes, bullet_bytes, bulle
     return uint8_arr.astype(np.float32)
 
 
-def calibrate_bullet_size(n_samples=50, seed=0):
+def calibrate_bullet_size(n_samples=50, seed=0, *, n_timesteps=None):
     """Run n_samples scenes, return max .bullet file size + 20% buffer for padding constant K."""
+    if n_timesteps is None:
+        n_timesteps = _CFG_N_TIMESTEPS
     rng = np.random.default_rng(seed)
     max_size = 0
 
@@ -327,7 +331,7 @@ def calibrate_bullet_size(n_samples=50, seed=0):
         body_ids, masses, frictions, is_occluded, _ = _create_scene(pc, scene_rng)
 
         # Step physics
-        for _ in range(N_TIMESTEPS):
+        for _ in range(n_timesteps):
             p.stepSimulation(physicsClientId=pc)
 
         bullet_bytes = _save_bullet_state(pc)
@@ -341,7 +345,7 @@ def calibrate_bullet_size(n_samples=50, seed=0):
     return k
 
 
-def generate_scenes(n_scenes, seed, bullet_k):
+def generate_scenes(n_scenes, seed, bullet_k, *, n_timesteps=None):
     """
     Generate n_scenes PyBullet scenes, returning program states and analysis labels.
 
@@ -354,6 +358,8 @@ def generate_scenes(n_scenes, seed, bullet_k):
       'kinetic_energies':       ndarray [n_scenes]       — continuous final KE
       'metadata': dict with dimension info
     """
+    if n_timesteps is None:
+        n_timesteps = _CFG_N_TIMESTEPS
     rng = np.random.default_rng(seed)
 
     # Render byte counts
@@ -389,7 +395,7 @@ def generate_scenes(n_scenes, seed, bullet_k):
         initial_renders[i] = np.frombuffer(init_rgba_bytes, dtype=np.uint8).astype(np.float32)
 
         # Step physics
-        for _ in range(N_TIMESTEPS):
+        for _ in range(n_timesteps):
             p.stepSimulation(physicsClientId=pc)
 
         # Collect final-state analysis labels (NOT used in neural generation)
@@ -458,7 +464,7 @@ def save_sample_renders(scenes, fig_dir, n_samples=16):
         axes = axes[np.newaxis, :]
 
     axes[0, 0].set_title('t = 0 (initial)', fontsize=9)
-    axes[0, 1].set_title(f't = {N_TIMESTEPS} (final)', fontsize=9)
+    axes[0, 1].set_title(f't = {_CFG_N_TIMESTEPS} (final)', fontsize=9)
 
     for i in range(n):
         # Initial RGBA

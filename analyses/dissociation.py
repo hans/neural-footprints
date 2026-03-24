@@ -23,7 +23,9 @@ from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 import matplotlib.pyplot as plt
 
-from config import PIXEL_PCA_DIM, BEHAVIORAL_PCA_DIM, BEHAVIORAL_OBJECTIVE
+from config import PIXEL_PCA_DIM as _CFG_PIXEL_PCA_DIM
+from config import BEHAVIORAL_PCA_DIM as _CFG_BEHAVIORAL_PCA_DIM
+from config import BEHAVIORAL_OBJECTIVE as _CFG_BEHAVIORAL_OBJECTIVE
 
 
 # ---------------------------------------------------------------------------
@@ -152,7 +154,8 @@ def _score_kinetic_energy(pixel_pca, physics_scaled, behavior_labels):
 # ---------------------------------------------------------------------------
 
 def run_dissociation_analysis(neural_activity, scenes, neural_meta,
-                               objective=None, fig_dir="figures"):
+                               objective=None, fig_dir="figures",
+                               *, pixel_pca_dim=None, behavioral_pca_dim=None):
     """
     Compute and plot the R² vs. behavioral sufficiency dissociation.
 
@@ -165,7 +168,11 @@ def run_dissociation_analysis(neural_activity, scenes, neural_meta,
       - Behavioral sufficiency score (determined by `objective`)
     """
     if objective is None:
-        objective = BEHAVIORAL_OBJECTIVE
+        objective = _CFG_BEHAVIORAL_OBJECTIVE
+    if pixel_pca_dim is None:
+        pixel_pca_dim = _CFG_PIXEL_PCA_DIM
+    if behavioral_pca_dim is None:
+        behavioral_pca_dim = _CFG_BEHAVIORAL_PCA_DIM
 
     print("\n" + "=" * 60)
     print("SIMULATION 3: R² vs. Behavioral Sufficiency Dissociation")
@@ -187,7 +194,7 @@ def run_dissociation_analysis(neural_activity, scenes, neural_meta,
     pixel_data = program_states[:, pixel_indices]
     scaler_pix = StandardScaler()
     pixel_scaled = scaler_pix.fit_transform(pixel_data)
-    pca = PCA(n_components=PIXEL_PCA_DIM, random_state=42)
+    pca = PCA(n_components=pixel_pca_dim, random_state=42)
     pixel_pca = pca.fit_transform(pixel_scaled)
 
     scaler_phys = StandardScaler()
@@ -218,9 +225,9 @@ def run_dissociation_analysis(neural_activity, scenes, neural_meta,
     # --- Pixel PCA for render model visualization (always needed) ---
     scaler_init_pix = StandardScaler()
     init_pix_scaled = scaler_init_pix.fit_transform(initial_renders)
-    pca_init = PCA(n_components=BEHAVIORAL_PCA_DIM, whiten=True, random_state=42)
+    pca_init = PCA(n_components=behavioral_pca_dim, whiten=True, random_state=42)
     pixel_pca_initial = pca_init.fit_transform(init_pix_scaled)
-    pca_final = PCA(n_components=BEHAVIORAL_PCA_DIM, whiten=True, random_state=42)
+    pca_final = PCA(n_components=behavioral_pca_dim, whiten=True, random_state=42)
     final_pixel_pca = pca_final.fit_transform(pixel_scaled)
 
     # --- Behavioral sufficiency ---

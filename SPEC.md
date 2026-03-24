@@ -5,21 +5,43 @@
 ```
 neural_footprints/
 ├── SPEC.md                   # this file
-├── requirements.txt          # pybullet, numpy, scipy, scikit-learn, matplotlib
-├── config.py                 # all simulation parameters
+├── requirements.txt          # pybullet, numpy, scipy, scikit-learn, matplotlib, snakemake
+├── config.yaml               # all simulation parameters (YAML)
+├── config.py                 # backward-compat shim (loads config.yaml)
+├── Snakefile                 # pipeline DAG (replaces run_all.py)
+├── scripts/
+│   ├── load_config.py        # YAML config loader
+│   ├── io_utils.py           # save/load intermediates (scenes, neural, results)
+│   ├── calibrate.py          # rule: calibrate bullet file size
+│   ├── gen_scenes.py         # rule: generate PyBullet scenes
+│   ├── gen_neural.py         # rule: generate neural activity
+│   ├── run_encoding.py       # rule: encoding model analysis
+│   ├── run_rsa.py            # rule: RSA analysis
+│   ├── run_dissociation.py   # rule: dissociation analysis
+│   └── run_evaluate.py       # rule: evaluation pass/fail
 ├── scene_generator.py        # PyBullet scene generation + raw state capture
 ├── neural_model.py           # random projection: program_state → neural activity
 ├── analyses/
 │   ├── __init__.py
 │   ├── encoding.py           # Simulation 1: encoding model false negatives
 │   ├── rsa.py                # Simulation 2: RSA dominated by render
-│   ├── dissociation.py       # NEW — Simulation 3: R² vs. behavioral sufficiency
+│   ├── dissociation.py       # Simulation 3: R² vs. behavioral sufficiency
 │   └── dynamics.py           # STUB — Buster vs. Aaron temporal models
-├── run_all.py                # orchestrator
+├── evaluation.py             # pass/fail checks
+├── data/                     # expensive intermediates (gitignored)
+│   ├── scenes.npz
+│   └── neural.npz
+├── outputs/                  # cheap derived results (gitignored)
+│   ├── bullet_k.json
+│   ├── encoding_results.json
+│   ├── rsa_results.json
+│   ├── dissociation_results.json
+│   └── evaluation.json
 └── figures/                  # all output figures saved here
     ├── encoding_analysis.png
     ├── rsa_analysis.png
-    └── dissociation.png      # NEW
+    ├── dissociation.png
+    └── predicted_frames.png
 ```
 
 ---
@@ -156,19 +178,20 @@ the world can't be found in the brain data.
 
 ---
 
-## Config Parameters
+## Config Parameters (`config.yaml`)
 
-```python
-N_SCENES = 2000          # number of PyBullet scenes
-N_OBJECTS = 5            # objects per scene
-IMAGE_SIZE = 64          # render resolution
-N_NEURONS = 500          # simulated neurons
-N_TIMESTEPS = 30         # physics steps per scene
-NOISE_LEVEL = 0.3        # noise as fraction of signal std
-RANDOM_SEED = 42
-RSA_SUBSAMPLE = 500      # scenes used for RDM computation
-BULLET_BYTES_K = None    # set by calibration (~28K)
-PIXEL_PCA_DIM = 200      # PCA components for pixel features in analyses
+```yaml
+n_scenes: 2000            # number of PyBullet scenes
+n_objects: 1              # objects per scene
+image_size: 64            # render resolution
+n_neurons: 500            # simulated neurons
+n_timesteps: 30           # physics steps per scene
+noise_level: 0.3          # noise as fraction of signal std
+random_seed: 42
+rsa_subsample: 500        # scenes used for RDM computation
+pixel_pca_dim: 500        # PCA components for pixel features in analyses
+behavioral_pca_dim: 50    # PCA dims for behavioral task MLP
+behavioral_objective: "next_frame_pixels"
 ```
 
 ---

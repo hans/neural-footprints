@@ -12,10 +12,11 @@ from sklearn.model_selection import cross_val_score
 from sklearn.preprocessing import StandardScaler
 import matplotlib.pyplot as plt
 
-from config import PIXEL_PCA_DIM
+from config import PIXEL_PCA_DIM as _CFG_PIXEL_PCA_DIM
 
 
-def run_encoding_analysis(neural_activity, scenes, neural_meta, fig_dir="figures"):
+def run_encoding_analysis(neural_activity, scenes, neural_meta, fig_dir="figures",
+                          *, pixel_pca_dim=None):
     """
     Run encoding model analysis.
 
@@ -26,6 +27,9 @@ def run_encoding_analysis(neural_activity, scenes, neural_meta, fig_dir="figures
     5. Subsampling curve: vary neurons sampled, plot DeltaR² + significance
     6. Control: logistic regression physics_labels -> behavior_label
     """
+    if pixel_pca_dim is None:
+        pixel_pca_dim = _CFG_PIXEL_PCA_DIM
+
     print("\n" + "=" * 60)
     print("SIMULATION 1: Encoding Model False Negatives")
     print("=" * 60)
@@ -38,11 +42,11 @@ def run_encoding_analysis(neural_activity, scenes, neural_meta, fig_dir="figures
     n_scenes, n_neurons = neural_activity.shape
 
     # --- Extract and PCA-reduce pixel slice ---
-    print(f"\nExtracting pixel slice and reducing to {PIXEL_PCA_DIM} PCA components...")
+    print(f"\nExtracting pixel slice and reducing to {pixel_pca_dim} PCA components...")
     pixel_data = program_states[:, pixel_indices]
     scaler_pix = StandardScaler()
     pixel_scaled = scaler_pix.fit_transform(pixel_data)
-    pca = PCA(n_components=PIXEL_PCA_DIM, random_state=42)
+    pca = PCA(n_components=pixel_pca_dim, random_state=42)
     pixel_pca = pca.fit_transform(pixel_scaled)
     print(f"  PCA explained variance: {pca.explained_variance_ratio_.sum():.2%}")
 

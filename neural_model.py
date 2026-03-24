@@ -8,10 +8,10 @@ it emerges from the structure of the program state.
 
 import numpy as np
 
-from config import N_NEURONS, NOISE_LEVEL
+from config import N_NEURONS as _CFG_N_NEURONS, NOISE_LEVEL as _CFG_NOISE_LEVEL
 
 
-def generate_neural_activity(program_states, seed):
+def generate_neural_activity(program_states, seed, *, n_neurons=None, noise_level=None):
     """
     Generate neural activity from raw program states via random linear projection.
 
@@ -28,6 +28,11 @@ def generate_neural_activity(program_states, seed):
     metadata : dict
         Contains W matrix and variance diagnostics.
     """
+    if n_neurons is None:
+        n_neurons = _CFG_N_NEURONS
+    if noise_level is None:
+        noise_level = _CFG_NOISE_LEVEL
+
     rng = np.random.default_rng(seed)
     n_scenes, D = program_states.shape
 
@@ -38,14 +43,14 @@ def generate_neural_activity(program_states, seed):
     standardized = (program_states - means) / stds
 
     # Step 2: Random projection matrix
-    W = rng.normal(0, 1.0 / np.sqrt(D), size=(N_NEURONS, D))
+    W = rng.normal(0, 1.0 / np.sqrt(D), size=(n_neurons, D))
 
     # Step 3: Signal
-    signal = standardized @ W.T  # [n_scenes x N_NEURONS]
+    signal = standardized @ W.T  # [n_scenes x n_neurons]
 
     # Step 4: Noise
     signal_std = signal.std()
-    noise = NOISE_LEVEL * signal_std * rng.normal(0, 1, size=signal.shape)
+    noise = noise_level * signal_std * rng.normal(0, 1, size=signal.shape)
 
     # Step 5: Neural activity
     neural_activity = signal + noise

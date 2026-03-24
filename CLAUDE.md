@@ -5,8 +5,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Running the Project
 
 ```bash
-# Run the full pipeline (generates scenes, neural activity, all analyses, and figures)
-python run_all.py
+# Run the full pipeline via Snakemake (tracks DAG, caches intermediates in data/ and outputs/)
+conda run -n footprints snakemake -j1
+
+# Dry run (show what would execute without running)
+conda run -n footprints snakemake -n
+
+# Run with parallelism (encoding, rsa, dissociation are independent)
+conda run -n footprints snakemake -j3
 ```
 
 ## Architecture
@@ -29,4 +35,4 @@ The key asymmetry: pixels are a **direct linear readout** of bytes in the projec
 
 **Scene design:** Object 0 (launcher, always visible), Object 1 (visible), Object 2 (occluded behind wall at y=0). Occlusion makes pixel-only models fundamentally limited for behavior prediction.
 
-**`BEHAVIORAL_OBJECTIVE`** in `config.py` switches between `"next_frame_pixels"` (MLP R²) and `"kinetic_energy"` (logistic accuracy) for the dissociation analysis.
+**`behavioral_objective`** in `config.yaml` switches between `"next_frame_pixels"` (MLP R²) and `"kinetic_energy"` (logistic accuracy) for the dissociation analysis. All pipeline parameters live in `config.yaml`; `config.py` is a backward-compat shim.
