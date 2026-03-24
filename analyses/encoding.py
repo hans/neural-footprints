@@ -59,13 +59,13 @@ def run_encoding_analysis(neural_activity, scenes, neural_meta, fig_dir="figures
     program_states = scenes['program_states']
     physics_labels = scenes['physics_labels']
     behavior_labels = scenes['behavior_labels']
-    pixel_indices = scenes['metadata']['pixel_indices']
+    render_indices = scenes['metadata']['render_indices']
 
     n_scenes, n_neurons = neural_activity.shape
 
-    # --- Extract and PCA-reduce pixel slice ---
-    print(f"\nExtracting pixel slice and reducing to {pixel_pca_dim} PCA components...")
-    pixel_data = program_states[:, pixel_indices]
+    # --- Extract and PCA-reduce render slice (RGBA + depth + seg) ---
+    print(f"\nExtracting render slice and reducing to {pixel_pca_dim} PCA components...")
+    pixel_data = program_states[:, render_indices]
     pixel_pca, pca = pca_reduce_pixels(pixel_data, pixel_pca_dim)
     print(f"  PCA explained variance: {pca.explained_variance_ratio_.sum():.2%}")
 

@@ -16,6 +16,8 @@ def save_scenes(scenes, path):
     # slice objects aren't JSON-serializable
     pi = meta['pixel_indices']
     meta['pixel_indices'] = [pi.start, pi.stop]
+    ri = meta['render_indices']
+    meta['render_indices'] = [ri.start, ri.stop]
     arrays['metadata_json'] = np.array(json.dumps(meta))
     arrays['scene_configs_json'] = np.array(json.dumps(scenes['scene_configs']))
 
@@ -33,6 +35,8 @@ def load_scenes(path):
     meta = json.loads(str(data['metadata_json']))
     pi = meta['pixel_indices']
     meta['pixel_indices'] = slice(pi[0], pi[1])
+    ri = meta['render_indices']
+    meta['render_indices'] = slice(ri[0], ri[1])
     scenes['metadata'] = meta
 
     scenes['scene_configs'] = json.loads(str(data['scene_configs_json']))
