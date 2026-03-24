@@ -66,7 +66,10 @@ class InverseMLPNet(nn.Module):
             nn.Linear(hidden_dim, hidden_dim),
             nn.ReLU(),
             nn.Dropout(dropout_rate),
-            nn.Linear(hidden_dim, output_dim),
+            nn.Linear(hidden_dim, hidden_dim // 2),
+            nn.ReLU(),
+            nn.Dropout(dropout_rate),
+            nn.Linear(hidden_dim // 2, output_dim),
         )
 
     def forward(self, x):
@@ -102,7 +105,7 @@ class InverseModel:
         self.const_values_ = None     # mean values for constant dims (used in predict)
 
     def fit(self, pixel_pca_two_frame, physics_labels,
-            n_epochs=150, batch_size=64, lr=1e-3, val_frac=0.15, patience=30):
+            n_epochs=300, batch_size=64, lr=1e-3, val_frac=0.15, patience=50):
         """
         Train InverseModel with MC dropout.
 
@@ -524,8 +527,9 @@ def run_predictive_processing_analysis(neural_activity, scenes,
     # Inferred physics supplies observable dims (position, velocity);
     # unobservable intrinsic properties (mass, friction, orientation, ang_vel)
     # come from ground truth since they cannot be recovered from pixels.
-    print(f"\nComputing PP chain R² ({n_oracle} test scenes, deterministic mean)...")
-    inferred_mean_oracle = inv_model.predict(pixel_pca_two_frame[oracle_test_idx])
+    print(f"\nComputing PP chain R² ({n_oracle} test scenes, MC ensemble mean)...")
+    mc_samples = inv_model.predict_stochastic(pixel_pca_two_frame[oracle_test_idx], n_samples=20)
+    inferred_mean_oracle = mc_samples.mean(axis=0)  # [n_oracle × physics_dim]
     for j in range(n_oracle):
         gt = initial_physics[oracle_test_idx[j]]
         # Copy non-observable dims from ground truth
@@ -541,13 +545,13 @@ def run_predictive_processing_analysis(neural_activity, scenes,
     if pp_r2 < prior_r2:
         print(f"  (PP chain R² < prior MLP R²: InverseModel bottleneck operative)")
 
-    # --- 8. Render-only R² ---
-    print("\nComputing render-only R² (full test set)...")
-    render_pred_pca = render_mlp.predict(pixel_pca_two_frame[test_idx])
+    # --- 8. Render-only R² (on same oracle scenes as PP chain for fair comparison) ---
+    print(f"\nComputing render-only R² ({n_oracle} oracle scenes)...")
+    render_pred_pca = render_mlp.predict(pixel_pca_two_frame[oracle_test_idx])
     render_pred_raw = np.clip(
         scaler_pix.inverse_transform(pca_final.inverse_transform(render_pred_pca)), 0, 255
     ).astype(np.float32)
-    render_r2 = _pixel_r2(render_pred_raw, actual_test_raw)
+    render_r2 = _pixel_r2(render_pred_raw, oracle_actual)
     print(f"  Render-only R²: {render_r2:.4f}")
 
     print(f"\n  Summary:")
