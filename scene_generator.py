@@ -71,7 +71,7 @@ def _create_scene(physics_client, rng):
 
     mass = rng.uniform(0.5, 5.0)
     friction = rng.uniform(0.1, 1.0)
-    color = list(rng.uniform(0.1, 1.0, size=3)) + [1.0]
+    color = list(rng.uniform(0.3, 1.0, size=3)) + [1.0]
 
     # Random shape: sphere or box
     if rng.random() < 0.5:
@@ -80,6 +80,7 @@ def _create_scene(physics_client, rng):
                                            physicsClientId=physics_client)
         vis_shape = p.createVisualShape(p.GEOM_SPHERE, radius=radius,
                                         rgbaColor=color,
+                                        specularColor=[0.4, 0.4, 0.4],
                                         physicsClientId=physics_client)
         shape_cfg = {'shape': 'sphere', 'params': {'radius': radius}, 'color': list(color)}
     else:
@@ -88,6 +89,7 @@ def _create_scene(physics_client, rng):
                                            physicsClientId=physics_client)
         vis_shape = p.createVisualShape(p.GEOM_BOX, halfExtents=half_extents,
                                         rgbaColor=color,
+                                        specularColor=[0.4, 0.4, 0.4],
                                         physicsClientId=physics_client)
         shape_cfg = {'shape': 'box', 'params': {'half_extents': half_extents}, 'color': list(color)}
 
@@ -195,6 +197,10 @@ def _render_scene(physics_client):
         width=IMAGE_SIZE, height=IMAGE_SIZE,
         viewMatrix=view_matrix,
         projectionMatrix=proj_matrix,
+        shadow=1,
+        lightDirection=[1, -1, 2],
+        lightColor=[1.0, 1.0, 1.0],
+        lightDistance=5.0,
         physicsClientId=physics_client,
     )
 
@@ -261,14 +267,18 @@ def resimulate_scene(shape_configs, initial_physics_row, *, n_timesteps=None):
                                          physicsClientId=pc)
             vis = p.createVisualShape(p.GEOM_SPHERE,
                                       radius=cfg['params']['radius'],
-                                      rgbaColor=color, physicsClientId=pc)
+                                      rgbaColor=color,
+                                      specularColor=[0.4, 0.4, 0.4],
+                                      physicsClientId=pc)
         else:
             col = p.createCollisionShape(p.GEOM_BOX,
                                          halfExtents=cfg['params']['half_extents'],
                                          physicsClientId=pc)
             vis = p.createVisualShape(p.GEOM_BOX,
                                       halfExtents=cfg['params']['half_extents'],
-                                      rgbaColor=color, physicsClientId=pc)
+                                      rgbaColor=color,
+                                      specularColor=[0.4, 0.4, 0.4],
+                                      physicsClientId=pc)
 
         body_id = p.createMultiBody(
             baseMass=mass,
