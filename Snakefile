@@ -8,6 +8,7 @@ rule all:
         "figures/rsa_analysis.png",
         "figures/dissociation.png",
         "figures/predicted_frames.png",
+        "figures/pca_analysis.png",
         "figures/sample_scenes.png",
 
 
@@ -69,6 +70,17 @@ rule dissociation:
         predicted="figures/predicted_frames.png",
     script:
         "scripts/run_dissociation.py"
+
+
+rule pca:
+    input:
+        scenes="data/scenes.npz",
+        neural="data/neural.npz",
+    output:
+        results="outputs/pca_results.json",
+        figure="figures/pca_analysis.png",
+    script:
+        "scripts/run_pca.py"
 
 
 rule evaluate:

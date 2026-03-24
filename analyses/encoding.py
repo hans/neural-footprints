@@ -15,6 +15,28 @@ import matplotlib.pyplot as plt
 from config import PIXEL_PCA_DIM as _CFG_PIXEL_PCA_DIM
 
 
+def pca_reduce_pixels(pixel_data, n_components, random_state=42):
+    """StandardScaler + PCA on raw pixel data. Returns (pixel_pca, pca_object)."""
+    scaler = StandardScaler()
+    pixel_scaled = scaler.fit_transform(pixel_data)
+    pca = PCA(n_components=n_components, random_state=random_state)
+    pixel_pca = pca.fit_transform(pixel_scaled)
+    return pixel_pca, pca
+
+
+def ridge_r2_per_neuron(X, neural_activity, alphas=None):
+    """Ridge regression per neuron, returns R² array of shape [n_neurons]."""
+    if alphas is None:
+        alphas = np.logspace(-2, 6, 20)
+    n_neurons = neural_activity.shape[1]
+    r2 = np.zeros(n_neurons)
+    for j in range(n_neurons):
+        ridge = RidgeCV(alphas=alphas)
+        ridge.fit(X, neural_activity[:, j])
+        r2[j] = ridge.score(X, neural_activity[:, j])
+    return r2
+
+
 def run_encoding_analysis(neural_activity, scenes, neural_meta, fig_dir="figures",
                           *, pixel_pca_dim=None):
     """
