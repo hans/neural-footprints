@@ -63,9 +63,17 @@ def run_pca_analysis(neural_activity, scenes, neural_meta, fig_dir="figures"):
     ax1.set_xlim(1, n_neurons)
 
     # Plot 2: PC1/PC2 scatter colored by motion direction
+    pc1, pc2 = neural_pca[:, 0], neural_pca[:, 1]
+    # Clip to percentile range to remove outlier distortion
+    lo, hi = 1, 99
+    pc1_lim = np.percentile(pc1, [lo, hi])
+    pc2_lim = np.percentile(pc2, [lo, hi])
     colors = np.where(motion_dir == 1, '#D65F5F', '#4878CF')
-    ax2.scatter(neural_pca[:, 0], neural_pca[:, 1],
-                c=colors, alpha=0.3, s=10, edgecolors='none')
+    ax2.scatter(pc1, pc2, c=colors, alpha=0.3, s=10, edgecolors='none')
+    pad1 = 0.05 * (pc1_lim[1] - pc1_lim[0])
+    pad2 = 0.05 * (pc2_lim[1] - pc2_lim[0])
+    ax2.set_xlim(pc1_lim[0] - pad1, pc1_lim[1] + pad1)
+    ax2.set_ylim(pc2_lim[0] - pad2, pc2_lim[1] + pad2)
     ax2.set_xlabel('PC1')
     ax2.set_ylabel('PC2')
     ax2.set_title('PC1 vs PC2 (colored by motion direction)')
