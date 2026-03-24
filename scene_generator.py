@@ -49,10 +49,11 @@ def _create_scene(physics_client, rng):
     # Central vertical pillar at x=0: VISUAL ONLY (no collision).
     # Objects pass through it freely — physics is unaffected.
     # Camera (at y=-3) cannot see objects behind it when they cross x=0.
+    pillar_gray = float(rng.uniform(0.3, 0.8))
     pillar_vis = p.createVisualShape(
         p.GEOM_BOX,
         halfExtents=[PILLAR_WIDTH / 2, PILLAR_DEPTH / 2, PILLAR_HEIGHT / 2],
-        rgbaColor=[0.5, 0.5, 0.5, 1.0],
+        rgbaColor=[pillar_gray, pillar_gray, pillar_gray, 1.0],
         physicsClientId=physics_client,
     )
     p.createMultiBody(
@@ -71,7 +72,7 @@ def _create_scene(physics_client, rng):
 
     mass = rng.uniform(0.5, 5.0)
     friction = rng.uniform(0.1, 1.0)
-    color = list(rng.uniform(0.3, 1.0, size=3)) + [1.0]
+    color = list(rng.uniform(0.1, 1.0, size=3)) + [1.0]
 
     # Random shape: sphere or box
     if rng.random() < 0.5:
@@ -180,8 +181,28 @@ def _compute_total_kinetic_energy(body_ids, masses, physics_client):
     return ke
 
 
-def _render_scene(physics_client):
+def _sample_lighting(rng):
+    """Sample random lighting parameters for a scene."""
+    return {
+        'lightDirection': [float(rng.uniform(-2, 2)),
+                           float(rng.uniform(-2, 0)),
+                           float(rng.uniform(1, 3))],
+        'lightColor': [float(c) for c in rng.uniform(0.6, 1.0, size=3)],
+        'lightDistance': float(rng.uniform(3.0, 8.0)),
+    }
+
+
+_DEFAULT_LIGHTING = {
+    'lightDirection': [1, -1, 2],
+    'lightColor': [1.0, 1.0, 1.0],
+    'lightDistance': 5.0,
+}
+
+
+def _render_scene(physics_client, lighting=None):
     """Render 64x64 image, return RGBA, depth, segmentation as raw bytes."""
+    if lighting is None:
+        lighting = _DEFAULT_LIGHTING
     view_matrix = p.computeViewMatrix(
         cameraEyePosition=[0, -3, 2],
         cameraTargetPosition=[0, 0, 0.3],
@@ -198,9 +219,9 @@ def _render_scene(physics_client):
         viewMatrix=view_matrix,
         projectionMatrix=proj_matrix,
         shadow=1,
-        lightDirection=[1, -1, 2],
-        lightColor=[1.0, 1.0, 1.0],
-        lightDistance=5.0,
+        lightDirection=lighting['lightDirection'],
+        lightColor=lighting['lightColor'],
+        lightDistance=lighting['lightDistance'],
         physicsClientId=physics_client,
     )
 
@@ -215,10 +236,11 @@ def _render_scene(physics_client):
     return rgba_bytes, depth_bytes, seg_bytes
 
 
-def resimulate_scene(shape_configs, initial_physics_row, *, n_timesteps=None):
+def resimulate_scene(shape_configs, initial_physics_row, *,
+                     n_timesteps=None, return_program_state=False, bullet_k=None):
     """
     Rebuild a scene from stored shape configs + initial physics state, step
-    N_TIMESTEPS, and return the rendered RGBA image as uint8 [IMAGE_SIZE, IMAGE_SIZE, 4].
+    N_TIMESTEPS, and return the rendered result.
 
     Used for oracle physics-model prediction: given the full initial state
     (position, velocity, mass, friction, shape, color), the simulation is
@@ -229,6 +251,15 @@ def resimulate_scene(shape_configs, initial_physics_row, *, n_timesteps=None):
                              'shape' ('sphere'|'box'), 'params', 'color'
         initial_physics_row: 1-D array of length 15*N_OBJECTS:
                              per object: pos(3), orn(4), lin_vel(3), ang_vel(3), mass(1), friction(1)
+        return_program_state: if True, return full program_state float32 vector
+                             (all render buffers + bullet blob), identical to
+                             what generate_scenes() produces. Requires bullet_k.
+        bullet_k:            padding constant for bullet blob (required when
+                             return_program_state=True).
+
+    Returns:
+        If return_program_state=False: RGBA uint8 [IMAGE_SIZE, IMAGE_SIZE, 4]
+        If return_program_state=True:  float32 [D] program_state vector
     """
     if n_timesteps is None:
         n_timesteps = _CFG_N_TIMESTEPS
@@ -295,10 +326,19 @@ def resimulate_scene(shape_configs, initial_physics_row, *, n_timesteps=None):
     for _ in range(n_timesteps):
         p.stepSimulation(physicsClientId=pc)
 
-    rgba_bytes, _, _ = _render_scene(pc)
-    p.disconnect(pc)
-
-    return np.frombuffer(rgba_bytes, dtype=np.uint8).reshape(IMAGE_SIZE, IMAGE_SIZE, 4)
+    if return_program_state:
+        if bullet_k is None:
+            raise ValueError("bullet_k required when return_program_state=True")
+        rgba_bytes, depth_bytes, seg_bytes = _render_scene(pc)
+        bullet_bytes = _save_bullet_state(pc)
+        p.disconnect(pc)
+        return _build_program_state(rgba_bytes, depth_bytes, seg_bytes,
+                                    bullet_bytes, bullet_k)
+    else:
+        rgba_bytes, _, _ = _render_scene(pc)
+        p.disconnect(pc)
+        return np.frombuffer(rgba_bytes, dtype=np.uint8).reshape(
+            IMAGE_SIZE, IMAGE_SIZE, 4)
 
 
 def _save_bullet_state(physics_client):
@@ -399,9 +439,12 @@ def generate_scenes(n_scenes, seed, bullet_k, *, n_timesteps=None):
         body_ids, masses, frictions, is_occluded, shape_configs = _create_scene(pc, scene_rng)
         all_scene_configs.append(shape_configs)
 
+        # Sample lighting once per scene (consistent across initial + final frames)
+        lighting = _sample_lighting(scene_rng)
+
         # Capture initial state (t=0) before stepping
         initial_physics_labels[i] = _collect_physics_labels(body_ids, masses, frictions, pc)
-        init_rgba_bytes, _, _ = _render_scene(pc)
+        init_rgba_bytes, _, _ = _render_scene(pc, lighting=lighting)
         initial_renders[i] = np.frombuffer(init_rgba_bytes, dtype=np.uint8).astype(np.float32)
 
         # Step physics
@@ -413,7 +456,7 @@ def generate_scenes(n_scenes, seed, bullet_k, *, n_timesteps=None):
         kinetic_energies[i] = _compute_total_kinetic_energy(body_ids, masses, pc)
 
         # Render final frame
-        rgba_bytes, depth_bytes, seg_bytes = _render_scene(pc)
+        rgba_bytes, depth_bytes, seg_bytes = _render_scene(pc, lighting=lighting)
 
         # Save bullet state
         bullet_bytes = _save_bullet_state(pc)
