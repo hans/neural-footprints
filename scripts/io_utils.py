@@ -68,16 +68,22 @@ def load_neural(path):
     return neural_activity, meta
 
 
+def _convert_numpy(obj):
+    """Recursively convert numpy types to Python natives for JSON serialization."""
+    if isinstance(obj, dict):
+        return {k: _convert_numpy(v) for k, v in obj.items()}
+    elif isinstance(obj, (list, tuple)):
+        return [_convert_numpy(v) for v in obj]
+    elif hasattr(obj, 'tolist'):
+        return obj.tolist()
+    elif isinstance(obj, (np.floating, np.integer, np.bool_)):
+        return obj.item()
+    return obj
+
+
 def save_results(results, path):
     """Save analysis results dict to JSON. Converts numpy types."""
-    serializable = {}
-    for k, v in results.items():
-        if hasattr(v, 'tolist'):
-            serializable[k] = v.tolist()
-        elif isinstance(v, (np.floating, np.integer)):
-            serializable[k] = v.item()
-        else:
-            serializable[k] = v
+    serializable = _convert_numpy(results)
     with open(path, 'w') as f:
         json.dump(serializable, f, indent=2)
 
