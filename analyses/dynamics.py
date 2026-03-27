@@ -18,6 +18,7 @@ encoding) is exactly what you need for temporal prediction.
 
 import numpy as np
 from sklearn.decomposition import PCA
+from sklearn.model_selection import cross_val_predict
 from sklearn.preprocessing import StandardScaler
 import matplotlib.pyplot as plt
 
@@ -110,10 +111,8 @@ def run_dynamics_analysis(neural_activity, scenes, neural_meta,
     pca_init = PCA(n_components=behavioral_pca_dim, whiten=True, random_state=42)
     init_pixel_pca = pca_init.fit_transform(init_scaled)
 
-    # Train MLP and predict
-    mlp = _make_mlp()
-    mlp.fit(init_pixel_pca, final_pixel_pca)
-    pred_final_pca = mlp.predict(init_pixel_pca)
+    # Cross-validated MLP predictions (out-of-fold to avoid double-dipping)
+    pred_final_pca = cross_val_predict(_make_mlp(), init_pixel_pca, final_pixel_pca, cv=5)
 
     # Inverse-transform back to pixel space
     pred_final_scaled = pca_final.inverse_transform(pred_final_pca)
