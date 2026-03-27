@@ -1,8 +1,5 @@
 {
   "setup-worktree": [
-    "CPLUS_INCLUDE_PATH=$(xcrun --show-sdk-path)/usr/include/c++/v1 uv sync",
-    "ln -sf $ROOT_WORKTREE_PATH/data data",
-    "ln -sf $ROOT_WORKTREE_PATH/outputs outputs",
-    "ln -sf $ROOT_WORKTREE_PATH/figures figures"
+    "CPLUS_INCLUDE_PATH=$(xcrun --show-sdk-path)/usr/include/c++/v1 uv sync"
   ]
 }
