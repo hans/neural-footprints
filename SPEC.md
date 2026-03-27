@@ -100,8 +100,8 @@ lossy, low-dimensional summary** of the engine state that entered the projection
 
 Three panels:
 
-1. **R² bar plot.** Two bars: "Pixels only" (R² ≈ 0.436) vs. "Pixels + Physics"
-   (R² ≈ 0.451). Near-identical height. Annotated with ΔR² = 0.015.
+1. **R² bar plot.** Two bars: "Pixels only" vs. "Pixels + Physics".
+   Near-identical height, annotated with ΔR².
    Message: adding physics to the encoding model does essentially nothing.
 
 2. **Subsampling curve.** X-axis: number of neurons sampled (10 → 500).
@@ -110,7 +110,7 @@ Three panels:
    TODO: add a complementary curve for render detectability to show
    differential degradation rates.
 
-3. **Control accuracy.** Single bar: physics → behavior prediction at 99.6%.
+3. **Control accuracy.** Single bar: physics → behavior prediction accuracy.
    Establishes that the physics labels are genuinely informative — the failure
    to detect them is a methodological failure, not a sign they're unimportant.
 
@@ -124,9 +124,9 @@ Four panels:
 2. **Render RDM** heatmap
 3. **Physics RDM** heatmap
 4. **Correlation bar plot.** Three bars:
-   - Neural ↔ Render: r = 0.238 (dominant)
-   - Neural ↔ Physics: r = 0.040 (small)
-   - Neural ↔ Physics | Render: r = 0.030 (near zero after partialing)
+   - Neural ↔ Render (dominant)
+   - Neural ↔ Physics (small)
+   - Neural ↔ Physics | Render (near zero after partialing)
 
    Message: neural similarity structure tracks render structure, not physics.
    What little physics signal exists is explained away by shared render variance.
@@ -147,8 +147,8 @@ Two "models" are compared:
 
 | Model | What it uses | Neural R² | Behavior prediction |
 |---|---|---|---|
-| Render model | pixel PCA (200 dims) | HIGH (~0.44) | LOW (near chance) |
-| Physics model | API physics labels (75 dims) | LOW (ΔR² ~0.015) | HIGH (~99.6%) |
+| Render model | pixel PCA | HIGH | LOW (near chance) |
+| Physics model | API physics labels | LOW | HIGH |
 
 The render model accounts for most of the neural variance but is useless for
 predicting what happens in the scene. The physics model is sufficient for
@@ -157,24 +157,17 @@ explaining environment dynamics but adds basically nothing to the encoding model
 **Panel layout — 2 panels side by side:**
 
 1. **Left panel: Neural R² contribution.**
-   Two bars: Render model R² (tall, ~0.44) vs. Physics model unique R² (short, ~0.015).
+   Two bars: Render model R² (tall) vs. Physics model unique R² (short).
    Y-axis: "Neural variance explained (R²)"
 
 2. **Right panel: Behavioral prediction accuracy.**
-   Two bars: Render model → behavior (near chance) vs. Physics model → behavior (~99.6%).
+   Two bars: Render model → behavior (near chance) vs. Physics model → behavior (high).
    Y-axis: "Behavior prediction accuracy"
    Dashed line at 50% (chance).
 
 The visual: the tall bar on the left becomes the short bar on the right, and vice versa.
 The model that explains the brain data can't explain the world; the model that explains
 the world can't be found in the brain data.
-
-**What needs to be computed:**
-- Render → behavior: logistic regression from pixel_PCA → behavior_label (cross-validated).
-  Expected: poor, because pixel similarity doesn't predict which objects moved.
-- Physics → behavior: already computed (99.6%).
-- Render → neural R²: already computed (0.436).
-- Physics unique → neural ΔR²: already computed (0.015).
 
 ---
 
@@ -192,30 +185,6 @@ rsa_subsample: 500        # scenes used for RDM computation
 pixel_pca_dim: 500        # PCA components for pixel features in analyses
 behavioral_pca_dim: 50    # PCA dims for behavioral task MLP
 behavioral_objective: "next_frame_pixels"
-```
-
----
-
-## Current Results (from last run)
-
-```
-Variance diagnostic:
-  D_render = 49,152 dims, D_physics = 28,872 dims (ratio 1.7x)
-  Render variance fraction: 59.4%
-  Physics variance fraction: 40.6%
-
-Encoding model:
-  R² pixels only:        0.4356
-  R² pixels + physics:   0.4505
-  ΔR²:                   0.0149
-
-Control:
-  Physics → behavior:    99.60%
-
-RSA:
-  Neural ↔ Render:       r = 0.238
-  Neural ↔ Physics:      r = 0.040
-  Neural ↔ Phys|Render:  r = 0.030
 ```
 
 ---
