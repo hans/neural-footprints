@@ -11,6 +11,8 @@ def save_scenes(scenes, path):
                 'initial_renders', 'behavior_labels', 'kinetic_energies']:
         arrays[key] = scenes[key]
 
+    arrays['pillar_grays'] = np.array(scenes['pillar_grays'])
+
     # Serialize non-array fields as JSON strings
     meta = dict(scenes['metadata'])
     # slice objects aren't JSON-serializable
@@ -40,6 +42,7 @@ def load_scenes(path):
     scenes['metadata'] = meta
 
     scenes['scene_configs'] = json.loads(str(data['scene_configs_json']))
+    scenes['pillar_grays'] = data['pillar_grays'].tolist()
     return scenes
 
 
