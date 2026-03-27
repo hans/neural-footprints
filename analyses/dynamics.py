@@ -69,6 +69,7 @@ def run_dynamics_analysis(neural_activity, scenes, neural_meta,
     scene_configs = scenes['scene_configs']
     pillar_grays = scenes['pillar_grays']
     pixel_indices = scenes['metadata']['pixel_indices']
+    render_indices = scenes['metadata']['render_indices']
 
     n_scenes, n_neurons = neural_activity.shape
 
@@ -86,9 +87,9 @@ def run_dynamics_analysis(neural_activity, scenes, neural_meta,
             pillar_gray=pillar_grays[i],
         )
 
-    print("  PCA-reducing resimulated pixels for encoding...")
-    resim_pixel_data = resim_program_states[:, pixel_indices]
-    resim_pixel_pca, _ = pca_reduce_pixels(resim_pixel_data, pixel_pca_dim)
+    print("  PCA-reducing resimulated render bytes for encoding...")
+    resim_render_data = resim_program_states[:, render_indices]
+    resim_pixel_pca, _ = pca_reduce_pixels(resim_render_data, pixel_pca_dim)
 
     print("  Ridge regression: resimulated pixels → neural activity...")
     r2_physics_forward = ridge_r2_per_neuron(resim_pixel_pca, neural_activity)
