@@ -127,7 +127,7 @@ def _create_scene(physics_client, rng):
     p.resetBaseVelocity(body_ids[0], linearVelocity=[x_vel, 0.0, 0.0],
                         physicsClientId=physics_client)
 
-    return body_ids, masses, frictions, is_occluded, shape_configs
+    return body_ids, masses, frictions, is_occluded, shape_configs, pillar_gray
 
 
 def _get_initial_positions(body_ids, physics_client):
@@ -264,7 +264,8 @@ def _render_scene(physics_client, lighting=None):
 
 
 def resimulate_scene(shape_configs, initial_physics_row, *,
-                     n_timesteps=None, return_program_state=False):
+                     n_timesteps=None, return_program_state=False,
+                     pillar_gray=0.5):
     """
     Rebuild a scene from stored shape configs + initial physics state, step
     N_TIMESTEPS, and return the rendered result.
@@ -295,7 +296,7 @@ def resimulate_scene(shape_configs, initial_physics_row, *,
     pillar_vis = p.createVisualShape(
         p.GEOM_BOX,
         halfExtents=[PILLAR_WIDTH / 2, PILLAR_DEPTH / 2, PILLAR_HEIGHT / 2],
-        rgbaColor=[0.5, 0.5, 0.5, 1.0],
+        rgbaColor=[pillar_gray, pillar_gray, pillar_gray, 1.0],
         physicsClientId=pc,
     )
     p.createMultiBody(
@@ -416,6 +417,7 @@ def generate_scenes(n_scenes, seed, *, n_timesteps=None):
     initial_renders = np.zeros((n_scenes, rgba_bytes_count), dtype=np.float32)
     kinetic_energies = np.zeros(n_scenes, dtype=np.float32)
     all_scene_configs = []
+    all_pillar_grays = []
 
     for i in range(n_scenes):
         if (i + 1) % 100 == 0 or i == 0:
@@ -425,8 +427,9 @@ def generate_scenes(n_scenes, seed, *, n_timesteps=None):
         scene_seed = rng.integers(0, 2**31)
         scene_rng = np.random.default_rng(scene_seed)
 
-        body_ids, masses, frictions, is_occluded, shape_configs = _create_scene(pc, scene_rng)
+        body_ids, masses, frictions, is_occluded, shape_configs, pillar_gray = _create_scene(pc, scene_rng)
         all_scene_configs.append(shape_configs)
+        all_pillar_grays.append(pillar_gray)
 
         # Sample lighting once per scene (consistent across initial + final frames)
         lighting = _sample_lighting(scene_rng)
@@ -484,6 +487,7 @@ def generate_scenes(n_scenes, seed, *, n_timesteps=None):
         'behavior_labels': behavior_labels,
         'kinetic_energies': kinetic_energies,
         'scene_configs': all_scene_configs,
+        'pillar_grays': all_pillar_grays,
         'metadata': metadata,
     }
 
