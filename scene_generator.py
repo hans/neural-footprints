@@ -49,10 +49,11 @@ def _create_scene(physics_client, rng):
     # Central vertical pillar at x=0: VISUAL ONLY (no collision).
     # Objects pass through it freely — physics is unaffected.
     # Camera (at y=-3) cannot see objects behind it when they cross x=0.
+    pillar_gray = float(rng.uniform(0.3, 0.8))
     pillar_vis = p.createVisualShape(
         p.GEOM_BOX,
         halfExtents=[PILLAR_WIDTH / 2, PILLAR_DEPTH / 2, PILLAR_HEIGHT / 2],
-        rgbaColor=[0.5, 0.5, 0.5, 1.0],
+        rgbaColor=[pillar_gray, pillar_gray, pillar_gray, 1.0],
         physicsClientId=physics_client,
     )
     p.createMultiBody(
@@ -121,7 +122,7 @@ def _create_scene(physics_client, rng):
     p.resetBaseVelocity(body_ids[0], linearVelocity=[x_vel, 0.0, 0.0],
                         physicsClientId=physics_client)
 
-    return body_ids, masses, frictions, is_occluded, shape_configs
+    return body_ids, masses, frictions, is_occluded, shape_configs, pillar_gray
 
 
 def _get_initial_positions(body_ids, physics_client):
@@ -209,9 +210,9 @@ def _render_scene(physics_client):
     return rgba_bytes, depth_bytes, seg_bytes
 
 
-def resimulate_scene(shape_configs, initial_physics_row):
+def resimulate_scene(scene_config, initial_physics_row):
     """
-    Rebuild a scene from stored shape configs + initial physics state, step
+    Rebuild a scene from stored scene config + initial physics state, step
     N_TIMESTEPS, and return the rendered RGBA image as uint8 [IMAGE_SIZE, IMAGE_SIZE, 4].
 
     Used for oracle physics-model prediction: given the full initial state
@@ -219,11 +220,14 @@ def resimulate_scene(shape_configs, initial_physics_row):
     deterministic and produces a pixel-perfect final frame.
 
     Args:
-        shape_configs:       list of dicts (one per object) with keys
-                             'shape' ('sphere'|'box'), 'params', 'color'
+        scene_config:        dict with keys 'shapes' (list of per-object dicts
+                             with 'shape', 'params', 'color') and 'pillar_gray'
         initial_physics_row: 1-D array of length 15*N_OBJECTS:
                              per object: pos(3), orn(4), lin_vel(3), ang_vel(3), mass(1), friction(1)
     """
+    shape_configs = scene_config['shapes']
+    pillar_gray = scene_config['pillar_gray']
+
     pc = p.connect(p.DIRECT)
     p.setAdditionalSearchPath(pybullet_data.getDataPath(), physicsClientId=pc)
     p.setGravity(0, 0, -9.81, physicsClientId=pc)
@@ -232,7 +236,7 @@ def resimulate_scene(shape_configs, initial_physics_row):
     pillar_vis = p.createVisualShape(
         p.GEOM_BOX,
         halfExtents=[PILLAR_WIDTH / 2, PILLAR_DEPTH / 2, PILLAR_HEIGHT / 2],
-        rgbaColor=[0.5, 0.5, 0.5, 1.0],
+        rgbaColor=[pillar_gray, pillar_gray, pillar_gray, 1.0],
         physicsClientId=pc,
     )
     p.createMultiBody(
@@ -324,7 +328,7 @@ def calibrate_bullet_size(n_samples=50, seed=0):
         pc = p.connect(p.DIRECT)
         scene_seed = rng.integers(0, 2**31)
         scene_rng = np.random.default_rng(scene_seed)
-        body_ids, masses, frictions, is_occluded, _ = _create_scene(pc, scene_rng)
+        body_ids, masses, frictions, is_occluded, _, _ = _create_scene(pc, scene_rng)
 
         # Step physics
         for _ in range(N_TIMESTEPS):
@@ -381,8 +385,8 @@ def generate_scenes(n_scenes, seed, bullet_k):
         scene_seed = rng.integers(0, 2**31)
         scene_rng = np.random.default_rng(scene_seed)
 
-        body_ids, masses, frictions, is_occluded, shape_configs = _create_scene(pc, scene_rng)
-        all_scene_configs.append(shape_configs)
+        body_ids, masses, frictions, is_occluded, shape_configs, pillar_gray = _create_scene(pc, scene_rng)
+        all_scene_configs.append({'shapes': shape_configs, 'pillar_gray': pillar_gray})
 
         # Capture initial state (t=0) before stepping
         initial_physics_labels[i] = _collect_physics_labels(body_ids, masses, frictions, pc)
