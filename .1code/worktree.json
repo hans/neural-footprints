@@ -1,0 +1,8 @@
+{
+  "setup-worktree": [
+    "conda run -n footprints pip install -r requirements.txt",
+    "ln -sf $ROOT_WORKTREE_PATH/data data",
+    "ln -sf $ROOT_WORKTREE_PATH/outputs outputs",
+    "ln -sf $ROOT_WORKTREE_PATH/figures figures"
+  ]
+}
