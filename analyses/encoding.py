@@ -8,7 +8,7 @@ produces negligible improvement in R², despite physics being causally operative
 import numpy as np
 from sklearn.decomposition import PCA
 from sklearn.linear_model import RidgeCV, LogisticRegressionCV
-from sklearn.model_selection import cross_val_score
+from sklearn.model_selection import cross_val_predict, cross_val_score
 from sklearn.preprocessing import StandardScaler
 import matplotlib.pyplot as plt
 
@@ -24,17 +24,15 @@ def pca_reduce_pixels(pixel_data, n_components, random_state=42):
     return pixel_pca, pca
 
 
-def ridge_r2_per_neuron(X, neural_activity, alphas=None):
-    """Ridge regression per neuron, returns R² array of shape [n_neurons]."""
+def ridge_r2_per_neuron(X, neural_activity, alphas=None, cv=5):
+    """Cross-validated ridge regression, returns R² array of shape [n_neurons]."""
     if alphas is None:
         alphas = np.logspace(-2, 6, 20)
-    n_neurons = neural_activity.shape[1]
-    r2 = np.zeros(n_neurons)
-    for j in range(n_neurons):
-        ridge = RidgeCV(alphas=alphas)
-        ridge.fit(X, neural_activity[:, j])
-        r2[j] = ridge.score(X, neural_activity[:, j])
-    return r2
+    ridge = RidgeCV(alphas=alphas, alpha_per_target=True)
+    predictions = cross_val_predict(ridge, X, neural_activity, cv=cv)
+    ss_res = ((neural_activity - predictions) ** 2).sum(axis=0)
+    ss_tot = ((neural_activity - neural_activity.mean(axis=0)) ** 2).sum(axis=0)
+    return 1 - ss_res / ss_tot
 
 
 def run_encoding_analysis(neural_activity, scenes, neural_meta, fig_dir="figures",
