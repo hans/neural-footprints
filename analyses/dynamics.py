@@ -68,7 +68,6 @@ def run_dynamics_analysis(neural_activity, scenes, neural_meta,
     initial_renders = scenes['initial_renders']
     scene_configs = scenes['scene_configs']
     pixel_indices = scenes['metadata']['pixel_indices']
-    bullet_k = scenes['metadata']['D_physics_bytes']
 
     n_scenes, n_neurons = neural_activity.shape
 
@@ -82,7 +81,7 @@ def run_dynamics_analysis(neural_activity, scenes, neural_meta,
             print(f"  Resimulating scene {i+1}/{n_scenes}...")
         resim_program_states[i] = resimulate_scene(
             scene_configs[i], initial_physics_labels[i],
-            return_program_state=True, bullet_k=bullet_k,
+            return_program_state=True,
         )
 
     print("  PCA-reducing resimulated pixels for encoding...")

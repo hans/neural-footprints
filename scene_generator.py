@@ -2,17 +2,20 @@
 Scene generation using PyBullet.
 
 Generates physics scenes with a central vertical occluding pillar, captures
-raw program state (render buffers + saveBullet blob), and collects API-level
-physics labels for analysis (never used in neural generation).
+raw program state (render buffers + physics labels + scene config), and
+collects API-level physics labels for analysis.
 
 Key design choices that make pixels insufficient for behavior prediction:
   1. A central pillar at x=0 may occlude the object in the final frame
   2. Behavior label (KE) uses final velocities — invisible in pixels
   3. Initial pixels cannot predict whether the object ends up behind the pillar
+
+The program_state contains everything sufficient to resimulate the scene:
+  render_bytes (49,152 floats) + physics_labels (15) + scene_config (9) = 49,176 floats.
+Physics+config is ~0.05% of the signal — swamped by pixels in the random projection.
 """
 
 import os
-import tempfile
 import numpy as np
 import pybullet as p
 import pybullet_data
@@ -164,6 +167,30 @@ def _collect_physics_labels(body_ids, masses, frictions, physics_client):
     return np.array(labels, dtype=np.float32)
 
 
+def _encode_scene_config(shape_configs):
+    """
+    Encode scene shape configs into a fixed-length float32 vector.
+
+    Per object: shape_is_box(1), radius(1), half_extents(3), color(4) = 9 floats.
+    Unused fields zeroed (radius=0 for box, half_extents=[0,0,0] for sphere).
+    """
+    vec = []
+    for cfg in shape_configs:
+        if cfg['shape'] == 'box':
+            vec.append(1.0)
+            vec.append(0.0)
+            vec.extend(cfg['params']['half_extents'])
+        else:
+            vec.append(0.0)
+            vec.append(cfg['params']['radius'])
+            vec.extend([0.0, 0.0, 0.0])
+        vec.extend(cfg['color'])
+    return np.array(vec, dtype=np.float32)
+
+
+SCENE_CONFIG_DIM = 9  # per object
+
+
 def _compute_total_kinetic_energy(body_ids, masses, physics_client):
     """
     Total kinetic energy of all objects: KE = Σ 0.5 * mass_i * |lin_vel_i|².
@@ -237,7 +264,7 @@ def _render_scene(physics_client, lighting=None):
 
 
 def resimulate_scene(shape_configs, initial_physics_row, *,
-                     n_timesteps=None, return_program_state=False, bullet_k=None):
+                     n_timesteps=None, return_program_state=False):
     """
     Rebuild a scene from stored shape configs + initial physics state, step
     N_TIMESTEPS, and return the rendered result.
@@ -252,10 +279,7 @@ def resimulate_scene(shape_configs, initial_physics_row, *,
         initial_physics_row: 1-D array of length 15*N_OBJECTS:
                              per object: pos(3), orn(4), lin_vel(3), ang_vel(3), mass(1), friction(1)
         return_program_state: if True, return full program_state float32 vector
-                             (all render buffers + bullet blob), identical to
-                             what generate_scenes() produces. Requires bullet_k.
-        bullet_k:            padding constant for bullet blob (required when
-                             return_program_state=True).
+                             (render buffers + physics labels + scene config).
 
     Returns:
         If return_program_state=False: RGBA uint8 [IMAGE_SIZE, IMAGE_SIZE, 4]
@@ -282,6 +306,9 @@ def resimulate_scene(shape_configs, initial_physics_row, *,
         physicsClientId=pc,
     )
 
+    body_ids = []
+    masses_list = []
+    frictions_list = []
     for i, cfg in enumerate(shape_configs):
         off = i * 15
         pos = initial_physics_row[off:off + 3].tolist()
@@ -322,18 +349,20 @@ def resimulate_scene(shape_configs, initial_physics_row, *,
         p.changeDynamics(body_id, -1, lateralFriction=friction, physicsClientId=pc)
         p.resetBaseVelocity(body_id, linearVelocity=lin_vel,
                             angularVelocity=ang_vel, physicsClientId=pc)
+        body_ids.append(body_id)
+        masses_list.append(mass)
+        frictions_list.append(friction)
 
     for _ in range(n_timesteps):
         p.stepSimulation(physicsClientId=pc)
 
     if return_program_state:
-        if bullet_k is None:
-            raise ValueError("bullet_k required when return_program_state=True")
         rgba_bytes, depth_bytes, seg_bytes = _render_scene(pc)
-        bullet_bytes = _save_bullet_state(pc)
+        final_physics = _collect_physics_labels(body_ids, masses_list, frictions_list, pc)
+        scene_config_vec = _encode_scene_config(shape_configs)
         p.disconnect(pc)
         return _build_program_state(rgba_bytes, depth_bytes, seg_bytes,
-                                    bullet_bytes, bullet_k)
+                                    final_physics, scene_config_vec)
     else:
         rgba_bytes, _, _ = _render_scene(pc)
         p.disconnect(pc)
@@ -341,66 +370,26 @@ def resimulate_scene(shape_configs, initial_physics_row, *,
             IMAGE_SIZE, IMAGE_SIZE, 4)
 
 
-def _save_bullet_state(physics_client):
-    """Save bullet state to temp file, read back as raw bytes."""
-    tmp_path = os.path.join(tempfile.gettempdir(), "scene_state.bullet")
-    p.saveBullet(tmp_path, physicsClientId=physics_client)
-    with open(tmp_path, "rb") as f:
-        bullet_bytes = f.read()
-    os.remove(tmp_path)
-    return bullet_bytes
-
-
-def _build_program_state(rgba_bytes, depth_bytes, seg_bytes, bullet_bytes, bullet_k):
+def _build_program_state(rgba_bytes, depth_bytes, seg_bytes, physics_labels, scene_config_vec):
     """
-    Concatenate all raw bytes, pad/truncate bullet to K, cast to float32.
+    Concatenate render bytes (uint8->float32) with physics labels and scene config
+    (native float32).
+
+    Render: 49,152 floats (values 0-255, from byte casts)
+    Physics+config: 24 floats (native float32, varying ranges)
+    The z-scoring in neural_model.py handles the scale difference.
     """
-    # Pad or truncate bullet bytes
-    if len(bullet_bytes) < bullet_k:
-        bullet_bytes = bullet_bytes + b'\x00' * (bullet_k - len(bullet_bytes))
-    else:
-        bullet_bytes = bullet_bytes[:bullet_k]
-
-    all_bytes = rgba_bytes + depth_bytes + seg_bytes + bullet_bytes
-    # Cast to uint8 array, then to float32
-    uint8_arr = np.frombuffer(all_bytes, dtype=np.uint8)
-    return uint8_arr.astype(np.float32)
+    all_render_bytes = rgba_bytes + depth_bytes + seg_bytes
+    render_vec = np.frombuffer(all_render_bytes, dtype=np.uint8).astype(np.float32)
+    return np.concatenate([render_vec, physics_labels, scene_config_vec])
 
 
-def calibrate_bullet_size(n_samples=50, seed=0, *, n_timesteps=None):
-    """Run n_samples scenes, return max .bullet file size + 20% buffer for padding constant K."""
-    if n_timesteps is None:
-        n_timesteps = _CFG_N_TIMESTEPS
-    rng = np.random.default_rng(seed)
-    max_size = 0
-
-    for i in range(n_samples):
-        pc = p.connect(p.DIRECT)
-        scene_seed = rng.integers(0, 2**31)
-        scene_rng = np.random.default_rng(scene_seed)
-        body_ids, masses, frictions, is_occluded, _ = _create_scene(pc, scene_rng)
-
-        # Step physics
-        for _ in range(n_timesteps):
-            p.stepSimulation(physicsClientId=pc)
-
-        bullet_bytes = _save_bullet_state(pc)
-        max_size = max(max_size, len(bullet_bytes))
-        p.disconnect(pc)
-
-    k = int(max_size * 1.2)
-    # Round up to multiple of 4 for float32 alignment
-    k = ((k + 3) // 4) * 4
-    print(f"Calibration: max .bullet size = {max_size} bytes, K = {k} bytes (with 20% buffer)")
-    return k
-
-
-def generate_scenes(n_scenes, seed, bullet_k, *, n_timesteps=None):
+def generate_scenes(n_scenes, seed, *, n_timesteps=None):
     """
     Generate n_scenes PyBullet scenes, returning program states and analysis labels.
 
     Returns dict with:
-      'program_states':         ndarray [n_scenes x D]   — final render + bullet blob
+      'program_states':         ndarray [n_scenes x D]   — render + physics_labels + scene_config
       'physics_labels':         ndarray [n_scenes x 15*N_OBJECTS]  — final-state API labels
       'initial_physics_labels': ndarray [n_scenes x 15*N_OBJECTS]  — t=0 API labels
       'initial_renders':        ndarray [n_scenes x IMAGE_SIZE**2*4]  — t=0 RGBA bytes
@@ -417,10 +406,10 @@ def generate_scenes(n_scenes, seed, bullet_k, *, n_timesteps=None):
     depth_bytes_count = IMAGE_SIZE * IMAGE_SIZE * 4  # float32 bytes
     seg_bytes_count = IMAGE_SIZE * IMAGE_SIZE * 4    # int32 bytes
     render_bytes_total = rgba_bytes_count + depth_bytes_count + seg_bytes_count
-    total_bytes = render_bytes_total + bullet_k
-    D = total_bytes  # each byte becomes one float32
 
     physics_dim = 15 * N_OBJECTS
+    config_dim = SCENE_CONFIG_DIM * N_OBJECTS
+    D = render_bytes_total + physics_dim + config_dim
     program_states = np.zeros((n_scenes, D), dtype=np.float32)
     physics_labels = np.zeros((n_scenes, physics_dim), dtype=np.float32)
     initial_physics_labels = np.zeros((n_scenes, physics_dim), dtype=np.float32)
@@ -458,12 +447,10 @@ def generate_scenes(n_scenes, seed, bullet_k, *, n_timesteps=None):
         # Render final frame
         rgba_bytes, depth_bytes, seg_bytes = _render_scene(pc, lighting=lighting)
 
-        # Save bullet state
-        bullet_bytes = _save_bullet_state(pc)
-
-        # Build program state
+        # Build program state: render + physics labels + scene config
+        scene_config_vec = _encode_scene_config(shape_configs)
         program_states[i] = _build_program_state(
-            rgba_bytes, depth_bytes, seg_bytes, bullet_bytes, bullet_k
+            rgba_bytes, depth_bytes, seg_bytes, physics_labels[i], scene_config_vec
         )
 
         p.disconnect(pc)
@@ -477,7 +464,8 @@ def generate_scenes(n_scenes, seed, bullet_k, *, n_timesteps=None):
     # Metadata
     metadata = {
         'D_render_bytes': render_bytes_total,
-        'D_physics_bytes': bullet_k,
+        'D_physics_labels': physics_dim,
+        'D_scene_config': config_dim,
         'D_total': D,
         'pixel_indices': slice(0, rgba_bytes_count),       # RGBA only (for visualization / pixel prediction)
         'render_indices': slice(0, render_bytes_total),    # RGBA + depth + seg (for encoding models)

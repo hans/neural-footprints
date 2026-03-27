@@ -1,4 +1,4 @@
-import sys, os, json
+import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from load_config import load_config
@@ -7,11 +7,8 @@ from scene_generator import generate_scenes, save_sample_renders
 
 cfg = load_config()
 
-with open(snakemake.input.bullet_k) as f:
-    bullet_k = json.load(f)['bullet_k']
-
 scenes = generate_scenes(
-    cfg['n_scenes'], cfg['random_seed'], bullet_k,
+    cfg['n_scenes'], cfg['random_seed'],
     n_timesteps=cfg['n_timesteps'],
 )
 

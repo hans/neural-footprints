@@ -80,7 +80,7 @@ def print_variance_diagnostic(scene_metadata, neural_metadata):
     This ratio is NOT set by a parameter — it is printed as a finding.
     """
     D_render = scene_metadata['D_render_bytes']
-    D_physics = scene_metadata['D_physics_bytes']
+    D_physics = scene_metadata['D_physics_labels'] + scene_metadata['D_scene_config']
     D_total = scene_metadata['D_total']
 
     var_per_dim = neural_metadata['var_per_dim']

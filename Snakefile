@@ -13,16 +13,7 @@ rule all:
         "figures/sample_scenes.png",
 
 
-rule calibrate:
-    output:
-        "outputs/bullet_k.json",
-    script:
-        "scripts/calibrate.py"
-
-
 rule generate_scenes:
-    input:
-        bullet_k="outputs/bullet_k.json",
     output:
         scenes="data/scenes.npz",
         figure="figures/sample_scenes.png",

@@ -41,16 +41,30 @@ def _make_mlp():
                      early_stopping=True, validation_fraction=0.1),
     )
 
+def _pixel_prediction_r2(predicted_raw, actual_pca, scaler, pca):
+    """R² of raw pixel predictions against ground-truth, measured in PCA space.
+
+    All pixel-level comparisons must go through this helper so that both models
+    are scored in the same feature space.
+    """
+    pred_pca = pca.transform(scaler.transform(predicted_raw))
+    ss_res = np.sum((actual_pca - pred_pca) ** 2)
+    ss_tot = np.sum((actual_pca - actual_pca.mean(axis=0, keepdims=True)) ** 2)
+    return float(1.0 - ss_res / ss_tot) if ss_tot > 0 else 1.0
+
+
 def _score_next_frame_pixels(pixel_pca_initial, final_pixel_pca,
                               scene_configs, initial_physics_labels,
-                              program_states, pixel_indices, n_oracle=200):
+                              scaler_pix, pca_final, n_oracle=200):
     """
     Behavioral sufficiency for next-frame pixel prediction.
+
+    Both models are scored in the same PCA space (scaler_pix → pca_final).
 
     Render model score:  MLP cross-val R² predicting final-frame pixel PCA
                          from initial pixel PCA (missing velocity/occlusion info).
     Physics model score: Oracle R² — re-simulate each scene from initial physics
-                         state and compare rendered pixels to actual final pixels.
+                         state, project rendered pixels into PCA space, compare.
                          Since physics is deterministic, this approaches 1.0.
 
     Returns (render_score, physics_score, metric_label, chance_line).
@@ -61,16 +75,14 @@ def _score_next_frame_pixels(pixel_pca_initial, final_pixel_pca,
     render_r2 = cross_val_score(_make_mlp(), pixel_pca_initial, final_pixel_pca,
                                 cv=5, scoring='r2').mean()
 
-    # Physics model: oracle re-simulation R² in raw pixel space
+    # Physics model: oracle re-simulation R² in same PCA space
     n = min(n_oracle, len(scene_configs))
-    actual = program_states[:n, pixel_indices].astype(np.float32)
-    predicted = np.stack([
+    oracle_raw = np.stack([
         resimulate_scene(scene_configs[i], initial_physics_labels[i]).reshape(-1).astype(np.float32)
         for i in range(n)
     ])
-    ss_res = np.sum((actual - predicted) ** 2)
-    ss_tot = np.sum((actual - actual.mean(axis=0, keepdims=True)) ** 2)
-    physics_r2 = float(1.0 - ss_res / ss_tot) if ss_tot > 0 else 1.0
+    physics_r2 = _pixel_prediction_r2(oracle_raw, final_pixel_pca[:n],
+                                       scaler_pix, pca_final)
 
     return render_r2, physics_r2, "Next-frame pred. R²", None
 
@@ -237,7 +249,7 @@ def run_dissociation_analysis(neural_activity, scenes, neural_meta,
         render_score, physics_score, metric_label, chance = _score_next_frame_pixels(
             pixel_pca_initial, final_pixel_pca,
             scene_configs, initial_physics_labels,
-            program_states, pixel_indices
+            scaler_pix, pca_final
         )
 
     elif objective == "kinetic_energy":
