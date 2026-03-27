@@ -1,7 +1,0 @@
-pybullet
-numpy
-scipy
-scikit-learn
-matplotlib
-snakemake
-pyyaml

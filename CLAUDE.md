@@ -6,13 +6,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 # Run the full pipeline via Snakemake (tracks DAG, caches intermediates in data/ and outputs/)
-conda run -n footprints snakemake -j1
+uv run snakemake -j1
 
 # Dry run (show what would execute without running)
-conda run -n footprints snakemake -n
+uv run snakemake -n
 
 # Run with parallelism (encoding, rsa, dissociation are independent)
-conda run -n footprints snakemake -j3
+uv run snakemake -j3
 ```
 
 ## Architecture
