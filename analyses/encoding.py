@@ -7,8 +7,9 @@ produces negligible improvement in R², despite physics being causally operative
 
 import numpy as np
 from sklearn.decomposition import PCA
-from sklearn.linear_model import RidgeCV, LogisticRegressionCV
+from sklearn.linear_model import RidgeCV
 from sklearn.model_selection import cross_val_predict, cross_val_score
+from sklearn.neural_network import MLPClassifier
 from sklearn.preprocessing import StandardScaler
 import matplotlib.pyplot as plt
 
@@ -45,7 +46,7 @@ def run_encoding_analysis(neural_activity, scenes, neural_meta, fig_dir="figures
     3. Ridge regression: neural ~ pixel_PCA + physics_labels -> R²
     4. DeltaR² should be tiny
     5. Subsampling curve: vary neurons sampled, plot DeltaR² + significance
-    6. Control: logistic regression physics_labels -> behavior_label
+    6. Control: MLP physics_labels -> behavior_label
     """
     if pixel_pca_dim is None:
         pixel_pca_dim = _CFG_PIXEL_PCA_DIM
@@ -90,9 +91,11 @@ def run_encoding_analysis(neural_activity, scenes, neural_meta, fig_dir="figures
     print(f"  Mean ΔR²:                 {mean_delta:.6f}")
 
     # --- Control: physics_labels -> behavior_label ---
-    print("\nControl: logistic regression physics_labels -> behavior_label ...")
-    log_reg = LogisticRegressionCV(cv=5, max_iter=1000, random_state=42)
-    log_scores = cross_val_score(log_reg, physics_scaled, behavior_labels, cv=5,
+    # MLP because KE = 0.5*m*v² is nonlinear in the physics label features.
+    print("\nControl: MLP physics_labels -> behavior_label ...")
+    mlp_clf = MLPClassifier(hidden_layer_sizes=(64,), max_iter=500,
+                            random_state=42, early_stopping=True)
+    log_scores = cross_val_score(mlp_clf, physics_scaled, behavior_labels, cv=5,
                                  scoring='accuracy')
     control_acc = log_scores.mean()
     print(f"  Behavior prediction accuracy: {control_acc:.2%} (±{log_scores.std():.2%})")
