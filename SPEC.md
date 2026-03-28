@@ -212,3 +212,10 @@ behavioral_objective: "next_frame_pixels"
 
 5. **False positive simulation not built.** The Canada vs. Mexico pixel
    decoding demonstration (spec line 64-66) is a separate experiment.
+
+6. **Pixel/render slice consistency across analyses.** Previously, encoding
+   used `render_indices` (RGBA + depth + seg, 49,152 dims) while RSA and
+   dissociation used `pixel_indices` (RGBA only, 16,384 dims). This was
+   fixed to use `render_indices` everywhere. **Before finalizing results,
+   verify all analyses use the same render slice** — this kind of silent
+   mismatch can change numerical outcomes without any obvious error.
