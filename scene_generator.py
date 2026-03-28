@@ -11,7 +11,7 @@ Key design choices that make pixels insufficient for behavior prediction:
   3. Initial pixels cannot predict whether the object ends up behind the pillar
 
 The program_state contains everything sufficient to resimulate the scene:
-  render_bytes (49,152 floats) + physics_labels (15) + scene_config (9) = 49,176 floats.
+  render_bytes (49,152 floats) + physics_labels (15) + scene_config (10) = 49,177 floats.
 Physics+config is ~0.05% of the signal — swamped by pixels in the random projection.
 """
 
@@ -123,9 +123,13 @@ def _create_scene(physics_client, rng):
     shape_configs.append(shape_cfg)
 
     # x-only velocity (left or right); gravity handles vertical fall
-    x_vel = float(rng.uniform(-5.0, 5.0))
+    x_vel = float(rng.uniform(-8.0, 8.0))
     p.resetBaseVelocity(body_ids[0], linearVelocity=[x_vel, 0.0, 0.0],
                         physicsClientId=physics_client)
+
+    # Random x-acceleration (invisible in initial frame, breaks pixel predictability)
+    x_accel = float(rng.uniform(-15.0, 15.0))
+    shape_configs[0]['x_accel'] = x_accel
 
     return body_ids, masses, frictions, is_occluded, shape_configs, pillar_gray
 
@@ -171,7 +175,7 @@ def _encode_scene_config(shape_configs):
     """
     Encode scene shape configs into a fixed-length float32 vector.
 
-    Per object: shape_is_box(1), radius(1), half_extents(3), color(4) = 9 floats.
+    Per object: shape_is_box(1), radius(1), half_extents(3), color(4), x_accel(1) = 10 floats.
     Unused fields zeroed (radius=0 for box, half_extents=[0,0,0] for sphere).
     """
     vec = []
@@ -185,10 +189,11 @@ def _encode_scene_config(shape_configs):
             vec.append(cfg['params']['radius'])
             vec.extend([0.0, 0.0, 0.0])
         vec.extend(cfg['color'])
+        vec.append(cfg.get('x_accel', 0.0))
     return np.array(vec, dtype=np.float32)
 
 
-SCENE_CONFIG_DIM = 9  # per object
+SCENE_CONFIG_DIM = 10  # per object
 
 
 def _compute_total_kinetic_energy(body_ids, masses, physics_client):
@@ -355,6 +360,13 @@ def resimulate_scene(shape_configs, initial_physics_row, *,
         frictions_list.append(friction)
 
     for _ in range(n_timesteps):
+        for i, (bid, cfg) in enumerate(zip(body_ids, shape_configs)):
+            x_accel = cfg.get('x_accel', 0.0)
+            if x_accel != 0.0:
+                p.applyExternalForce(bid, -1,
+                                     [x_accel * masses_list[i], 0, 0],
+                                     [0, 0, 0], p.WORLD_FRAME,
+                                     physicsClientId=pc)
         p.stepSimulation(physicsClientId=pc)
 
     if return_program_state:
@@ -439,8 +451,15 @@ def generate_scenes(n_scenes, seed, *, n_timesteps=None):
         init_rgba_bytes, _, _ = _render_scene(pc, lighting=lighting)
         initial_renders[i] = np.frombuffer(init_rgba_bytes, dtype=np.uint8).astype(np.float32)
 
-        # Step physics
+        # Step physics (with per-scene random x-acceleration as external force)
         for _ in range(n_timesteps):
+            for obj_idx, bid in enumerate(body_ids):
+                x_accel = shape_configs[obj_idx].get('x_accel', 0.0)
+                if x_accel != 0.0:
+                    p.applyExternalForce(bid, -1,
+                                         [x_accel * masses[obj_idx], 0, 0],
+                                         [0, 0, 0], p.WORLD_FRAME,
+                                         physicsClientId=pc)
             p.stepSimulation(physicsClientId=pc)
 
         # Collect final-state analysis labels (NOT used in neural generation)
