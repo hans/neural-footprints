@@ -270,7 +270,7 @@ def _render_scene(physics_client, lighting=None):
 
 def resimulate_scene(shape_configs, initial_physics_row, *,
                      n_timesteps=None, return_program_state=False,
-                     pillar_gray=0.5):
+                     pillar_gray=0.5, lighting=None):
     """
     Rebuild a scene from stored shape configs + initial physics state, step
     N_TIMESTEPS, and return the rendered result.
@@ -370,14 +370,14 @@ def resimulate_scene(shape_configs, initial_physics_row, *,
         p.stepSimulation(physicsClientId=pc)
 
     if return_program_state:
-        rgba_bytes, depth_bytes, seg_bytes = _render_scene(pc)
+        rgba_bytes, depth_bytes, seg_bytes = _render_scene(pc, lighting=lighting)
         final_physics = _collect_physics_labels(body_ids, masses_list, frictions_list, pc)
         scene_config_vec = _encode_scene_config(shape_configs)
         p.disconnect(pc)
         return _build_program_state(rgba_bytes, depth_bytes, seg_bytes,
                                     final_physics, scene_config_vec)
     else:
-        rgba_bytes, _, _ = _render_scene(pc)
+        rgba_bytes, _, _ = _render_scene(pc, lighting=lighting)
         p.disconnect(pc)
         return np.frombuffer(rgba_bytes, dtype=np.uint8).reshape(
             IMAGE_SIZE, IMAGE_SIZE, 4)
@@ -430,6 +430,7 @@ def generate_scenes(n_scenes, seed, *, n_timesteps=None):
     kinetic_energies = np.zeros(n_scenes, dtype=np.float32)
     all_scene_configs = []
     all_pillar_grays = []
+    all_lightings = []
 
     for i in range(n_scenes):
         if (i + 1) % 100 == 0 or i == 0:
@@ -445,6 +446,7 @@ def generate_scenes(n_scenes, seed, *, n_timesteps=None):
 
         # Sample lighting once per scene (consistent across initial + final frames)
         lighting = _sample_lighting(scene_rng)
+        all_lightings.append(lighting)
 
         # Capture initial state (t=0) before stepping
         initial_physics_labels[i] = _collect_physics_labels(body_ids, masses, frictions, pc)
@@ -507,6 +509,7 @@ def generate_scenes(n_scenes, seed, *, n_timesteps=None):
         'kinetic_energies': kinetic_energies,
         'scene_configs': all_scene_configs,
         'pillar_grays': all_pillar_grays,
+        'lightings': all_lightings,
         'metadata': metadata,
     }
 

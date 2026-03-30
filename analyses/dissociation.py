@@ -56,7 +56,7 @@ def _pixel_prediction_r2(predicted_raw, actual_pca, scaler, pca):
 def _score_next_frame_pixels(pixel_pca_initial, final_pixel_pca,
                               scene_configs, initial_physics_labels,
                               scaler_pix, pca_final, pillar_grays=None,
-                              n_oracle=200):
+                              lightings=None, n_oracle=200):
     """
     Behavioral sufficiency for next-frame pixel prediction.
 
@@ -80,7 +80,8 @@ def _score_next_frame_pixels(pixel_pca_initial, final_pixel_pca,
     n = min(n_oracle, len(scene_configs))
     oracle_raw = np.stack([
         resimulate_scene(scene_configs[i], initial_physics_labels[i],
-                         pillar_gray=pillar_grays[i] if pillar_grays is not None else 0.5
+                         pillar_gray=pillar_grays[i] if pillar_grays is not None else 0.5,
+                         lighting=lightings[i] if lightings is not None else None,
                          ).reshape(-1).astype(np.float32)
         for i in range(n)
     ])
@@ -94,7 +95,7 @@ def _save_predicted_frames(
     pixel_pca_initial, final_pixel_pca, scaler_pix, pca_final,
     initial_renders, program_states, pixel_indices,
     scene_configs, initial_physics_labels,
-    fig_dir, n_samples=8, pillar_grays=None
+    fig_dir, n_samples=8, pillar_grays=None, lightings=None
 ):
     """
     Compare render model (learned MLP) vs. physics model (oracle re-simulation).
@@ -126,7 +127,8 @@ def _save_predicted_frames(
     # Physics model: oracle re-simulation from stored initial state
     physics_imgs = np.stack([
         resimulate_scene(scene_configs[j], initial_physics_labels[j],
-                         pillar_gray=pillar_grays[j] if pillar_grays is not None else 0.5)
+                         pillar_gray=pillar_grays[j] if pillar_grays is not None else 0.5,
+                         lighting=lightings[j] if lightings is not None else None)
         for j in range(n)
     ])
 
@@ -204,6 +206,7 @@ def run_dissociation_analysis(neural_activity, scenes, neural_meta,
     pixel_indices = scenes['metadata']['pixel_indices']
     scene_configs = scenes['scene_configs']
     pillar_grays = scenes['pillar_grays']
+    lightings = scenes['lightings']
 
     n_scenes, n_neurons = neural_activity.shape
 
@@ -259,7 +262,8 @@ def run_dissociation_analysis(neural_activity, scenes, neural_meta,
         render_score, physics_score, metric_label, chance = _score_next_frame_pixels(
             pixel_pca_initial, final_pixel_pca,
             scene_configs, initial_physics_labels,
-            scaler_rgba, pca_final, pillar_grays=pillar_grays
+            scaler_rgba, pca_final, pillar_grays=pillar_grays,
+            lightings=lightings,
         )
 
     elif objective == "kinetic_energy":
@@ -277,7 +281,7 @@ def run_dissociation_analysis(neural_activity, scenes, neural_meta,
         pixel_pca_initial, final_pixel_pca, scaler_rgba, pca_final,
         initial_renders, program_states, pixel_indices,
         scene_configs, initial_physics_labels,
-        fig_dir, pillar_grays=pillar_grays
+        fig_dir, pillar_grays=pillar_grays, lightings=lightings,
     )
 
     print(f"  Render  → {metric_label}: {render_score:.4f}")

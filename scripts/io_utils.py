@@ -22,6 +22,7 @@ def save_scenes(scenes, path):
     meta['render_indices'] = [ri.start, ri.stop]
     arrays['metadata_json'] = np.array(json.dumps(meta))
     arrays['scene_configs_json'] = np.array(json.dumps(scenes['scene_configs']))
+    arrays['lightings_json'] = np.array(json.dumps(scenes['lightings']))
 
     np.savez_compressed(path, **arrays)
 
@@ -43,6 +44,7 @@ def load_scenes(path):
 
     scenes['scene_configs'] = json.loads(str(data['scene_configs_json']))
     scenes['pillar_grays'] = data['pillar_grays'].tolist()
+    scenes['lightings'] = json.loads(str(data['lightings_json']))
     return scenes
 
 
