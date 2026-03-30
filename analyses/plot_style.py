@@ -4,6 +4,7 @@ from contextlib import contextmanager
 
 import matplotlib as mpl
 import matplotlib.pyplot as plt
+import seaborn as sns
 
 # Semantic color palette used across all figures
 COLORS = {
@@ -29,16 +30,11 @@ def paper_style():
             ...
             plt.savefig(...)
     """
+    sns.set_context("paper", font_scale=2)
     overrides = {
         # Font
         "font.family": "sans-serif",
         "font.sans-serif": ["Helvetica", "Arial", "DejaVu Sans"],
-        "font.size": 16,
-        "axes.titlesize": 15,
-        "axes.labelsize": 14,
-        "xtick.labelsize": 12,
-        "ytick.labelsize": 12,
-        "legend.fontsize": 12,
         # Axes
         "axes.spines.top": False,
         "axes.spines.right": False,

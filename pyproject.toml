@@ -10,4 +10,5 @@ dependencies = [
     "matplotlib",
     "snakemake>=9",
     "pyyaml",
+    "seaborn>=0.13.2",
 ]
