@@ -66,29 +66,38 @@ def plot_rsa(plot_data, fig_dir="figures"):
     n_sub = int(plot_data['n_sub'])
     corr_neural_render = float(plot_data['corr_neural_render'])
     corr_neural_physics = float(plot_data['corr_neural_physics'])
-    partial_corr = float(plot_data['partial_corr'])
 
     with paper_style():
-        fig, axes = plt.subplots(1, 4, figsize=(20, 5))
+        fig, axes = plt.subplots(2, 2, figsize=(10, 9),
+                                 constrained_layout=True)
 
         n_show = min(100, n_sub)
         rdm_neural_sq = squareform(rdm_neural)[:n_show, :n_show]
         rdm_render_sq = squareform(rdm_render)[:n_show, :n_show]
         rdm_physics_sq = squareform(rdm_physics)[:n_show, :n_show]
 
-        for ax, rdm, title in zip(axes[:3],
-                                   [rdm_neural_sq, rdm_render_sq, rdm_physics_sq],
+        # Shared color range across all RDMs
+        all_rdms = [rdm_neural_sq, rdm_render_sq, rdm_physics_sq]
+        vmin = min(r.min() for r in all_rdms)
+        vmax = max(r.max() for r in all_rdms)
+
+        rdm_axes = [axes[0, 0], axes[0, 1], axes[1, 0]]
+        for ax, rdm, title in zip(rdm_axes, all_rdms,
                                    ['Neural RDM', 'Render RDM', 'Physics RDM']):
-            im = ax.imshow(rdm, cmap='viridis', aspect='equal')
+            im = ax.imshow(rdm, cmap='viridis', aspect='equal',
+                           vmin=vmin, vmax=vmax)
             ax.set_title(title)
             ax.set_xlabel('Scene')
             ax.set_ylabel('Scene')
-            plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
 
-        ax = axes[3]
-        labels = ['Neural↔Render', 'Neural↔Physics', 'Partial\nNeural↔Physics|Render']
-        values = [corr_neural_render, corr_neural_physics, partial_corr]
-        colors = [COLORS['pixels'], COLORS['physics'], COLORS['neutral']]
+        fig.colorbar(im, ax=axes[1, 0], orientation='horizontal',
+                     label='Correlation distance', fraction=0.046, pad=0.08)
+
+        # Correlation bar plot
+        ax = axes[1, 1]
+        labels = ['Neural\u2013Render', 'Neural\u2013Physics']
+        values = [corr_neural_render, corr_neural_physics]
+        colors = [COLORS['pixels'], COLORS['physics']]
         bars = ax.bar(labels, values, color=colors)
         ax.set_ylabel('Spearman r')
         ax.set_title('RSA Correlations')
@@ -97,7 +106,6 @@ def plot_rsa(plot_data, fig_dir="figures"):
             ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.01,
                     f'{val:.3f}', ha='center', va='bottom', fontsize=9)
 
-        plt.tight_layout()
         fig_path = f"{fig_dir}/rsa_analysis.png"
         plt.savefig(fig_path)
         plt.close()
