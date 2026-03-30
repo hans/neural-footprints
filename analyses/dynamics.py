@@ -23,17 +23,12 @@ import numpy as np
 from sklearn.decomposition import PCA
 from sklearn.model_selection import cross_val_predict
 from sklearn.preprocessing import StandardScaler
-import matplotlib.pyplot as plt
-
-from analyses.plot_style import COLORS, paper_style
-
 from analyses.dissociation import _make_mlp
 from config import BEHAVIORAL_PCA_DIM as _CFG_BEHAVIORAL_PCA_DIM
 
 
 def run_dynamics_analysis(neural_activity, scenes, neural_meta,
                           encoding_delta_r2, encoder, *,
-                          fig_dir="figures",
                           behavioral_pca_dim=None):
     """
     Future brain state prediction via physics vs. pixel forward models.
@@ -153,33 +148,6 @@ def run_dynamics_analysis(neural_activity, scenes, neural_meta,
     print(f"    Pixel forward model R²:   {mean_r2_pixel:.4f}")
     print(f"    Gap:                      {gap:.4f}")
     print(f"    (cf. encoding ΔR² for current brain: {encoding_delta_r2:.4f})")
-
-    # ------------------------------------------------------------------
-    # Figure
-    # ------------------------------------------------------------------
-    with paper_style():
-        fig, ax1 = plt.subplots(1, 1, figsize=(5, 5))
-
-        bar_width = 0.5
-        colors = [COLORS['pixels'], COLORS['physics']]
-        labels = ['Render\nmodel', 'Physics\nmodel']
-
-        bars1 = ax1.bar(labels, [mean_r2_pixel, mean_r2_physics],
-                        width=bar_width, color=colors,
-                        yerr=[r2_pixel_forward.std() / np.sqrt(n_neurons),
-                              r2_physics_forward.std() / np.sqrt(n_neurons)],
-                        capsize=5)
-        ax1.set_ylabel('Future neural R²')
-        ax1.set_title('Future brain state prediction')
-        for bar, val in zip(bars1, [mean_r2_pixel, mean_r2_physics]):
-            ax1.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.01,
-                     f'{val:.3f}', ha='center', va='bottom', fontweight='bold')
-
-        plt.tight_layout()
-        fig_path = f"{fig_dir}/dynamics_analysis.png"
-        plt.savefig(fig_path)
-        plt.close()
-        print(f"\nFigure saved: {fig_path}")
 
     return {
         'r2_physics_forward': r2_physics_forward,

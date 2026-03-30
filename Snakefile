@@ -9,15 +9,19 @@ rule all:
         "figures/dissociation.png",
         "figures/predicted_frames.png",
         "figures/pca_analysis.png",
+        "figures/pca_variance_decoding.png",
         "figures/dynamics_analysis.png",
         "figures/sample_scenes.png",
         "paper/results_macros.tex",
 
 
+# ---------------------------------------------------------------------------
+# Data generation
+# ---------------------------------------------------------------------------
+
 rule generate_scenes:
     output:
         scenes="data/scenes.npz",
-        figure="figures/sample_scenes.png",
     script:
         "scripts/gen_scenes.py"
 
@@ -31,6 +35,10 @@ rule generate_neural:
         "scripts/gen_neural.py"
 
 
+# ---------------------------------------------------------------------------
+# Analysis (computation only — no figures)
+# ---------------------------------------------------------------------------
+
 rule encoding:
     input:
         scenes="data/scenes.npz",
@@ -38,7 +46,7 @@ rule encoding:
     output:
         results="outputs/encoding_results.json",
         encoder="data/encoder.joblib",
-        figure="figures/encoding_analysis.png",
+        plot_data="data/encoding_plot_data.npz",
     script:
         "scripts/run_encoding.py"
 
@@ -49,7 +57,7 @@ rule rsa:
         neural="data/neural.npz",
     output:
         results="outputs/rsa_results.json",
-        figure="figures/rsa_analysis.png",
+        plot_data="data/rsa_plot_data.npz",
     script:
         "scripts/run_rsa.py"
 
@@ -60,8 +68,7 @@ rule dissociation:
         neural="data/neural.npz",
     output:
         results="outputs/dissociation_results.json",
-        figure="figures/dissociation.png",
-        predicted="figures/predicted_frames.png",
+        plot_data="data/dissociation_plot_data.npz",
     script:
         "scripts/run_dissociation.py"
 
@@ -72,7 +79,7 @@ rule pca:
         neural="data/neural.npz",
     output:
         results="outputs/pca_results.json",
-        figure="figures/pca_analysis.png",
+        plot_data="data/pca_plot_data.npz",
     script:
         "scripts/run_pca.py"
 
@@ -85,10 +92,74 @@ rule dynamics:
         encoder="data/encoder.joblib",
     output:
         results="outputs/dynamics_results.json",
-        figure="figures/dynamics_analysis.png",
+        plot_data="data/dynamics_plot_data.npz",
     script:
         "scripts/run_dynamics.py"
 
+
+# ---------------------------------------------------------------------------
+# Plotting (fast — only reads cached plot_data NPZ files)
+# ---------------------------------------------------------------------------
+
+rule plot_scenes:
+    input:
+        scenes="data/scenes.npz",
+    output:
+        figure="figures/sample_scenes.png",
+    script:
+        "scripts/plot_scenes.py"
+
+
+rule plot_encoding:
+    input:
+        plot_data="data/encoding_plot_data.npz",
+    output:
+        figure="figures/encoding_analysis.png",
+    script:
+        "scripts/plot_encoding.py"
+
+
+rule plot_rsa:
+    input:
+        plot_data="data/rsa_plot_data.npz",
+    output:
+        figure="figures/rsa_analysis.png",
+    script:
+        "scripts/plot_rsa.py"
+
+
+rule plot_dissociation:
+    input:
+        plot_data="data/dissociation_plot_data.npz",
+    output:
+        figure="figures/dissociation.png",
+        predicted="figures/predicted_frames.png",
+    script:
+        "scripts/plot_dissociation.py"
+
+
+rule plot_pca:
+    input:
+        plot_data="data/pca_plot_data.npz",
+    output:
+        figure="figures/pca_analysis.png",
+        overlay="figures/pca_variance_decoding.png",
+    script:
+        "scripts/plot_pca.py"
+
+
+rule plot_dynamics:
+    input:
+        plot_data="data/dynamics_plot_data.npz",
+    output:
+        figure="figures/dynamics_analysis.png",
+    script:
+        "scripts/plot_dynamics.py"
+
+
+# ---------------------------------------------------------------------------
+# Evaluation & paper macros
+# ---------------------------------------------------------------------------
 
 rule paper_macros:
     input:

@@ -21,10 +21,6 @@ from sklearn.model_selection import cross_val_score
 from sklearn.neural_network import MLPRegressor
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
-import matplotlib.pyplot as plt
-
-from analyses.plot_style import COLORS, paper_style
-
 from config import PIXEL_PCA_DIM as _CFG_PIXEL_PCA_DIM
 from config import BEHAVIORAL_PCA_DIM as _CFG_BEHAVIORAL_PCA_DIM
 from config import BEHAVIORAL_OBJECTIVE as _CFG_BEHAVIORAL_OBJECTIVE
@@ -93,21 +89,16 @@ def _score_next_frame_pixels(pixel_pca_initial, final_pixel_pca,
     return render_r2, physics_r2, "Next-frame pred. R²", None
 
 
-def _save_predicted_frames(
+def _compute_predicted_frames(
     pixel_pca_initial, final_pixel_pca, scaler_pix, pca_final,
     initial_renders, program_states, pixel_indices,
     scene_configs, initial_physics_labels,
-    fig_dir, n_samples=8, pillar_grays=None, lightings=None
+    n_samples=8, pillar_grays=None, lightings=None
 ):
     """
-    Compare render model (learned MLP) vs. physics model (oracle re-simulation).
+    Compute render model vs. physics model predicted frame images.
 
-    Grid: n_samples rows × 4 cols
-      Col 0: initial frame (t=0, input)
-      Col 1: render model prediction (MLP from pixel PCA — blurry, missing velocity)
-      Col 2: physics model prediction (oracle re-simulation — pixel-perfect)
-      Col 3: actual final frame (t=N, ground truth)
-    Saved to {fig_dir}/predicted_frames.png.
+    Returns (init_imgs, render_imgs, physics_imgs, final_imgs) as uint8 arrays.
     """
     from config import IMAGE_SIZE
     from scene_generator import resimulate_scene
@@ -137,25 +128,7 @@ def _save_predicted_frames(
     init_imgs = initial_renders[:n].astype(np.uint8).reshape(n, IMAGE_SIZE, IMAGE_SIZE, 4)
     final_imgs = program_states[:n, pixel_indices].astype(np.uint8).reshape(n, IMAGE_SIZE, IMAGE_SIZE, 4)
 
-    col_titles = ['t=0 (input)', 'Render model\nprediction', 'Physics model\nprediction', 't=N (actual)']
-    cols = [init_imgs, render_imgs, physics_imgs, final_imgs]
-
-    with paper_style():
-        fig, axes = plt.subplots(n, 4, figsize=(8, 2 * n))
-        if n == 1:
-            axes = axes[np.newaxis, :]
-
-        for col_idx, (title, imgs) in enumerate(zip(col_titles, cols)):
-            axes[0, col_idx].set_title(title, fontsize=8)
-            for row_idx in range(n):
-                axes[row_idx, col_idx].imshow(imgs[row_idx])
-                axes[row_idx, col_idx].axis('off')
-
-        plt.tight_layout(pad=0.3)
-        fig_path = f"{fig_dir}/predicted_frames.png"
-        plt.savefig(fig_path)
-        plt.close()
-        print(f"Predicted frames saved: {fig_path}")
+    return init_imgs, render_imgs, physics_imgs, final_imgs
 
 
 def _score_kinetic_energy(pixel_pca, physics_scaled, behavior_labels):
@@ -175,7 +148,7 @@ def _score_kinetic_energy(pixel_pca, physics_scaled, behavior_labels):
 # ---------------------------------------------------------------------------
 
 def run_dissociation_analysis(neural_activity, scenes, neural_meta,
-                               objective=None, fig_dir="figures",
+                               objective=None,
                                *, pixel_pca_dim=None, behavioral_pca_dim=None):
     """
     Compute and plot the R² vs. behavioral sufficiency dissociation.
@@ -278,13 +251,13 @@ def run_dissociation_analysis(neural_activity, scenes, neural_meta,
         raise ValueError(f"Unknown objective: {objective!r}. "
                          "Use 'next_frame_pixels' or 'kinetic_energy'.")
 
-    # --- Visual illustration: oracle physics vs. render MLP ---
-    print("Saving predicted frame visualization...")
-    _save_predicted_frames(
+    # --- Compute predicted frame images for visualization ---
+    print("Computing predicted frame images...")
+    init_imgs, render_imgs, physics_imgs, final_imgs = _compute_predicted_frames(
         pixel_pca_initial, final_pixel_pca, scaler_rgba, pca_final,
         initial_renders, program_states, pixel_indices,
         scene_configs, initial_physics_labels,
-        fig_dir, pillar_grays=pillar_grays, lightings=lightings,
+        pillar_grays=pillar_grays, lightings=lightings,
     )
 
     print(f"  Render  → {metric_label}: {render_score:.4f}")
@@ -294,50 +267,18 @@ def run_dissociation_analysis(neural_activity, scenes, neural_meta,
     print(f"    Render model:  R² = {mean_r2_render:.4f}  |  {metric_label} = {render_score:.4f}")
     print(f"    Physics model: R² = {mean_r2_physics:.4f}  |  {metric_label} = {physics_score:.4f}")
 
-    # --- Figure ---
-    with paper_style():
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 5))
-
-        bar_width = 0.5
-        colors = [COLORS['pixels'], COLORS['physics']]
-        labels = ['Render\nmodel', 'Physics\nmodel']
-
-        # Left panel: Neural R²
-        bars1 = ax1.bar(labels, [mean_r2_render, mean_r2_physics],
-                        width=bar_width, color=colors,
-                        yerr=[r2_render.std() / np.sqrt(n_neurons),
-                              r2_physics.std() / np.sqrt(n_neurons)],
-                        capsize=5)
-        ax1.set_ylabel('Neural variance explained (R²)')
-        ax1.set_title('Encoding model performance')
-        for bar, val in zip(bars1, [mean_r2_render, mean_r2_physics]):
-            ax1.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.01,
-                     f'{val:.3f}', ha='center', va='bottom', fontweight='bold')
-
-        # Right panel: behavioral sufficiency
-        bars2 = ax2.bar(labels, [render_score, physics_score],
-                        width=bar_width, color=colors, capsize=5)
-        if chance is not None:
-            ax2.axhline(chance, color='gray', linestyle='--', alpha=0.5, label='Chance')
-            ax2.set_ylim(0, 1.1)
-            ax2.legend()
-        ax2.set_ylabel(metric_label)
-        ax2.set_title('Behavioral sufficiency')
-        for bar, val in zip(bars2, [render_score, physics_score]):
-            ax2.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.01,
-                     f'{val:.3f}', ha='center', va='bottom', fontweight='bold')
-
-        plt.tight_layout()
-        fig_path = f"{fig_dir}/dissociation.png"
-        plt.savefig(fig_path)
-        plt.close()
-        print(f"\nFigure saved: {fig_path}")
-
     return {
         'mean_r2_render': mean_r2_render,
         'mean_r2_physics': mean_r2_physics,
+        'r2_render': r2_render,
+        'r2_physics': r2_physics,
         'render_behavioral_score': render_score,
         'physics_behavioral_score': physics_score,
         'metric_label': metric_label,
         'objective': objective,
+        'chance': chance if chance is not None else float('nan'),
+        'predicted_init_imgs': init_imgs,
+        'predicted_render_imgs': render_imgs,
+        'predicted_physics_imgs': physics_imgs,
+        'predicted_final_imgs': final_imgs,
     }
