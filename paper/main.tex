@@ -1,0 +1,75 @@
+% Minimal draft -- swap documentclass for conference template later
+\documentclass{article}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{amsmath}
+
+\input{results_macros}          % auto-generated numbers
+
+\title{Neural Footprints: Standard Neuroscience Methods\\
+       Systematically Miss Causally Operative Variables}
+\author{Draft}
+\date{}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+We show, via simulation, that standard neural analysis methods---encoding
+models and representational similarity analysis (RSA)---systematically favour
+pixel-level features over physics variables that causally drive behaviour.
+In a controlled PyBullet environment with \nScenes{} scenes,
+pixel-only encoding models achieve $R^2 = \encodingRsqPixels$,
+while adding physics variables yields a negligible
+$\Delta R^2 = \encodingDeltaRsq$.
+RSA confirms the asymmetry: neural--render correlation is
+$r = \rsaCorrNeuralRender$ versus neural--physics
+$r = \rsaCorrNeuralPhysics$
+(partial $r = \rsaPartialNeuralPhysics$).
+Yet a physics-based forward model predicts future neural states
+($R^2 = \dynamicsRsqPhysics$) substantially better than a pixel-based one
+($R^2 = \dynamicsRsqPixel$; gap $= \dynamicsGap$),
+revealing the hidden causal role of physics.
+All \evalPassed/\evalTotal{} quantitative checks pass.
+\end{abstract}
+
+\section{Introduction}
+% TODO
+
+\section{Methods}
+We simulate \nScenes{} scenes in PyBullet at $\imageSize \times \imageSize$
+resolution over \nTimesteps{} timesteps. Neural activity is generated via
+random projection of the full program state (\nNeurons{} units, noise level
+$\sigma = \noiseLevel$).
+
+\section{Results}
+
+\subsection{Encoding Analysis}
+A pixel-only ridge regression achieves mean cross-validated
+$R^2 = \encodingRsqPixels$. Adding physics variables gives
+$R^2 = \encodingRsqCombined$, a negligible
+$\Delta R^2 = \encodingDeltaRsq$, demonstrating that standard encoding
+models attribute nearly all variance to pixels.
+
+A logistic control confirms physics labels are recoverable from neural
+activity (accuracy $= \controlAccuracy\%$).
+
+\subsection{Representational Similarity Analysis}
+Neural--render RDM correlation is $r = \rsaCorrNeuralRender$, while
+neural--physics is $r = \rsaCorrNeuralPhysics$ (\rsaRatio$\times$ ratio).
+Partialling out render yields $r = \rsaPartialNeuralPhysics$, confirming
+physics structure is masked by pixel-correlated variance.
+
+\subsection{Dynamics Analysis}
+A physics-based forward model predicts next-timestep neural state with
+$R^2 = \dynamicsRsqPhysics$, outperforming pixel-based prediction
+($R^2 = \dynamicsRsqPixel$) by $\dynamicsGap$.
+
+\subsection{PCA}
+The first principal component explains \pcaVarExplained1\% of variance;
+10 components explain \pcaVarExplained10\%.
+
+\section{Discussion}
+% TODO
+
+\end{document}

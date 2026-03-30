@@ -11,6 +11,7 @@ rule all:
         "figures/pca_analysis.png",
         "figures/dynamics_analysis.png",
         "figures/sample_scenes.png",
+        "paper/results_macros.tex",
 
 
 rule generate_scenes:
@@ -85,6 +86,19 @@ rule dynamics:
         figure="figures/dynamics_analysis.png",
     script:
         "scripts/run_dynamics.py"
+
+
+rule paper_macros:
+    input:
+        encoding="outputs/encoding_results.json",
+        rsa="outputs/rsa_results.json",
+        dynamics="outputs/dynamics_results.json",
+        pca="outputs/pca_results.json",
+        evaluation="outputs/evaluation.json",
+    output:
+        "paper/results_macros.tex",
+    script:
+        "scripts/gen_macros.py"
 
 
 rule evaluate:
