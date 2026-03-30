@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 from scipy.spatial.distance import squareform
 
-from analyses.plot_style import COLORS, paper_style
+from analyses.plot_style import COLORS, COL_WIDTH, FULL_WIDTH, paper_style
 
 
 def plot_encoding(plot_data, fig_dir="figures"):
@@ -22,39 +22,45 @@ def plot_encoding(plot_data, fig_dir="figures"):
     control_acc_std = float(plot_data['control_accuracy_std'])
 
     with paper_style():
-        fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+        fig, axes = plt.subplots(3, 1, figsize=(COL_WIDTH, 5.5))
 
+        # Panel A: R² bar plot
         ax = axes[0]
-        ax.bar(['Pixels only', 'Pixels + Physics'],
+        ax.bar(['Pixels only', 'Pixels +\nPhysics'],
                [mean_r2_pix, mean_r2_comb],
                yerr=[r2_pixels_only.std() / np.sqrt(n_neurons),
                      r2_combined.std() / np.sqrt(n_neurons)],
-               color=[COLORS['pixels'], COLORS['physics']], capsize=5)
-        ax.set_ylabel('Mean R²')
-        ax.set_title('Encoding Model: R² ± Physics Labels')
-        ymax = max(mean_r2_pix, mean_r2_comb) * 1.1
-        ax.annotate(f'ΔR² = {mean_delta:.6f}', xy=(0.5, ymax),
-                    ha='center', fontsize=10, style='italic')
+               color=[COLORS['pixels'], COLORS['physics']], capsize=3,
+               width=0.6)
+        ax.set_ylabel('Mean R\u00b2')
+        ax.set_title('Encoding model: R\u00b2 \u00b1 physics labels')
+        ymax = max(mean_r2_pix, mean_r2_comb) * 1.12
+        ax.annotate(f'\u0394R\u00b2 = {mean_delta:.6f}', xy=(0.5, ymax),
+                    ha='center', style='italic')
 
+        # Panel B: Subsampling curve
         ax = axes[1]
         ax.errorbar(neuron_counts, subsample_means, yerr=subsample_sems,
-                    marker='o', color=COLORS['pixels'], capsize=3)
+                    marker='o', color=COLORS['pixels'], capsize=2)
         ax.axhline(0, color='gray', linestyle='--', alpha=0.5)
         ax.set_xlabel('Number of neurons sampled')
-        ax.set_ylabel('Mean ΔR²')
-        ax.set_title('ΔR² vs. Neuron Subsampling')
+        ax.set_ylabel('Mean \u0394R\u00b2')
+        ax.set_title('\u0394R\u00b2 vs. neuron subsampling')
 
+        # Panel C: Control accuracy
         ax = axes[2]
-        ax.bar(['Physics → Behavior'], [control_acc],
-               yerr=[control_acc_std], color=COLORS['control'], capsize=5)
+        ax.bar(['Physics \u2192 Behavior'], [control_acc],
+               yerr=[control_acc_std], color=COLORS['control'], capsize=3,
+               width=0.5)
         ax.axhline(0.5, color='gray', linestyle='--', alpha=0.5, label='Chance')
         ax.set_ylabel('Accuracy')
-        ax.set_title('Control: Physics Labels Predict Behavior')
+        ax.set_title('Control: physics labels predict behavior')
         ax.set_ylim(0, 1)
         ax.legend()
 
+        fig.align_ylabels(axes)
         plt.tight_layout()
-        fig_path = f"{fig_dir}/encoding_analysis.png"
+        fig_path = f"{fig_dir}/encoding_analysis.pdf"
         plt.savefig(fig_path)
         plt.close()
 
@@ -68,7 +74,7 @@ def plot_rsa(plot_data, fig_dir="figures"):
     corr_neural_physics = float(plot_data['corr_neural_physics'])
 
     with paper_style():
-        fig, axes = plt.subplots(2, 2, figsize=(10, 9),
+        fig, axes = plt.subplots(2, 2, figsize=(COL_WIDTH, COL_WIDTH),
                                  constrained_layout=True)
 
         n_show = min(100, n_sub)
@@ -98,15 +104,15 @@ def plot_rsa(plot_data, fig_dir="figures"):
         labels = ['Neural\u2013Render', 'Neural\u2013Physics']
         values = [corr_neural_render, corr_neural_physics]
         colors = [COLORS['pixels'], COLORS['physics']]
-        bars = ax.bar(labels, values, color=colors)
+        bars = ax.bar(labels, values, color=colors, width=0.6)
         ax.set_ylabel('Spearman r')
-        ax.set_title('RSA Correlations')
+        ax.set_title('RSA correlations')
         ax.axhline(0, color='gray', linestyle='-', alpha=0.3)
         for bar, val in zip(bars, values):
             ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.01,
-                    f'{val:.3f}', ha='center', va='bottom', fontsize=9)
+                    f'{val:.3f}', ha='center', va='bottom')
 
-        fig_path = f"{fig_dir}/rsa_analysis.png"
+        fig_path = f"{fig_dir}/rsa_analysis.pdf"
         plt.savefig(fig_path)
         plt.close()
 
@@ -124,25 +130,25 @@ def plot_dissociation(plot_data, fig_dir="figures"):
     chance = None if np.isnan(chance_val) else chance_val
 
     with paper_style():
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 5))
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(COL_WIDTH, 2.0))
 
         bar_width = 0.5
         colors = [COLORS['pixels'], COLORS['physics']]
-        labels = ['Render\nmodel', 'Physics\nmodel']
+        labels = ['Render', 'Physics']
 
         bars1 = ax1.bar(labels, [mean_r2_render, mean_r2_physics],
                         width=bar_width, color=colors,
                         yerr=[r2_render.std() / np.sqrt(n_neurons),
                               r2_physics.std() / np.sqrt(n_neurons)],
-                        capsize=5)
-        ax1.set_ylabel('Neural variance explained (R²)')
-        ax1.set_title('Encoding model performance')
+                        capsize=3)
+        ax1.set_ylabel('Neural R\u00b2')
+        ax1.set_title('Encoding performance')
         for bar, val in zip(bars1, [mean_r2_render, mean_r2_physics]):
             ax1.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.01,
                      f'{val:.3f}', ha='center', va='bottom', fontweight='bold')
 
         bars2 = ax2.bar(labels, [render_score, physics_score],
-                        width=bar_width, color=colors, capsize=5)
+                        width=bar_width, color=colors, capsize=3)
         if chance is not None:
             ax2.axhline(chance, color='gray', linestyle='--', alpha=0.5, label='Chance')
             ax2.set_ylim(0, 1.1)
@@ -154,12 +160,13 @@ def plot_dissociation(plot_data, fig_dir="figures"):
                      f'{val:.3f}', ha='center', va='bottom', fontweight='bold')
 
         plt.tight_layout()
-        fig_path = f"{fig_dir}/dissociation.png"
+        fig_path = f"{fig_dir}/dissociation.pdf"
         plt.savefig(fig_path)
         plt.close()
 
 
 def plot_predicted_frames(plot_data, fig_dir="figures"):
+    """Predicted frames grid — uses figure* (full width) for legibility."""
     init_imgs = plot_data['predicted_init_imgs']
     render_imgs = plot_data['predicted_render_imgs']
     physics_imgs = plot_data['predicted_physics_imgs']
@@ -171,18 +178,18 @@ def plot_predicted_frames(plot_data, fig_dir="figures"):
     cols = [init_imgs, render_imgs, physics_imgs, final_imgs]
 
     with paper_style():
-        fig, axes = plt.subplots(n, 4, figsize=(8, 2 * n))
+        fig, axes = plt.subplots(n, 4, figsize=(FULL_WIDTH, 1.6 * n))
         if n == 1:
             axes = axes[np.newaxis, :]
 
         for col_idx, (title, imgs) in enumerate(zip(col_titles, cols)):
-            axes[0, col_idx].set_title(title, fontsize=8)
+            axes[0, col_idx].set_title(title)
             for row_idx in range(n):
                 axes[row_idx, col_idx].imshow(imgs[row_idx])
                 axes[row_idx, col_idx].axis('off')
 
         plt.tight_layout(pad=0.3)
-        fig_path = f"{fig_dir}/predicted_frames.png"
+        fig_path = f"{fig_dir}/predicted_frames.pdf"
         plt.savefig(fig_path)
         plt.close()
 
@@ -195,25 +202,25 @@ def plot_dynamics(plot_data, fig_dir="figures"):
     mean_r2_pixel = r2_pixel_forward.mean()
 
     with paper_style():
-        fig, ax1 = plt.subplots(1, 1, figsize=(5, 5))
+        fig, ax1 = plt.subplots(1, 1, figsize=(COL_WIDTH * 0.6, 2.2))
 
         bar_width = 0.5
         colors = [COLORS['pixels'], COLORS['physics']]
-        labels = ['Render\nmodel', 'Physics\nmodel']
+        labels = ['Render', 'Physics']
 
         bars1 = ax1.bar(labels, [mean_r2_pixel, mean_r2_physics],
                         width=bar_width, color=colors,
                         yerr=[r2_pixel_forward.std() / np.sqrt(n_neurons),
                               r2_physics_forward.std() / np.sqrt(n_neurons)],
-                        capsize=5)
-        ax1.set_ylabel('Future neural R²')
+                        capsize=3)
+        ax1.set_ylabel('Future neural R\u00b2')
         ax1.set_title('Future brain state prediction')
         for bar, val in zip(bars1, [mean_r2_pixel, mean_r2_physics]):
             ax1.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.01,
                      f'{val:.3f}', ha='center', va='bottom', fontweight='bold')
 
         plt.tight_layout()
-        fig_path = f"{fig_dir}/dynamics_analysis.png"
+        fig_path = f"{fig_dir}/dynamics_analysis.pdf"
         plt.savefig(fig_path)
         plt.close()
 
@@ -228,24 +235,29 @@ def plot_pca(plot_data, fig_dir="figures"):
     all_pc_acc = decode_accs[-1]
     pc1, pc2 = neural_pca_2d[:, 0], neural_pca_2d[:, 1]
 
+    # Figure 1: elbow + scatter (stacked vertically)
     with paper_style():
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(13, 5))
+        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(COL_WIDTH, 4.5))
 
-        ax1.plot(range(1, n_neurons + 1), cumvar, color=COLORS['pixels'], linewidth=2)
-        ax1.axhline(all_pc_acc, color=COLORS['physics'], linestyle='--', linewidth=1.5,
+        # Elbow + decoding reference
+        ax1.plot(range(1, n_neurons + 1), cumvar, color=COLORS['pixels'])
+        ax1.axhline(all_pc_acc, color=COLORS['physics'], linestyle='--',
+                    linewidth=1.0,
                     label=f'Motion decoding (all PCs): {all_pc_acc:.1%}')
-        ax1.axhline(0.5, color='gray', linestyle=':', alpha=0.5, label='Chance (50%)')
+        ax1.axhline(0.5, color='gray', linestyle=':', alpha=0.5,
+                    label='Chance (50%)')
         ax1.set_xlabel('Number of principal components')
         ax1.set_ylabel('Cumulative explained variance')
-        ax1.set_title('PCA Elbow Plot + Motion Decoding')
-        ax1.legend(fontsize=9)
+        ax1.set_title('PCA elbow plot + motion decoding')
+        ax1.legend()
         ax1.set_xlim(1, n_neurons)
 
+        # PC1/PC2 scatter colored by motion direction
         lo, hi = 1, 99
         pc1_lim = np.percentile(pc1, [lo, hi])
         pc2_lim = np.percentile(pc2, [lo, hi])
         colors = np.where(motion_dir == 1, COLORS['physics'], COLORS['pixels'])
-        ax2.scatter(pc1, pc2, c=colors, alpha=0.3, s=10, edgecolors='none')
+        ax2.scatter(pc1, pc2, c=colors, alpha=0.3, s=4, edgecolors='none')
         pad1 = 0.05 * (pc1_lim[1] - pc1_lim[0])
         pad2 = 0.05 * (pc2_lim[1] - pc2_lim[0])
         ax2.set_xlim(pc1_lim[0] - pad1, pc1_lim[1] + pad1)
@@ -254,44 +266,50 @@ def plot_pca(plot_data, fig_dir="figures"):
         ax2.set_ylabel('PC2')
         ax2.set_title('PC1 vs PC2 (colored by motion direction)')
         ax2.legend(handles=[
-            Line2D([0], [0], marker='o', color='w', markerfacecolor=COLORS['pixels'],
-                   markersize=8, label='Left'),
-            Line2D([0], [0], marker='o', color='w', markerfacecolor=COLORS['physics'],
-                   markersize=8, label='Right'),
-        ], fontsize=9)
+            Line2D([0], [0], marker='o', color='w',
+                   markerfacecolor=COLORS['pixels'], markersize=5,
+                   label='Left'),
+            Line2D([0], [0], marker='o', color='w',
+                   markerfacecolor=COLORS['physics'], markersize=5,
+                   label='Right'),
+        ])
 
-        ax_inset = ax2.inset_axes([0.55, 0.05, 0.42, 0.40])
-        ax_inset.plot(pc_counts, decode_accs, marker='o', color=COLORS['pixels'],
-                      markersize=4, linewidth=1.5)
+        # Inset: decoding accuracy vs number of PCs
+        ax_inset = ax2.inset_axes([0.58, 0.05, 0.40, 0.42])
+        ax_inset.plot(pc_counts, decode_accs, marker='o',
+                      color=COLORS['pixels'], markersize=3)
         ax_inset.axhline(0.5, color='gray', linestyle='--', alpha=0.5)
-        ax_inset.set_xlabel('# PCs', fontsize=7)
-        ax_inset.set_ylabel('Accuracy', fontsize=7)
-        ax_inset.set_title('Motion decoding', fontsize=8)
-        ax_inset.tick_params(labelsize=6)
+        ax_inset.set_xlabel('# PCs', fontsize=5)
+        ax_inset.set_ylabel('Accuracy', fontsize=5)
+        ax_inset.set_title('Motion decoding', fontsize=6)
+        ax_inset.tick_params(labelsize=5)
         ax_inset.set_xscale('log')
         ax_inset.set_ylim(0.4, 1.0)
 
+        fig.align_ylabels([ax1, ax2])
         plt.tight_layout()
-        fig_path = f"{fig_dir}/pca_analysis.png"
+        fig_path = f"{fig_dir}/pca_analysis.pdf"
         plt.savefig(fig_path)
         plt.close()
 
     # Figure 2: elbow + decoding overlay with twinx
     with paper_style():
-        fig, ax_var = plt.subplots(figsize=(6.5, 5))
+        fig, ax_var = plt.subplots(figsize=(COL_WIDTH, 2.4))
         ax_dec = ax_var.twinx()
 
         ax_var.plot(range(1, n_neurons + 1), cumvar,
-                    color=COLORS['pixels'], linewidth=2, label='Cumulative variance')
+                    color=COLORS['pixels'], label='Cumulative variance')
         ax_var.set_xlabel('Number of principal components')
-        ax_var.set_ylabel('Cumulative explained variance', color=COLORS['pixels'])
+        ax_var.set_ylabel('Cumulative explained variance',
+                          color=COLORS['pixels'])
         ax_var.tick_params(axis='y', labelcolor=COLORS['pixels'])
         ax_var.set_xlim(1, n_neurons)
         ax_var.set_ylim(0, 1.05)
 
-        ax_dec.plot(pc_counts, decode_accs, marker='o', color=COLORS['physics'],
-                    linewidth=2, markersize=5, label='Motion decoding accuracy')
-        ax_dec.axhline(0.5, color='gray', linestyle=':', alpha=0.5, linewidth=1)
+        ax_dec.plot(pc_counts, decode_accs, marker='o',
+                    color=COLORS['physics'], markersize=3,
+                    label='Motion decoding accuracy')
+        ax_dec.axhline(0.5, color='gray', linestyle=':', alpha=0.5)
         ax_dec.set_ylabel('Decoding accuracy', color=COLORS['physics'])
         ax_dec.tick_params(axis='y', labelcolor=COLORS['physics'])
         ax_dec.set_ylim(0.4, 1.05)
@@ -299,25 +317,26 @@ def plot_pca(plot_data, fig_dir="figures"):
         lines_var, labels_var = ax_var.get_legend_handles_labels()
         lines_dec, labels_dec = ax_dec.get_legend_handles_labels()
         ax_var.legend(lines_var + lines_dec, labels_var + labels_dec,
-                      loc='center right', fontsize=9)
+                      loc='center right')
 
-        ax_var.set_title('PCA Variance vs Motion Decoding')
+        ax_var.set_title('PCA variance vs motion decoding')
 
-        fig_path2 = f"{fig_dir}/pca_variance_decoding.png"
+        fig_path2 = f"{fig_dir}/pca_variance_decoding.pdf"
         plt.savefig(fig_path2)
         plt.close()
 
 
 def plot_sample_scenes(initial_renders, program_states, pixel_indices,
-                       image_size, n_timesteps, fig_dir="figures", n_samples=16):
+                       image_size, n_timesteps, fig_dir="figures",
+                       n_samples=6):
     n = min(n_samples, len(initial_renders))
     with paper_style():
-        fig, axes = plt.subplots(n, 2, figsize=(4, 2 * n))
+        fig, axes = plt.subplots(n, 2, figsize=(COL_WIDTH, 1.6 * n))
         if n == 1:
             axes = axes[np.newaxis, :]
 
-        axes[0, 0].set_title('t = 0 (initial)', fontsize=9)
-        axes[0, 1].set_title(f't = {n_timesteps} (final)', fontsize=9)
+        axes[0, 0].set_title('t = 0 (initial)')
+        axes[0, 1].set_title(f't = {n_timesteps} (final)')
 
         for i in range(n):
             init_rgba = initial_renders[i].astype(np.uint8).reshape(
@@ -330,6 +349,6 @@ def plot_sample_scenes(initial_renders, program_states, pixel_indices,
             axes[i, 1].axis('off')
 
         plt.tight_layout(pad=0.3)
-        fig_path = f"{fig_dir}/sample_scenes.png"
+        fig_path = f"{fig_dir}/sample_scenes.pdf"
         plt.savefig(fig_path)
         plt.close()

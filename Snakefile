@@ -4,14 +4,14 @@ configfile: "config.yaml"
 rule all:
     input:
         "outputs/evaluation.json",
-        "figures/encoding_analysis.png",
-        "figures/rsa_analysis.png",
-        "figures/dissociation.png",
-        "figures/predicted_frames.png",
-        "figures/pca_analysis.png",
-        "figures/pca_variance_decoding.png",
-        "figures/dynamics_analysis.png",
-        "figures/sample_scenes.png",
+        "figures/encoding_analysis.pdf",
+        "figures/rsa_analysis.pdf",
+        "figures/dissociation.pdf",
+        "figures/predicted_frames.pdf",
+        "figures/pca_analysis.pdf",
+        "figures/pca_variance_decoding.pdf",
+        "figures/dynamics_analysis.pdf",
+        "figures/sample_scenes.pdf",
         "paper/results_macros.tex",
 
 
@@ -105,7 +105,7 @@ rule plot_scenes:
     input:
         scenes="data/scenes.npz",
     output:
-        figure="figures/sample_scenes.png",
+        figure="figures/sample_scenes.pdf",
     script:
         "scripts/plot_scenes.py"
 
@@ -114,7 +114,7 @@ rule plot_encoding:
     input:
         plot_data="data/encoding_plot_data.npz",
     output:
-        figure="figures/encoding_analysis.png",
+        figure="figures/encoding_analysis.pdf",
     script:
         "scripts/plot_encoding.py"
 
@@ -123,7 +123,7 @@ rule plot_rsa:
     input:
         plot_data="data/rsa_plot_data.npz",
     output:
-        figure="figures/rsa_analysis.png",
+        figure="figures/rsa_analysis.pdf",
     script:
         "scripts/plot_rsa.py"
 
@@ -132,8 +132,8 @@ rule plot_dissociation:
     input:
         plot_data="data/dissociation_plot_data.npz",
     output:
-        figure="figures/dissociation.png",
-        predicted="figures/predicted_frames.png",
+        figure="figures/dissociation.pdf",
+        predicted="figures/predicted_frames.pdf",
     script:
         "scripts/plot_dissociation.py"
 
@@ -142,8 +142,8 @@ rule plot_pca:
     input:
         plot_data="data/pca_plot_data.npz",
     output:
-        figure="figures/pca_analysis.png",
-        overlay="figures/pca_variance_decoding.png",
+        figure="figures/pca_analysis.pdf",
+        overlay="figures/pca_variance_decoding.pdf",
     script:
         "scripts/plot_pca.py"
 
@@ -152,7 +152,7 @@ rule plot_dynamics:
     input:
         plot_data="data/dynamics_plot_data.npz",
     output:
-        figure="figures/dynamics_analysis.png",
+        figure="figures/dynamics_analysis.pdf",
     script:
         "scripts/plot_dynamics.py"
 
