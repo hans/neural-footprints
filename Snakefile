@@ -15,6 +15,18 @@ rule all:
         "paper/results_macros.tex",
 
 
+rule figures:
+    input:
+        "figures/encoding_analysis.pdf",
+        "figures/rsa_analysis.pdf",
+        "figures/dissociation.pdf",
+        "figures/predicted_frames.pdf",
+        "figures/pca_analysis.pdf",
+        "figures/pca_variance_decoding.pdf",
+        "figures/dynamics_analysis.pdf",
+        "figures/sample_scenes.pdf",
+
+
 # ---------------------------------------------------------------------------
 # Data generation
 # ---------------------------------------------------------------------------
