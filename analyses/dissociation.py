@@ -201,6 +201,7 @@ def run_dissociation_analysis(neural_activity, scenes, neural_meta,
     initial_renders = scenes['initial_renders']
     behavior_labels = scenes['behavior_labels']
     render_indices = scenes['metadata']['render_indices']
+    pixel_indices = scenes['metadata']['pixel_indices']
     scene_configs = scenes['scene_configs']
     pillar_grays = scenes['pillar_grays']
 
@@ -239,13 +240,17 @@ def run_dissociation_analysis(neural_activity, scenes, neural_meta,
     print(f"  Render model mean R²:  {mean_r2_render:.4f}")
     print(f"  Physics model mean R²: {mean_r2_physics:.4f}")
 
-    # --- Pixel PCA for render model visualization (always needed) ---
+    # --- RGBA-only pixel PCA for behavioral sufficiency (matches resimulate output) ---
+    rgba_data = program_states[:, pixel_indices]
+    scaler_rgba = StandardScaler()
+    rgba_scaled = scaler_rgba.fit_transform(rgba_data)
+
     scaler_init_pix = StandardScaler()
     init_pix_scaled = scaler_init_pix.fit_transform(initial_renders)
     pca_init = PCA(n_components=behavioral_pca_dim, whiten=True, random_state=42)
     pixel_pca_initial = pca_init.fit_transform(init_pix_scaled)
     pca_final = PCA(n_components=behavioral_pca_dim, whiten=True, random_state=42)
-    final_pixel_pca = pca_final.fit_transform(pixel_scaled)
+    final_pixel_pca = pca_final.fit_transform(rgba_scaled)
 
     # --- Behavioral sufficiency ---
     print(f"Computing behavioral sufficiency ({objective})...")
@@ -254,7 +259,7 @@ def run_dissociation_analysis(neural_activity, scenes, neural_meta,
         render_score, physics_score, metric_label, chance = _score_next_frame_pixels(
             pixel_pca_initial, final_pixel_pca,
             scene_configs, initial_physics_labels,
-            scaler_pix, pca_final, pillar_grays=pillar_grays
+            scaler_rgba, pca_final, pillar_grays=pillar_grays
         )
 
     elif objective == "kinetic_energy":
@@ -269,7 +274,7 @@ def run_dissociation_analysis(neural_activity, scenes, neural_meta,
     # --- Visual illustration: oracle physics vs. render MLP ---
     print("Saving predicted frame visualization...")
     _save_predicted_frames(
-        pixel_pca_initial, final_pixel_pca, scaler_pix, pca_final,
+        pixel_pca_initial, final_pixel_pca, scaler_rgba, pca_final,
         initial_renders, program_states, pixel_indices,
         scene_configs, initial_physics_labels,
         fig_dir, pillar_grays=pillar_grays
