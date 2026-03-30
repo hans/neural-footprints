@@ -105,6 +105,41 @@ def run_pca_analysis(neural_activity, scenes, neural_meta, fig_dir="figures"):
         plt.close()
         print(f"\nFigure saved: {fig_path}")
 
+    # --- Figure v2: elbow + decoding overlay with twinx ---
+    with paper_style():
+        fig, ax_var = plt.subplots(figsize=(6.5, 5))
+        ax_dec = ax_var.twinx()
+
+        # Cumulative variance (left y-axis)
+        ax_var.plot(range(1, n_neurons + 1), cumvar,
+                    color=COLORS['pixels'], linewidth=2, label='Cumulative variance')
+        ax_var.set_xlabel('Number of principal components')
+        ax_var.set_ylabel('Cumulative explained variance', color=COLORS['pixels'])
+        ax_var.tick_params(axis='y', labelcolor=COLORS['pixels'])
+        ax_var.set_xlim(1, n_neurons)
+        ax_var.set_ylim(0, 1.05)
+
+        # Decoding accuracy (right y-axis)
+        ax_dec.plot(pc_counts, decode_accs, marker='o', color=COLORS['physics'],
+                    linewidth=2, markersize=5, label='Motion decoding accuracy')
+        ax_dec.axhline(0.5, color='gray', linestyle=':', alpha=0.5, linewidth=1)
+        ax_dec.set_ylabel('Decoding accuracy', color=COLORS['physics'])
+        ax_dec.tick_params(axis='y', labelcolor=COLORS['physics'])
+        ax_dec.set_ylim(0.4, 1.05)
+
+        # Combined legend
+        lines_var, labels_var = ax_var.get_legend_handles_labels()
+        lines_dec, labels_dec = ax_dec.get_legend_handles_labels()
+        ax_var.legend(lines_var + lines_dec, labels_var + labels_dec,
+                      loc='center right', fontsize=9)
+
+        ax_var.set_title('PCA Variance vs Motion Decoding')
+
+        fig_path2 = f"{fig_dir}/pca_variance_decoding.png"
+        plt.savefig(fig_path2)
+        plt.close()
+        print(f"Figure saved: {fig_path2}")
+
     return {
         'cumulative_variance': cumvar.tolist(),
         'all_pc_decoding_accuracy': float(all_pc_acc),
