@@ -6,3 +6,4 @@ outputs/
 .venv/
 
 paper/results_macros.tex
+.DS_Store
