@@ -25,6 +25,8 @@ from sklearn.model_selection import cross_val_predict
 from sklearn.preprocessing import StandardScaler
 import matplotlib.pyplot as plt
 
+from analyses.plot_style import COLORS, paper_style
+
 from analyses.dissociation import _make_mlp
 from config import BEHAVIORAL_PCA_DIM as _CFG_BEHAVIORAL_PCA_DIM
 
@@ -155,42 +157,41 @@ def run_dynamics_analysis(neural_activity, scenes, neural_meta,
     # ------------------------------------------------------------------
     # Figure
     # ------------------------------------------------------------------
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 5))
+    with paper_style():
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 5))
 
-    colors = ['#D65F5F', '#4878CF']
-    labels = ['Physics\nforward', 'Pixel\nforward']
+        colors = [COLORS['physics'], COLORS['pixels']]
+        labels = ['Physics\nforward', 'Pixel\nforward']
 
-    # Left panel: future brain state R²
-    bars1 = ax1.bar(labels, [mean_r2_physics, mean_r2_pixel],
-                    width=0.5, color=colors,
-                    yerr=[r2_physics_forward.std() / np.sqrt(n_neurons),
-                          r2_pixel_forward.std() / np.sqrt(n_neurons)],
-                    capsize=5)
-    ax1.set_ylabel('Future neural R²', fontsize=12)
-    ax1.set_title('Future brain state prediction', fontsize=13)
-    for bar, val in zip(bars1, [mean_r2_physics, mean_r2_pixel]):
-        ax1.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.01,
-                 f'{val:.3f}', ha='center', va='bottom', fontsize=11,
-                 fontweight='bold')
+        # Left panel: future brain state R²
+        bars1 = ax1.bar(labels, [mean_r2_physics, mean_r2_pixel],
+                        width=0.5, color=colors,
+                        yerr=[r2_physics_forward.std() / np.sqrt(n_neurons),
+                              r2_pixel_forward.std() / np.sqrt(n_neurons)],
+                        capsize=5)
+        ax1.set_ylabel('Future neural R²')
+        ax1.set_title('Future brain state prediction')
+        for bar, val in zip(bars1, [mean_r2_physics, mean_r2_pixel]):
+            ax1.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.01,
+                     f'{val:.3f}', ha='center', va='bottom', fontweight='bold')
 
-    # Right panel: ΔR² comparison (current vs future brain)
-    delta_labels = ['Current brain\n(encoding ΔR²)', 'Future brain\n(forward gap)']
-    delta_vals = [encoding_delta_r2, gap]
-    bars2 = ax2.bar(delta_labels, delta_vals,
-                    width=0.5, color=['#999999', '#6ACC65'])
-    ax2.set_ylabel('ΔR² / Gap', fontsize=12)
-    ax2.set_title('Reverse dissociation', fontsize=13)
-    ax2.axhline(0, color='gray', linestyle='--', alpha=0.3)
-    for bar, val in zip(bars2, delta_vals):
-        ax2.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.005,
-                 f'{val:.4f}', ha='center', va='bottom', fontsize=11,
-                 fontweight='bold')
+        # Right panel: ΔR² comparison (current vs future brain)
+        delta_labels = ['Current brain\n(encoding ΔR²)', 'Future brain\n(forward gap)']
+        delta_vals = [encoding_delta_r2, gap]
+        bars2 = ax2.bar(delta_labels, delta_vals,
+                        width=0.5, color=[COLORS['neutral'], COLORS['control']])
+        ax2.set_ylabel('ΔR² / Gap')
+        ax2.set_title('Reverse dissociation')
+        ax2.axhline(0, color='gray', linestyle='--', alpha=0.3)
+        for bar, val in zip(bars2, delta_vals):
+            ax2.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.005,
+                     f'{val:.4f}', ha='center', va='bottom', fontweight='bold')
 
-    plt.tight_layout()
-    fig_path = f"{fig_dir}/dynamics_analysis.png"
-    plt.savefig(fig_path, dpi=150, bbox_inches='tight')
-    plt.close()
-    print(f"\nFigure saved: {fig_path}")
+        plt.tight_layout()
+        fig_path = f"{fig_dir}/dynamics_analysis.png"
+        plt.savefig(fig_path)
+        plt.close()
+        print(f"\nFigure saved: {fig_path}")
 
     return {
         'r2_physics_forward': r2_physics_forward,

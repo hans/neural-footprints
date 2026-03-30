@@ -13,6 +13,8 @@ from sklearn.neural_network import MLPClassifier
 from sklearn.preprocessing import StandardScaler
 import matplotlib.pyplot as plt
 
+from analyses.plot_style import COLORS, paper_style
+
 from config import PIXEL_PCA_DIM as _CFG_PIXEL_PCA_DIM
 
 
@@ -125,45 +127,46 @@ def run_encoding_analysis(neural_activity, scenes, neural_meta, fig_dir="figures
         subsample_sig_fracs.append((deltas > 0).mean())
 
     # --- Figure 1: R² bar plot ---
-    fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+    with paper_style():
+        fig, axes = plt.subplots(1, 3, figsize=(15, 5))
 
-    ax = axes[0]
-    bars = ax.bar(['Pixels only', 'Pixels + Physics'],
-                  [mean_r2_pix, mean_r2_comb],
-                  yerr=[r2_pixels_only.std() / np.sqrt(n_neurons),
-                        r2_combined.std() / np.sqrt(n_neurons)],
-                  color=['#4878CF', '#D65F5F'], capsize=5)
-    ax.set_ylabel('Mean R²')
-    ax.set_title('Encoding Model: R² ± Physics Labels')
-    # Annotate ΔR²
-    ymax = max(mean_r2_pix, mean_r2_comb) * 1.1
-    ax.annotate(f'ΔR² = {mean_delta:.6f}', xy=(0.5, ymax),
-                ha='center', fontsize=10, style='italic')
+        ax = axes[0]
+        bars = ax.bar(['Pixels only', 'Pixels + Physics'],
+                      [mean_r2_pix, mean_r2_comb],
+                      yerr=[r2_pixels_only.std() / np.sqrt(n_neurons),
+                            r2_combined.std() / np.sqrt(n_neurons)],
+                      color=[COLORS['pixels'], COLORS['physics']], capsize=5)
+        ax.set_ylabel('Mean R²')
+        ax.set_title('Encoding Model: R² ± Physics Labels')
+        # Annotate ΔR²
+        ymax = max(mean_r2_pix, mean_r2_comb) * 1.1
+        ax.annotate(f'ΔR² = {mean_delta:.6f}', xy=(0.5, ymax),
+                    ha='center', fontsize=10, style='italic')
 
-    # --- Figure 2: Subsampling curve ---
-    ax = axes[1]
-    ax.errorbar(neuron_counts, subsample_means, yerr=subsample_sems,
-                marker='o', color='#4878CF', capsize=3)
-    ax.axhline(0, color='gray', linestyle='--', alpha=0.5)
-    ax.set_xlabel('Number of neurons sampled')
-    ax.set_ylabel('Mean ΔR²')
-    ax.set_title('ΔR² vs. Neuron Subsampling')
+        # --- Figure 2: Subsampling curve ---
+        ax = axes[1]
+        ax.errorbar(neuron_counts, subsample_means, yerr=subsample_sems,
+                    marker='o', color=COLORS['pixels'], capsize=3)
+        ax.axhline(0, color='gray', linestyle='--', alpha=0.5)
+        ax.set_xlabel('Number of neurons sampled')
+        ax.set_ylabel('Mean ΔR²')
+        ax.set_title('ΔR² vs. Neuron Subsampling')
 
-    # --- Figure 3: Control accuracy ---
-    ax = axes[2]
-    ax.bar(['Physics → Behavior'], [control_acc],
-           yerr=[log_scores.std()], color='#6ACC65', capsize=5)
-    ax.axhline(0.5, color='gray', linestyle='--', alpha=0.5, label='Chance')
-    ax.set_ylabel('Accuracy')
-    ax.set_title('Control: Physics Labels Predict Behavior')
-    ax.set_ylim(0, 1)
-    ax.legend()
+        # --- Figure 3: Control accuracy ---
+        ax = axes[2]
+        ax.bar(['Physics → Behavior'], [control_acc],
+               yerr=[log_scores.std()], color=COLORS['control'], capsize=5)
+        ax.axhline(0.5, color='gray', linestyle='--', alpha=0.5, label='Chance')
+        ax.set_ylabel('Accuracy')
+        ax.set_title('Control: Physics Labels Predict Behavior')
+        ax.set_ylim(0, 1)
+        ax.legend()
 
-    plt.tight_layout()
-    fig_path = f"{fig_dir}/encoding_analysis.png"
-    plt.savefig(fig_path, dpi=150, bbox_inches='tight')
-    plt.close()
-    print(f"\nFigure saved: {fig_path}")
+        plt.tight_layout()
+        fig_path = f"{fig_dir}/encoding_analysis.png"
+        plt.savefig(fig_path)
+        plt.close()
+        print(f"\nFigure saved: {fig_path}")
 
     # --- Fit full encoder on all data (for downstream dynamics analysis) ---
     print("\nFitting full encoder for downstream use...")

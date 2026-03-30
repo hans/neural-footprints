@@ -21,6 +21,8 @@ import pybullet as p
 import pybullet_data
 import matplotlib.pyplot as plt
 
+from analyses.plot_style import paper_style
+
 from config import N_OBJECTS, IMAGE_SIZE, N_TIMESTEPS as _CFG_N_TIMESTEPS
 
 
@@ -526,27 +528,28 @@ def save_sample_renders(scenes, fig_dir, n_samples=16):
     pixel_indices = scenes['metadata']['pixel_indices']
 
     n = min(n_samples, len(initial_renders))
-    fig, axes = plt.subplots(n, 2, figsize=(4, 2 * n))
-    if n == 1:
-        axes = axes[np.newaxis, :]
+    with paper_style():
+        fig, axes = plt.subplots(n, 2, figsize=(4, 2 * n))
+        if n == 1:
+            axes = axes[np.newaxis, :]
 
-    axes[0, 0].set_title('t = 0 (initial)', fontsize=9)
-    axes[0, 1].set_title(f't = {_CFG_N_TIMESTEPS} (final)', fontsize=9)
+        axes[0, 0].set_title('t = 0 (initial)', fontsize=9)
+        axes[0, 1].set_title(f't = {_CFG_N_TIMESTEPS} (final)', fontsize=9)
 
-    for i in range(n):
-        # Initial RGBA
-        init_rgba = initial_renders[i].astype(np.uint8).reshape(IMAGE_SIZE, IMAGE_SIZE, 4)
-        # Final RGBA (first slice of program_states)
-        final_rgba = program_states[i, pixel_indices].astype(np.uint8).reshape(IMAGE_SIZE, IMAGE_SIZE, 4)
+        for i in range(n):
+            # Initial RGBA
+            init_rgba = initial_renders[i].astype(np.uint8).reshape(IMAGE_SIZE, IMAGE_SIZE, 4)
+            # Final RGBA (first slice of program_states)
+            final_rgba = program_states[i, pixel_indices].astype(np.uint8).reshape(IMAGE_SIZE, IMAGE_SIZE, 4)
 
-        axes[i, 0].imshow(init_rgba)
-        axes[i, 0].axis('off')
-        axes[i, 1].imshow(final_rgba)
-        axes[i, 1].axis('off')
+            axes[i, 0].imshow(init_rgba)
+            axes[i, 0].axis('off')
+            axes[i, 1].imshow(final_rgba)
+            axes[i, 1].axis('off')
 
-    plt.tight_layout(pad=0.3)
-    os.makedirs(fig_dir, exist_ok=True)
-    fig_path = os.path.join(fig_dir, 'sample_scenes.png')
-    plt.savefig(fig_path, dpi=120, bbox_inches='tight')
-    plt.close()
-    print(f"Sample renders saved: {fig_path}")
+        plt.tight_layout(pad=0.3)
+        os.makedirs(fig_dir, exist_ok=True)
+        fig_path = os.path.join(fig_dir, 'sample_scenes.png')
+        plt.savefig(fig_path)
+        plt.close()
+        print(f"Sample renders saved: {fig_path}")
