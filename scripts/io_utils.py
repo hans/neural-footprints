@@ -88,6 +88,18 @@ def _convert_numpy(obj):
     return obj
 
 
+def save_encoder(encoder, path):
+    """Save fitted encoder (scaler, PCA, ridge) via joblib."""
+    import joblib
+    joblib.dump(encoder, path)
+
+
+def load_encoder(path):
+    """Load fitted encoder from joblib."""
+    import joblib
+    return joblib.load(path)
+
+
 def save_results(results, path):
     """Save analysis results dict to JSON. Converts numpy types."""
     serializable = _convert_numpy(results)

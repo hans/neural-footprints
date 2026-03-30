@@ -2,15 +2,18 @@
 Simulation 4: Future brain state prediction — reverse dissociation.
 
 Compares two forward models that attempt to predict future neural activity
-from t=0 information:
+from t=0 information, scored through the same learned encoding model (fitted
+on actual final-frame data in the encoding analysis):
 
   Physics forward model (oracle): resimulate each scene via PyBullet from
-    initial physics state → reconstruct full program_state → encoding R².
-    Since PyBullet is deterministic, this recovers ~the original encoding R².
+    initial physics state → render → encoder.predict().
+    Since PyBullet is deterministic, the encoder sees pixel-perfect input.
 
-  Pixel forward model (learned): MLP predicts final-frame pixels from initial
-    pixels → use predicted pixels as encoding features → encoding R².
-    Fails because initial pixels lack velocity and occluded-state information.
+  Pixel forward model (learned): MLP predicts final-frame RGBA pixels from
+    initial pixels → fill render array (depth/seg at training mean) →
+    encoder.predict().
+    Fails because (a) initial pixels lack velocity and occluded-state info,
+    and (b) only RGBA pixels are predicted, missing depth/segmentation.
 
 This is the reverse of the encoding analysis: physics (invisible to standard
 encoding) is exactly what you need for temporal prediction.
@@ -22,18 +25,19 @@ from sklearn.model_selection import cross_val_predict
 from sklearn.preprocessing import StandardScaler
 import matplotlib.pyplot as plt
 
-from analyses.encoding import pca_reduce_pixels, ridge_r2_per_neuron
 from analyses.dissociation import _make_mlp
-from config import PIXEL_PCA_DIM as _CFG_PIXEL_PCA_DIM
 from config import BEHAVIORAL_PCA_DIM as _CFG_BEHAVIORAL_PCA_DIM
 
 
 def run_dynamics_analysis(neural_activity, scenes, neural_meta,
-                          encoding_delta_r2, *,
+                          encoding_delta_r2, encoder, *,
                           fig_dir="figures",
-                          pixel_pca_dim=None, behavioral_pca_dim=None):
+                          behavioral_pca_dim=None):
     """
     Future brain state prediction via physics vs. pixel forward models.
+
+    Both forward models are scored through the same learned encoding model
+    (scaler → PCA → ridge) fitted on actual final-frame render data.
 
     Parameters
     ----------
@@ -45,15 +49,13 @@ def run_dynamics_analysis(neural_activity, scenes, neural_meta,
         Neural generation metadata.
     encoding_delta_r2 : float
         Mean ΔR² from the encoding analysis (for comparison plot).
+    encoder : dict
+        Fitted encoder from encoding analysis: {'scaler', 'pca', 'ridge'}.
     fig_dir : str
         Directory for output figures.
-    pixel_pca_dim : int
-        PCA components for encoding features.
     behavioral_pca_dim : int
-        PCA components for MLP prediction target.
+        PCA components for MLP pixel prediction target.
     """
-    if pixel_pca_dim is None:
-        pixel_pca_dim = _CFG_PIXEL_PCA_DIM
     if behavioral_pca_dim is None:
         behavioral_pca_dim = _CFG_BEHAVIORAL_PCA_DIM
 
@@ -71,10 +73,14 @@ def run_dynamics_analysis(neural_activity, scenes, neural_meta,
     pixel_indices = scenes['metadata']['pixel_indices']
     render_indices = scenes['metadata']['render_indices']
 
+    enc_scaler = encoder['scaler']
+    enc_pca = encoder['pca']
+    enc_ridge = encoder['ridge']
+
     n_scenes, n_neurons = neural_activity.shape
 
     # ------------------------------------------------------------------
-    # Physics forward model: resimulate each scene → full program_state
+    # Physics forward model: resimulate → full render bytes → encoder
     # ------------------------------------------------------------------
     print("\nPhysics forward model: resimulating scenes from initial state...")
     resim_program_states = np.zeros_like(program_states)
@@ -87,17 +93,16 @@ def run_dynamics_analysis(neural_activity, scenes, neural_meta,
             pillar_gray=pillar_grays[i],
         )
 
-    print("  PCA-reducing resimulated render bytes for encoding...")
-    resim_render_data = resim_program_states[:, render_indices]
-    resim_pixel_pca, _ = pca_reduce_pixels(resim_render_data, pixel_pca_dim)
+    resim_render = resim_program_states[:, render_indices]
+    resim_pca = enc_pca.transform(enc_scaler.transform(resim_render))
+    pred_neural_physics = enc_ridge.predict(resim_pca)
 
-    print("  Ridge regression: resimulated pixels → neural activity...")
-    r2_physics_forward = ridge_r2_per_neuron(resim_pixel_pca, neural_activity)
+    r2_physics_forward = _r2_per_neuron(pred_neural_physics, neural_activity)
     mean_r2_physics = r2_physics_forward.mean()
     print(f"  Physics forward model mean R²: {mean_r2_physics:.4f}")
 
     # ------------------------------------------------------------------
-    # Pixel forward model: MLP predicts final pixels from initial pixels
+    # Pixel forward model: MLP predicts RGBA → partial render → encoder
     # ------------------------------------------------------------------
     print("\nPixel forward model: training MLP on initial → final pixels...")
 
@@ -120,12 +125,18 @@ def run_dynamics_analysis(neural_activity, scenes, neural_meta,
     pred_final_scaled = pca_final.inverse_transform(pred_final_pca)
     pred_final_pixels = scaler_final.inverse_transform(pred_final_scaled)
 
-    # PCA-reduce predicted pixels for encoding (same dim as physics model)
-    print("  PCA-reducing MLP-predicted pixels for encoding...")
-    pred_pixel_pca, _ = pca_reduce_pixels(pred_final_pixels, pixel_pca_dim)
+    # Build partial render array: predicted RGBA + training-mean depth/seg
+    render_len = render_indices.stop - render_indices.start
+    pixel_len = pixel_indices.stop - pixel_indices.start
+    rgba_offset = pixel_indices.start - render_indices.start
 
-    print("  Ridge regression: predicted pixels → neural activity...")
-    r2_pixel_forward = ridge_r2_per_neuron(pred_pixel_pca, neural_activity)
+    render_data_pixel = np.tile(enc_scaler.mean_, (n_scenes, 1))
+    render_data_pixel[:, rgba_offset:rgba_offset + pixel_len] = pred_final_pixels
+
+    pixel_pca = enc_pca.transform(enc_scaler.transform(render_data_pixel))
+    pred_neural_pixel = enc_ridge.predict(pixel_pca)
+
+    r2_pixel_forward = _r2_per_neuron(pred_neural_pixel, neural_activity)
     mean_r2_pixel = r2_pixel_forward.mean()
     print(f"  Pixel forward model mean R²: {mean_r2_pixel:.4f}")
 
@@ -187,3 +198,12 @@ def run_dynamics_analysis(neural_activity, scenes, neural_meta,
         'encoding_delta_r2': encoding_delta_r2,
         'forward_gap': gap,
     }
+
+
+def _r2_per_neuron(predicted, actual):
+    """Per-neuron R² between predicted and actual neural activity."""
+    ss_res = ((actual - predicted) ** 2).sum(axis=0)
+    ss_tot = ((actual - actual.mean(axis=0)) ** 2).sum(axis=0)
+    r2 = 1.0 - ss_res / ss_tot
+    r2[ss_tot == 0] = 0.0
+    return r2

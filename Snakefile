@@ -37,6 +37,7 @@ rule encoding:
         neural="data/neural.npz",
     output:
         results="outputs/encoding_results.json",
+        encoder="data/encoder.joblib",
         figure="figures/encoding_analysis.png",
     script:
         "scripts/run_encoding.py"
@@ -81,6 +82,7 @@ rule dynamics:
         scenes="data/scenes.npz",
         neural="data/neural.npz",
         encoding="outputs/encoding_results.json",
+        encoder="data/encoder.joblib",
     output:
         results="outputs/dynamics_results.json",
         figure="figures/dynamics_analysis.png",

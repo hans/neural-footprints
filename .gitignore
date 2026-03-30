@@ -4,3 +4,5 @@ data/
 outputs/
 .snakemake/
 .venv/
+
+paper/results_macros.tex

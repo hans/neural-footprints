@@ -17,12 +17,12 @@ from config import PIXEL_PCA_DIM as _CFG_PIXEL_PCA_DIM
 
 
 def pca_reduce_pixels(pixel_data, n_components, random_state=42):
-    """StandardScaler + PCA on raw pixel data. Returns (pixel_pca, pca_object)."""
+    """StandardScaler + PCA on raw pixel data. Returns (pixel_pca, pca, scaler)."""
     scaler = StandardScaler()
     pixel_scaled = scaler.fit_transform(pixel_data)
     pca = PCA(n_components=n_components, random_state=random_state)
     pixel_pca = pca.fit_transform(pixel_scaled)
-    return pixel_pca, pca
+    return pixel_pca, pca, scaler
 
 
 def ridge_r2_per_neuron(X, neural_activity, alphas=None, cv=5):
@@ -65,7 +65,7 @@ def run_encoding_analysis(neural_activity, scenes, neural_meta, fig_dir="figures
     # --- Extract and PCA-reduce render slice (RGBA + depth + seg) ---
     print(f"\nExtracting render slice and reducing to {pixel_pca_dim} PCA components...")
     pixel_data = program_states[:, render_indices]
-    pixel_pca, pca = pca_reduce_pixels(pixel_data, pixel_pca_dim)
+    pixel_pca, pca, pixel_scaler = pca_reduce_pixels(pixel_data, pixel_pca_dim)
     print(f"  PCA explained variance: {pca.explained_variance_ratio_.sum():.2%}")
 
     # --- Standardize physics labels ---
@@ -165,6 +165,12 @@ def run_encoding_analysis(neural_activity, scenes, neural_meta, fig_dir="figures
     plt.close()
     print(f"\nFigure saved: {fig_path}")
 
+    # --- Fit full encoder on all data (for downstream dynamics analysis) ---
+    print("\nFitting full encoder for downstream use...")
+    alphas = np.logspace(-2, 6, 20)
+    encoder_ridge = RidgeCV(alphas=alphas, alpha_per_target=True)
+    encoder_ridge.fit(pixel_pca, neural_activity)
+
     return {
         'r2_pixels_only': r2_pixels_only,
         'r2_combined': r2_combined,
@@ -172,4 +178,9 @@ def run_encoding_analysis(neural_activity, scenes, neural_meta, fig_dir="figures
         'control_accuracy': control_acc,
         'subsample_means': subsample_means,
         'subsample_neuron_counts': neuron_counts,
+        'encoder': {
+            'scaler': pixel_scaler,
+            'pca': pca,
+            'ridge': encoder_ridge,
+        },
     }

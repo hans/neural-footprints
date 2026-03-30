@@ -2,7 +2,7 @@ import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from load_config import load_config
-from io_utils import load_scenes, load_neural, save_results
+from io_utils import load_scenes, load_neural, save_results, save_encoder
 from analyses.encoding import run_encoding_analysis
 
 cfg = load_config()
@@ -16,4 +16,6 @@ results = run_encoding_analysis(
     neural, scenes, neural_meta, fig_dir=fig_dir,
     pixel_pca_dim=cfg['pixel_pca_dim'],
 )
+encoder = results.pop('encoder')
 save_results(results, snakemake.output.results)
+save_encoder(encoder, snakemake.output.encoder)
