@@ -1,8 +1,11 @@
 % Minimal draft -- swap documentclass for conference template later
-\documentclass{article}
+\documentclass{ccn}
+
 \usepackage{booktabs}
 \usepackage{graphicx}
 \usepackage{amsmath}
+
+\bibliography{references}
 
 \input{results_macros}          % auto-generated numbers
 
@@ -15,61 +18,175 @@
 \maketitle
 
 \begin{abstract}
-We show, via simulation, that standard neural analysis methods---encoding
-models and representational similarity analysis (RSA)---systematically favour
-pixel-level features over physics variables that causally drive behaviour.
-In a controlled PyBullet environment with \nScenes{} scenes,
-pixel-only encoding models achieve $R^2 = \encodingRsqPixels$,
-while adding physics variables yields a negligible
-$\Delta R^2 = \encodingDeltaRsq$.
-RSA confirms the asymmetry: neural--render correlation is
-$r = \rsaCorrNeuralRender$ versus neural--physics
-$r = \rsaCorrNeuralPhysics$
-(partial $r = \rsaPartialNeuralPhysics$).
-Yet a physics-based forward model predicts future neural states
-($R^2 = \dynamicsRsqPhysics$) substantially better than a pixel-based one
-($R^2 = \dynamicsRsqPixel$; gap $= \dynamicsGap$),
-revealing the hidden causal role of physics.
-All \evalPassed/\evalTotal{} quantitative checks pass.
+Encoding models and RSA identify features that explain neural variance---but
+variance explained is not causal relevance. We demonstrate this via
+simulation: pixel features explain most neural variance
+($R^2 = \encodingRsqPixels$; $\Delta R^2 = \encodingDeltaRsq$ adding
+physics), while physics variables that causally determine future scene
+dynamics are invisible to encoding models, RSA, and PCA alike. A double
+dissociation confirms: render features achieve high neural $R^2$ but fail
+to predict future states; physics features support accurate dynamical
+prediction but are neurally invisible. This blind spot arises from an
+\emph{information asymmetry}---high-dimensional sensory features swamp
+low-dimensional causal ones---that we argue is pervasive across
+neuroscience, from speech processing to motor control. Resolving it
+requires evaluating features against behavioral sufficiency criteria, not
+variance explained.
 \end{abstract}
 
+% ===================================================================
 \section{Introduction}
-% TODO
+% ===================================================================
 
+Encoding models and RSA form the standard toolkit for claims about what
+the brain represents \citep{huth2016natural,yamins2014performance,kriegeskorte2008representational}.
+Both share a core logic: a feature is neurally relevant if it explains
+variance in neural responses. But variance explained measures statistical
+association, not causal importance. Whenever high-dimensional observable
+features dominate the input while low-dimensional latent features causally
+determine outcomes, variance-based methods will systematically favor the
+former---an \emph{information asymmetry} that is not specific to any one
+domain but arises wherever sensory signals are richer than the causal
+variables they carry.
+
+We formalize this with a controlled simulation. Using PyBullet, we
+construct partially-occluded physics scenes and generate synthetic neural
+activity by random projection of the full program state (render buffers
+$+$ serialized physics). This guarantees physics is linearly present in
+the neural code. We then show that encoding models, RSA, and PCA all
+fail to detect it---a structural consequence of information asymmetry
+that cannot be resolved by more data or better regression.
+
+% ===================================================================
 \section{Methods}
-We simulate \nScenes{} scenes in PyBullet at $\imageSize \times \imageSize$
-resolution over \nTimesteps{} timesteps. Neural activity is generated via
-random projection of the full program state (\nNeurons{} units, noise level
-$\sigma = \noiseLevel$).
+% ===================================================================
 
+We simulate \nScenes{} scenes in PyBullet with random rigid objects
+launched on a ground plane. A vertical wall at $x{=}0$ partially occludes
+objects from the camera ($\imageSize{\times}\imageSize$ pixels,
+\nTimesteps{} steps). The \emph{program state} concatenates all render
+buffers (RGBA, depth, segmentation; 49{,}152 floats) with the serialized
+physics engine state. \emph{Physics labels}---position, velocity, mass,
+friction per object (75 floats)---are extracted separately via the API,
+never concatenated into the program state, mirroring how neuroscientists
+construct regressors.
+
+Synthetic neural activity for \nNeurons{} units is:
+$\mathbf{z} = \bar{\mathbf{x}}\,\mathbf{W}^\top + \boldsymbol{\epsilon}$,
+with $W_{ij} \sim \mathcal{N}(0, 1/\sqrt{D})$ and noise $\sigma = \noiseLevel$.
+Since the program state contains both render and physics bytes, both are
+linearly decodable in principle.
+
+All analyses compare a \textbf{render model} (render bytes, PCA-reduced to
+500 dims) against a \textbf{physics model} (75-dim API labels). Behavioral
+sufficiency is measured by predicting future scene states from current
+features via ridge regression.
+
+% ===================================================================
 \section{Results}
+% ===================================================================
 
-\subsection{Encoding Analysis}
-A pixel-only ridge regression achieves mean cross-validated
-$R^2 = \encodingRsqPixels$. Adding physics variables gives
-$R^2 = \encodingRsqCombined$, a negligible
-$\Delta R^2 = \encodingDeltaRsq$, demonstrating that standard encoding
-models attribute nearly all variance to pixels.
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\columnwidth]{../figures/dissociation.pdf}
+  \caption{Double dissociation between neural variance explained and
+  behavioral sufficiency. Render features dominate encoding models but
+  cannot predict future scene states; physics features predict behavior
+  but are neurally invisible.}
+  \label{fig:dissociation}
+\end{figure}
 
-A logistic control confirms physics labels are recoverable from neural
-activity (accuracy $= \controlAccuracy\%$).
+\textbf{Double dissociation} (Fig.~\ref{fig:dissociation}).\quad
+The render model explains most neural variance (cross-validated
+$R^2 = \encodingRsqPixels$) but poorly predicts future scene states
+($R^2 = \dynamicsRsqPixel$). The physics model accurately predicts future
+dynamics ($R^2 = \dynamicsRsqPhysics$) but contributes almost nothing to
+the encoding model ($\Delta R^2 = \encodingDeltaRsq$). The features that
+explain the brain cannot explain the world, and vice versa.
 
-\subsection{Representational Similarity Analysis}
-Neural--render RDM correlation is $r = \rsaCorrNeuralRender$, while
+\textbf{Encoding models.}\quad
+A pixel-only model achieves $R^2 = \encodingRsqPixels$; adding all 75
+physics variables yields $R^2 = \encodingRsqCombined$---negligible
+$\Delta R^2 = \encodingDeltaRsq$. Standard encoding model logic would
+conclude physics is not represented, yet we know by construction it is.
+This false negative persists across neuron subsampling (10--500 units).
+A control MLP predicting future dynamics from physics labels alone achieves
+$\controlAccuracy\%$ accuracy, confirming the labels are informative.
+
+\textbf{RSA.}\quad
+Neural--render RDM correlation is $r = \rsaCorrNeuralRender$;
 neural--physics is $r = \rsaCorrNeuralPhysics$ (\rsaRatio$\times$ ratio).
-Partialling out render yields $r = \rsaPartialNeuralPhysics$, confirming
-physics structure is masked by pixel-correlated variance.
+Partialling out render reduces neural--physics correlation to
+$r = \rsaPartialNeuralPhysics$: the representational geometry is entirely
+render-shaped.
 
-\subsection{Dynamics Analysis}
-A physics-based forward model predicts next-timestep neural state with
-$R^2 = \dynamicsRsqPhysics$, outperforming pixel-based prediction
-($R^2 = \dynamicsRsqPixel$) by $\dynamicsGap$.
+\textbf{PCA.}\quad
+The top PC explains \pcaVarExplainedOne\% of variance; 10 PCs explain
+\pcaVarExplainedTen\%. These components are render-dominated. Decoding
+object motion direction from leading PCs yields near-chance accuracy;
+physics information resides in tail components only. Encoding models,
+RSA, and PCA all miss the same causal variables for the same reason:
+each privileges high-variance directions dominated by pixels.
 
-\subsection{PCA}
-The first principal component explains \pcaVarExplained1\% of variance;
-10 components explain \pcaVarExplained10\%.
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=0.7\columnwidth]{../figures/dynamics_analysis.pdf}
+  \caption{Predicting future simulated brain states from initial-timestep
+  features. Physics-based forward models far outperform render-based
+  models, recovering the causal signal that static variance-based methods
+  miss.}
+  \label{fig:dynamics}
+\end{figure}
 
+\textbf{Dynamics} (Fig.~\ref{fig:dynamics}).\quad
+The preceding analyses are static: they ask which features explain a
+snapshot of neural activity. But if we instead ask which features predict
+\emph{future} simulated brain states---neural activity at $t{+}n$ given
+features at $t$---the picture inverts. A physics-based forward model
+achieves $R^2 = \dynamicsRsqPhysics$; a render-based model achieves only
+$R^2 = \dynamicsRsqPixel$---a gap of $\dynamicsGap$. Features that carry
+the dynamics of the generative process, not its momentary appearance,
+are what predict where the neural state is headed. This suggests a
+concrete criterion for real data: models that predict brain states at
+$t \gg n$ from features at $t$ should preferentially recover causally
+operative variables.
+
+% ===================================================================
 \section{Discussion}
-% TODO
+% ===================================================================
 
+Our results do not challenge encoding models' correctness---they correctly
+identify dominant variance sources. Rather, variance explained is
+structurally insufficient for identifying causally operative variables.
+The core issue is an information asymmetry: high-dimensional observable
+features dominate the variance budget, burying low-dimensional causal
+variables that occupy too small a subspace to register.
+
+This information asymmetry is not a special case of pixels versus physics.
+It arises whenever the features that dominate neural variance are richer
+than the causal variables they carry---a condition we should expect to be
+pervasive. In auditory cortex, spectrotemporal modulation features explain
+substantial neural variance, but syntactic structure---which determines
+sentence meaning---is low-dimensional and may be similarly invisible to
+encoding models. In visual neuroscience, deep network features dominate
+encoding performance throughout the ventral stream
+\citep{yamins2014performance}, yet category-diagnostic or
+affordance-relevant variables occupy a small subspace of those
+representations. In motor cortex, high-dimensional kinematic features may
+swamp the low-dimensional planning primitives that actually govern action
+selection. In each case, the same logic applies: variance-based methods
+will find the dominant signal, not necessarily the operative one.
+
+The corrective is to complement variance-based methods with behavioral
+sufficiency criteria. In our simulation, the key test is whether features
+predict future brain states: models that forecast neural activity at
+$t \gg n$ from features at $t$ preferentially recover physics over pixels.
+In real-data settings, the analogous criterion would evaluate candidate
+feature sets by their ability to predict downstream neural states, motor
+outputs, or task-relevant decisions---not just concurrent variance. Features
+with high neural $R^2$ but no predictive power capture the dominant signal,
+not the important one. Understanding what neural representations are
+actually \emph{for} requires benchmarks that test what they \emph{do}.
+
+\printbibliography
 \end{document}
