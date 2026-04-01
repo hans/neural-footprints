@@ -11,16 +11,16 @@ from sklearn.linear_model import RidgeCV
 from sklearn.model_selection import cross_val_predict, cross_val_score
 from sklearn.neural_network import MLPClassifier
 from sklearn.preprocessing import StandardScaler
-from config import PIXEL_PCA_DIM as _CFG_PIXEL_PCA_DIM
+from config import RENDER_PCA_DIM as _CFG_RENDER_PCA_DIM
 
 
-def pca_reduce_pixels(pixel_data, n_components, random_state=42):
-    """StandardScaler + PCA on raw pixel data. Returns (pixel_pca, pca, scaler)."""
+def pca_reduce_render(render_data, n_components, random_state=42):
+    """StandardScaler + PCA on render data (RGBA+depth+seg). Returns (render_pca, pca, scaler)."""
     scaler = StandardScaler()
-    pixel_scaled = scaler.fit_transform(pixel_data)
+    render_scaled = scaler.fit_transform(render_data)
     pca = PCA(n_components=n_components, random_state=random_state)
-    pixel_pca = pca.fit_transform(pixel_scaled)
-    return pixel_pca, pca, scaler
+    render_pca = pca.fit_transform(render_scaled)
+    return render_pca, pca, scaler
 
 
 def ridge_r2_per_neuron(X, neural_activity, alphas=None, cv=5):
@@ -35,19 +35,19 @@ def ridge_r2_per_neuron(X, neural_activity, alphas=None, cv=5):
 
 
 def run_encoding_analysis(neural_activity, scenes, neural_meta,
-                          *, pixel_pca_dim=None):
+                          *, render_pca_dim=None):
     """
     Run encoding model analysis.
 
-    1. PCA-reduce pixel slice to PIXEL_PCA_DIM components
-    2. Ridge regression: neural ~ pixel_PCA -> R² per neuron
-    3. Ridge regression: neural ~ pixel_PCA + physics_labels -> R²
+    1. PCA-reduce render slice to RENDER_PCA_DIM components
+    2. Ridge regression: neural ~ render_PCA -> R² per neuron
+    3. Ridge regression: neural ~ render_PCA + physics_labels -> R²
     4. DeltaR² should be tiny
     5. Subsampling curve: vary neurons sampled, plot DeltaR² + significance
     6. Control: MLP physics_labels -> behavior_label
     """
-    if pixel_pca_dim is None:
-        pixel_pca_dim = _CFG_PIXEL_PCA_DIM
+    if render_pca_dim is None:
+        render_pca_dim = _CFG_RENDER_PCA_DIM
 
     print("\n" + "=" * 60)
     print("SIMULATION 1: Encoding Model False Negatives")
@@ -61,22 +61,22 @@ def run_encoding_analysis(neural_activity, scenes, neural_meta,
     n_scenes, n_neurons = neural_activity.shape
 
     # --- Extract and PCA-reduce render slice (RGBA + depth + seg) ---
-    print(f"\nExtracting render slice and reducing to {pixel_pca_dim} PCA components...")
-    pixel_data = program_states[:, render_indices]
-    pixel_pca, pca, pixel_scaler = pca_reduce_pixels(pixel_data, pixel_pca_dim)
+    print(f"\nExtracting render slice and reducing to {render_pca_dim} PCA components...")
+    render_data = program_states[:, render_indices]
+    render_pca, pca, render_scaler = pca_reduce_render(render_data, render_pca_dim)
     print(f"  PCA explained variance: {pca.explained_variance_ratio_.sum():.2%}")
 
     # --- Standardize physics labels ---
     scaler_phys = StandardScaler()
     physics_scaled = scaler_phys.fit_transform(physics_labels)
 
-    # --- Encoding model: pixels only ---
-    print("\nFitting encoding model: neural ~ pixel_PCA ...")
-    r2_pixels_only = ridge_r2_per_neuron(pixel_pca, neural_activity)
+    # --- Encoding model: render only ---
+    print("\nFitting encoding model: neural ~ render_PCA ...")
+    r2_pixels_only = ridge_r2_per_neuron(render_pca, neural_activity)
 
-    # --- Encoding model: pixels + physics labels ---
-    print("Fitting encoding model: neural ~ pixel_PCA + physics_labels ...")
-    combined = np.hstack([pixel_pca, physics_scaled])
+    # --- Encoding model: render + physics labels ---
+    print("Fitting encoding model: neural ~ render_PCA + physics_labels ...")
+    combined = np.hstack([render_pca, physics_scaled])
     r2_combined = ridge_r2_per_neuron(combined, neural_activity)
 
     delta_r2 = r2_combined - r2_pixels_only
@@ -126,7 +126,7 @@ def run_encoding_analysis(neural_activity, scenes, neural_meta,
     print("\nFitting full encoder for downstream use...")
     alphas = np.logspace(-2, 6, 20)
     encoder_ridge = RidgeCV(alphas=alphas, alpha_per_target=True)
-    encoder_ridge.fit(pixel_pca, neural_activity)
+    encoder_ridge.fit(render_pca, neural_activity)
 
     return {
         'r2_pixels_only': r2_pixels_only,
@@ -138,7 +138,7 @@ def run_encoding_analysis(neural_activity, scenes, neural_meta,
         'subsample_sems': subsample_sems,
         'subsample_neuron_counts': neuron_counts,
         'encoder': {
-            'scaler': pixel_scaler,
+            'scaler': render_scaler,
             'pca': pca,
             'ridge': encoder_ridge,
         },

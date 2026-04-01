@@ -21,7 +21,7 @@ from sklearn.model_selection import cross_val_score
 from sklearn.neural_network import MLPRegressor
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
-from config import PIXEL_PCA_DIM as _CFG_PIXEL_PCA_DIM
+from config import RENDER_PCA_DIM as _CFG_RENDER_PCA_DIM
 from config import BEHAVIORAL_PCA_DIM as _CFG_BEHAVIORAL_PCA_DIM
 from config import BEHAVIORAL_OBJECTIVE as _CFG_BEHAVIORAL_OBJECTIVE
 
@@ -131,14 +131,14 @@ def _compute_predicted_frames(
     return init_imgs, render_imgs, physics_imgs, final_imgs
 
 
-def _score_kinetic_energy(pixel_pca, physics_scaled, behavior_labels):
+def _score_kinetic_energy(render_pca, physics_scaled, behavior_labels):
     """
     Logistic regression accuracy predicting KE binary label.
 
     Returns (render_score, physics_score, metric_label, chance_line).
     """
     log_reg = LogisticRegressionCV(cv=5, max_iter=1000, random_state=42)
-    render_r2 = cross_val_score(log_reg, pixel_pca, behavior_labels, cv=5, scoring='accuracy').mean()
+    render_r2 = cross_val_score(log_reg, render_pca, behavior_labels, cv=5, scoring='accuracy').mean()
     physics_r2 = cross_val_score(log_reg, physics_scaled, behavior_labels, cv=5, scoring='accuracy').mean()
     return render_r2, physics_r2, "Behavior accuracy", 0.5
 
@@ -149,12 +149,12 @@ def _score_kinetic_energy(pixel_pca, physics_scaled, behavior_labels):
 
 def run_dissociation_analysis(neural_activity, scenes, neural_meta,
                                objective=None,
-                               *, pixel_pca_dim=None, behavioral_pca_dim=None):
+                               *, render_pca_dim=None, behavioral_pca_dim=None):
     """
     Compute and plot the R² vs. behavioral sufficiency dissociation.
 
     Two models:
-      Render model:  pixel PCA features (PIXEL_PCA_DIM dims)
+      Render model:  render PCA features (RENDER_PCA_DIM dims)
       Physics model: API physics labels (15*N_OBJECTS dims)
 
     For each, measure:
@@ -163,8 +163,8 @@ def run_dissociation_analysis(neural_activity, scenes, neural_meta,
     """
     if objective is None:
         objective = _CFG_BEHAVIORAL_OBJECTIVE
-    if pixel_pca_dim is None:
-        pixel_pca_dim = _CFG_PIXEL_PCA_DIM
+    if render_pca_dim is None:
+        render_pca_dim = _CFG_RENDER_PCA_DIM
     if behavioral_pca_dim is None:
         behavioral_pca_dim = _CFG_BEHAVIORAL_PCA_DIM
 
@@ -187,12 +187,12 @@ def run_dissociation_analysis(neural_activity, scenes, neural_meta,
     n_scenes, n_neurons = neural_activity.shape
 
     # --- Prepare final-frame render features (used for neural R²) ---
-    print("\nPreparing render features (pixel PCA of final frame)...")
-    pixel_data = program_states[:, render_indices]
-    scaler_pix = StandardScaler()
-    pixel_scaled = scaler_pix.fit_transform(pixel_data)
-    pca = PCA(n_components=pixel_pca_dim, random_state=42)
-    pixel_pca = pca.fit_transform(pixel_scaled)
+    print("\nPreparing render features (render PCA of final frame)...")
+    render_data = program_states[:, render_indices]
+    scaler_render = StandardScaler()
+    render_scaled = scaler_render.fit_transform(render_data)
+    pca = PCA(n_components=render_pca_dim, random_state=42)
+    render_pca = pca.fit_transform(render_scaled)
 
     scaler_phys = StandardScaler()
     physics_scaled = scaler_phys.fit_transform(physics_labels)
@@ -204,8 +204,8 @@ def run_dissociation_analysis(neural_activity, scenes, neural_meta,
     r2_render = np.zeros(n_neurons)
     for j in range(n_neurons):
         ridge = RidgeCV(alphas=alphas)
-        ridge.fit(pixel_pca, neural_activity[:, j])
-        r2_render[j] = ridge.score(pixel_pca, neural_activity[:, j])
+        ridge.fit(render_pca, neural_activity[:, j])
+        r2_render[j] = ridge.score(render_pca, neural_activity[:, j])
 
     r2_physics = np.zeros(n_neurons)
     for j in range(n_neurons):
@@ -244,7 +244,7 @@ def run_dissociation_analysis(neural_activity, scenes, neural_meta,
 
     elif objective == "kinetic_energy":
         render_score, physics_score, metric_label, chance = _score_kinetic_energy(
-            pixel_pca, physics_scaled, behavior_labels
+            render_pca, physics_scaled, behavior_labels
         )
 
     else:

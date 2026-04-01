@@ -10,7 +10,7 @@ from scipy.spatial.distance import pdist, squareform
 from scipy.stats import spearmanr
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
-from config import RSA_SUBSAMPLE as _CFG_RSA_SUBSAMPLE, PIXEL_PCA_DIM as _CFG_PIXEL_PCA_DIM
+from config import RSA_SUBSAMPLE as _CFG_RSA_SUBSAMPLE, RENDER_PCA_DIM as _CFG_RENDER_PCA_DIM
 
 
 def _compute_rdm(data):
@@ -45,7 +45,7 @@ def _partial_spearman(x, y, z):
 
 
 def run_rsa_analysis(neural_activity, scenes, neural_meta,
-                     *, rsa_subsample=None, pixel_pca_dim=None):
+                     *, rsa_subsample=None, render_pca_dim=None):
     """
     Run RSA analysis on a subsample of scenes.
 
@@ -55,8 +55,8 @@ def run_rsa_analysis(neural_activity, scenes, neural_meta,
     """
     if rsa_subsample is None:
         rsa_subsample = _CFG_RSA_SUBSAMPLE
-    if pixel_pca_dim is None:
-        pixel_pca_dim = _CFG_PIXEL_PCA_DIM
+    if render_pca_dim is None:
+        render_pca_dim = _CFG_RENDER_PCA_DIM
 
     print("\n" + "=" * 60)
     print("SIMULATION 2: RSA Dominated by Render Structure")
@@ -75,16 +75,16 @@ def run_rsa_analysis(neural_activity, scenes, neural_meta,
     sub_idx.sort()
 
     neural_sub = neural_activity[sub_idx]
-    pixel_sub = program_states[sub_idx][:, render_indices]
+    render_sub = program_states[sub_idx][:, render_indices]
     physics_sub = physics_labels[sub_idx]
 
-    # PCA-reduce pixel data for tractability
+    # PCA-reduce render data for tractability
     print(f"\nSubsampled {n_sub} scenes for RSA.")
-    print(f"PCA-reducing pixel data to {pixel_pca_dim} components...")
+    print(f"PCA-reducing render data to {render_pca_dim} components...")
     scaler = StandardScaler()
-    pixel_scaled = scaler.fit_transform(pixel_sub)
-    pca = PCA(n_components=min(pixel_pca_dim, pixel_scaled.shape[0] - 1), random_state=42)
-    pixel_pca = pca.fit_transform(pixel_scaled)
+    render_scaled = scaler.fit_transform(render_sub)
+    pca = PCA(n_components=min(render_pca_dim, render_scaled.shape[0] - 1), random_state=42)
+    render_pca = pca.fit_transform(render_scaled)
 
     # Standardize physics
     scaler_phys = StandardScaler()
@@ -93,7 +93,7 @@ def run_rsa_analysis(neural_activity, scenes, neural_meta,
     # Compute RDMs
     print("Computing RDMs...")
     rdm_neural = _compute_rdm(neural_sub)
-    rdm_render = _compute_rdm(pixel_pca)
+    rdm_render = _compute_rdm(render_pca)
     rdm_physics = _compute_rdm(physics_scaled)
 
     # Handle NaN in RDMs (constant rows produce NaN in correlation distance)
