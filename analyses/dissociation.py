@@ -195,12 +195,15 @@ def run_dissociation_analysis(neural_activity, scenes, neural_meta,
     print("\nReusing neural R² from encoding analysis...")
     r2_render = encoding_results['r2_pixels_only']
     r2_physics = encoding_results['r2_physics_only']
+    r2_combined = encoding_results['r2_combined']
 
     mean_r2_render = r2_render.mean()
     mean_r2_physics = r2_physics.mean()
+    mean_r2_combined = r2_combined.mean()
 
-    print(f"  Render model mean R²:  {mean_r2_render:.4f}")
-    print(f"  Physics model mean R²: {mean_r2_physics:.4f}")
+    print(f"  Render model mean R²:          {mean_r2_render:.4f}")
+    print(f"  Physics model mean R²:         {mean_r2_physics:.4f}")
+    print(f"  Render+physics model mean R²:  {mean_r2_combined:.4f}")
 
     # --- Prepare features for behavioral sufficiency scoring ---
     render_data = program_states[:, render_indices]
@@ -219,6 +222,9 @@ def run_dissociation_analysis(neural_activity, scenes, neural_meta,
     pca_final = PCA(n_components=behavioral_pca_dim, whiten=True, random_state=42)
     final_pixel_pca = pca_final.fit_transform(rgba_scaled)
 
+    # --- Scale initial physics labels for combined behavioral model ---
+    initial_physics_scaled = encoder['scaler_phys'].transform(initial_physics_labels)
+
     # --- Behavioral sufficiency ---
     print(f"Computing behavioral sufficiency ({objective})...")
 
@@ -229,11 +235,19 @@ def run_dissociation_analysis(neural_activity, scenes, neural_meta,
             scaler_rgba, pca_final, pillar_grays=pillar_grays,
             lightings=lightings,
         )
+        # Combined model: same oracle as physics-only — if you have the
+        # physics state you can re-simulate deterministically.
+        combined_score = physics_score
 
     elif objective == "kinetic_energy":
         render_score, physics_score, metric_label, chance = _score_kinetic_energy(
             render_pca, physics_scaled, behavior_labels
         )
+        combined_features = np.hstack([render_pca, physics_scaled])
+        log_reg = LogisticRegressionCV(cv=5, max_iter=1000, random_state=42)
+        combined_score = cross_val_score(
+            log_reg, combined_features, behavior_labels,
+            cv=5, scoring='accuracy').mean()
 
     else:
         raise ValueError(f"Unknown objective: {objective!r}. "
@@ -248,20 +262,25 @@ def run_dissociation_analysis(neural_activity, scenes, neural_meta,
         pillar_grays=pillar_grays, lightings=lightings,
     )
 
-    print(f"  Render  → {metric_label}: {render_score:.4f}")
-    print(f"  Physics → {metric_label}: {physics_score:.4f}")
+    print(f"  Render          → {metric_label}: {render_score:.4f}")
+    print(f"  Physics         → {metric_label}: {physics_score:.4f}")
+    print(f"  Render+physics  → {metric_label}: {combined_score:.4f}")
 
     print("\n  DISSOCIATION:")
-    print(f"    Render model:  R² = {mean_r2_render:.4f}  |  {metric_label} = {render_score:.4f}")
-    print(f"    Physics model: R² = {mean_r2_physics:.4f}  |  {metric_label} = {physics_score:.4f}")
+    print(f"    Render model:          R² = {mean_r2_render:.4f}  |  {metric_label} = {render_score:.4f}")
+    print(f"    Physics model:         R² = {mean_r2_physics:.4f}  |  {metric_label} = {physics_score:.4f}")
+    print(f"    Render+physics model:  R² = {mean_r2_combined:.4f}  |  {metric_label} = {combined_score:.4f}")
 
     return {
         'mean_r2_render': mean_r2_render,
         'mean_r2_physics': mean_r2_physics,
+        'mean_r2_combined': mean_r2_combined,
         'r2_render': r2_render,
         'r2_physics': r2_physics,
+        'r2_combined': r2_combined,
         'render_behavioral_score': render_score,
         'physics_behavioral_score': physics_score,
+        'combined_behavioral_score': combined_score,
         'metric_label': metric_label,
         'objective': objective,
         'chance': chance if chance is not None else float('nan'),

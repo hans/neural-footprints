@@ -9,8 +9,9 @@ from analyses.plot_style import COLORS, COL_WIDTH, FULL_WIDTH, paper_style
 
 
 # Model names
-LABEL_RENDER = "Render"
+LABEL_RENDER = "Sensory"
 LABEL_PHYSICS = "Physics"
+LABEL_RENDER_PLUS_PHYSICS = "Full"
 
 
 def plot_encoding(plot_data, fig_dir="figures"):
@@ -79,10 +80,7 @@ def plot_rsa(plot_data, fig_dir="figures"):
     corr_neural_physics = float(plot_data['corr_neural_physics'])
 
     with paper_style():
-        fig, axes = plt.subplots(2, 2, figsize=(COL_WIDTH, COL_WIDTH),
-                                 constrained_layout=True)
-
-        n_show = min(100, n_sub)
+        n_show = min(25, n_sub)
         rdm_neural_sq = squareform(rdm_neural)[:n_show, :n_show]
         rdm_render_sq = squareform(rdm_render)[:n_show, :n_show]
         rdm_physics_sq = squareform(rdm_physics)[:n_show, :n_show]
@@ -92,21 +90,29 @@ def plot_rsa(plot_data, fig_dir="figures"):
         vmin = min(r.min() for r in all_rdms)
         vmax = max(r.max() for r in all_rdms)
 
-        rdm_axes = [axes[0, 0], axes[0, 1], axes[1, 0]]
-        for ax, rdm, title in zip(rdm_axes, all_rdms,
-                                   ['Neural RDM', 'Render RDM', 'Physics RDM']):
+        # 2x2 grid with a thin colorbar column between the two main columns
+        fig = plt.figure(figsize=(COL_WIDTH, COL_WIDTH * 0.85))
+        gs = fig.add_gridspec(2, 3, width_ratios=[1, 0.04, 1],
+                              wspace=0.4, hspace=0.5)
+
+        rdm_positions = [(0, 0), (0, 2), (1, 0)]
+        rdm_titles = ['Neural RDM', f'{LABEL_RENDER} RDM', f'{LABEL_PHYSICS} RDM']
+        for (r, c), rdm, title in zip(rdm_positions, all_rdms, rdm_titles):
+            ax = fig.add_subplot(gs[r, c])
             im = ax.imshow(rdm, cmap='viridis', aspect='equal',
                            vmin=vmin, vmax=vmax)
             ax.set_title(title)
-            ax.set_xlabel('Scene')
-            ax.set_ylabel('Scene')
+            ax.set_xticks([])
+            ax.set_yticks([])
 
-        fig.colorbar(im, ax=axes[1, 0], orientation='horizontal',
-                     label='Correlation distance', fraction=0.046, pad=0.08)
+        # Colorbar in the thin middle column, bottom row only
+        cax = fig.add_subplot(gs[1, 1])
+        fig.colorbar(im, cax=cax, orientation='vertical')
+        cax.set_ylabel('Corr. dist.', fontsize=5, rotation=270, labelpad=8)
 
-        # Correlation bar plot
-        ax = axes[1, 1]
-        labels = [f'Neural\u2013{LABEL_RENDER}', f'Neural\u2013{LABEL_PHYSICS}']
+        # Correlation bar plot in bottom-right
+        ax = fig.add_subplot(gs[1, 2])
+        labels = [f'Neural\u2013\n{LABEL_RENDER}', f'Neural\u2013\n{LABEL_PHYSICS}']
         values = [corr_neural_render, corr_neural_physics]
         colors = [COLORS['pixels'], COLORS['physics']]
         bars = ax.bar(labels, values, color=colors, width=0.6)
@@ -166,6 +172,60 @@ def plot_dissociation(plot_data, fig_dir="figures"):
 
         plt.tight_layout()
         fig_path = f"{fig_dir}/dissociation.pdf"
+        plt.savefig(fig_path)
+        plt.close()
+
+
+def plot_dissociation_combined(plot_data, fig_dir="figures"):
+    """Dissociation figure comparing render vs. render+physics models.
+
+    The two encoding bars are nearly identical height, showing that adding
+    physics to the render model barely changes neural R² — even though
+    physics dramatically improves behavioral prediction.
+    """
+    r2_render = plot_data['r2_render']
+    r2_combined = plot_data['r2_combined']
+    n_neurons = len(r2_render)
+    mean_r2_render = r2_render.mean()
+    mean_r2_combined = r2_combined.mean()
+    render_score = float(plot_data['render_score'])
+    combined_score = float(plot_data['combined_score'])
+    metric_label = str(plot_data['metric_label'])
+    chance_val = float(plot_data['chance'])
+    chance = None if np.isnan(chance_val) else chance_val
+
+    with paper_style():
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(COL_WIDTH, 2.0))
+
+        bar_width = 0.5
+        colors = [COLORS['pixels'], COLORS['combined']]
+        labels = [LABEL_RENDER, LABEL_RENDER_PLUS_PHYSICS]
+
+        bars1 = ax1.bar(labels, [mean_r2_render, mean_r2_combined],
+                        width=bar_width, color=colors,
+                        yerr=[r2_render.std() / np.sqrt(n_neurons),
+                              r2_combined.std() / np.sqrt(n_neurons)],
+                        capsize=3)
+        ax1.set_ylabel('Neural R\u00b2')
+        ax1.set_title('Encoding performance')
+        for bar, val in zip(bars1, [mean_r2_render, mean_r2_combined]):
+            ax1.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.01,
+                     f'{val:.3f}', ha='center', va='bottom', fontweight='bold')
+
+        bars2 = ax2.bar(labels, [render_score, combined_score],
+                        width=bar_width, color=colors, capsize=3)
+        if chance is not None:
+            ax2.axhline(chance, color='gray', linestyle='--', alpha=0.5, label='Chance')
+            ax2.set_ylim(0, 1.1)
+            ax2.legend()
+        ax2.set_ylabel(metric_label)
+        ax2.set_title('Behavioral sufficiency')
+        for bar, val in zip(bars2, [render_score, combined_score]):
+            ax2.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.01,
+                     f'{val:.3f}', ha='center', va='bottom', fontweight='bold')
+
+        plt.tight_layout()
+        fig_path = f"{fig_dir}/dissociation_combined.pdf"
         plt.savefig(fig_path)
         plt.close()
 

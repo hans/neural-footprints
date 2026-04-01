@@ -18,6 +18,7 @@ COLORS = {
     # Semantic aliases
     "pixels": "#4878CF",
     "physics": "#D65F5F",
+    "combined": "#D65F5F",
     "control": "#6ACC65",
     "neutral": "#999999",
 }

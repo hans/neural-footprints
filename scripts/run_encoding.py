@@ -17,6 +17,7 @@ results = run_encoding_analysis(
 encoder = results.pop('encoder')
 encoder['r2_pixels_only'] = results['r2_pixels_only']
 encoder['r2_physics_only'] = results['r2_physics_only']
+encoder['r2_combined'] = results['r2_combined']
 save_results(results, snakemake.output.results)
 save_encoder(encoder, snakemake.output.encoder)
 

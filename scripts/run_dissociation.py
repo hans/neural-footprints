@@ -14,6 +14,7 @@ encoder = load_encoder(snakemake.input.encoder)
 encoding_results = {
     'r2_pixels_only': encoder.pop('r2_pixels_only'),
     'r2_physics_only': encoder.pop('r2_physics_only'),
+    'r2_combined': encoder.pop('r2_combined'),
 }
 
 results = run_dissociation_analysis(
@@ -25,7 +26,7 @@ results = run_dissociation_analysis(
 
 # Separate large arrays / plot-only data from JSON results
 plot_arrays = {}
-for key in ['r2_render', 'r2_physics', 'chance',
+for key in ['r2_render', 'r2_physics', 'r2_combined', 'chance',
             'predicted_init_imgs', 'predicted_render_imgs',
             'predicted_physics_imgs', 'predicted_final_imgs']:
     plot_arrays[key] = results.pop(key)
@@ -33,6 +34,7 @@ for key in ['r2_render', 'r2_physics', 'chance',
 # Add scalar plot data
 plot_arrays['render_score'] = np.array(results['render_behavioral_score'])
 plot_arrays['physics_score'] = np.array(results['physics_behavioral_score'])
+plot_arrays['combined_score'] = np.array(results['combined_behavioral_score'])
 plot_arrays['metric_label'] = np.array(results['metric_label'])
 
 save_results(results, snakemake.output.results)
