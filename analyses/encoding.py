@@ -141,5 +141,6 @@ def run_encoding_analysis(neural_activity, scenes, neural_meta,
             'scaler': render_scaler,
             'pca': pca,
             'ridge': encoder_ridge,
+            'scaler_phys': scaler_phys,
         },
     }

@@ -3,17 +3,18 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import numpy as np
 from load_config import load_config
-from io_utils import load_scenes, load_neural, save_results
+from io_utils import load_scenes, load_neural, load_encoder, save_results
 from analyses.dissociation import run_dissociation_analysis
 
 cfg = load_config()
 scenes = load_scenes(snakemake.input.scenes)
 neural, neural_meta = load_neural(snakemake.input.neural)
+encoder = load_encoder(snakemake.input.encoder)
 
 results = run_dissociation_analysis(
     neural, scenes, neural_meta,
+    encoder,
     objective=cfg['behavioral_objective'],
-    render_pca_dim=cfg['render_pca_dim'],
     behavioral_pca_dim=cfg['behavioral_pca_dim'],
 )
 
