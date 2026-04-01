@@ -39,53 +39,63 @@ used methods for neural analysis are unreliable without cognitive insight.
 \section{Introduction}
 % ===================================================================
 
-TODO: Abstract away from vision, change to "perception requires...", then use vision as an example.
-
-Visual perception requires the brain to maintain representations at
-multiple levels of abstraction simultaneously. At one end, neurons encode
+Perception requires the brain to maintain representations at multiple
+levels of abstraction simultaneously. At one end, neurons encode
 fine-grained sensory detail---textures, luminance gradients, color
-patterns---that varies enormously across scenes. At the other, the brain
-must represent compact, abstract knowledge about the world: object
-identities, physical properties like mass and friction, and the dynamics
-of motion and collision that govern how a scene will unfold. These two
-levels of representation have fundamentally different statistical
-signatures.
-
-TODO: Change "statistical signatures" to "informational footprints". 
-
-Sensory features are high-dimensional and account for the
+patterns, spectrotemporal modulations---that varies enormously across
+stimuli. At the other, the brain must represent compact, abstract
+knowledge about the world: object identities, physical properties like
+mass and friction, syntactic structure, and the causal dynamics that
+govern how a scene, utterance, or action will unfold. These two levels
+of representation have fundamentally different informational footprints.
+Sensory features are intrinsically high-dimensional and account for the
 bulk of signal variance; abstract knowledge is low-dimensional and
-occupies a comparatively tiny subspace.
+occupies a comparatively tiny portion of the signal.
 
-TODO: "Subspace" --> "portion of the signal" 
+Encoding models, representational similarity analysis, and principal
+component analysis underlie many of the central findings in
+computational neuroscience---from semantic tuning in language cortex to
+hierarchical feature selectivity in the ventral stream to
+task-optimized models of auditory processing
+\citep{huth2016natural,yamins2014performance,kriegeskorte2008representational,kay2008identifying,naselaris2011encoding,kell2018task}.
+Yet these methods share a structural vulnerability: each is dominated
+by the highest-variance directions in neural activity. Encoding models
+fit regressors that maximize variance explained; representational
+similarity analysis computes similarity structures shaped by the most
+variable features; PCA explicitly extracts the principal axes of
+variance. When an intrinsically high-dimensional sensory feature set
+and a low-dimensional abstract feature set both contribute to neural
+activity, all three methods will systematically privilege the sensory
+features---not because the abstract features are absent, but because
+they are statistically dwarfed.
 
-TODO: "Statistical assymetry" should be "informational assymetry" 
-
-This statistical asymmetry poses a structural problem for the dominant
-analysis methods in systems neuroscience. Encoding models, RSA, and PCA
-all rely on variance explained as their measure of model fit
-\citep{huth2016natural,yamins2014performance,kriegeskorte2008representational}.
-When a high-dimensional sensory feature set and a low-dimensional
-abstract feature set both contribute to neural activity, variance-based
-methods will systematically privilege the sensory features at the expense of high level contents. The result
-is that these methods cannot reliably distinguish between models that
-capture the computationally relevant structure of a task and models that
-merely overlap in their low level representations. 
+This informational asymmetry matters because the representations that
+dominate neural variance are not necessarily the representations that
+drive behavior. Consider a concrete test of model adequacy: given a
+model's account of current neural activity, can it predict what happens
+next---where the scene is headed, what the organism will do, how the
+environment will change? A model built from the right variables should
+succeed at this task; a model that merely captures the dominant
+statistical surface of the signal will not. Success at this behavioral
+prediction task is what separates a model that has identified the
+computationally relevant representations from one that has merely
+found the loudest signal.
 
 We demonstrate this with a controlled simulation. Using PyBullet, we
-construct partially-occluded physics scenes and generate synthetic neural
-activity by random projection of the full program state (render buffers
-$+$ serialized physics). This guarantees that both sensory and abstract
-features are linearly present in the neural code. We then show that
+construct partially-occluded physics scenes and generate synthetic
+neural activity by random projection of the full program state (render
+buffers $+$ serialized physics). This guarantees that both sensory and
+abstract features are linearly present in the neural code. Standard
 encoding models, RSA, and PCA uniformly fail to detect the abstract
-features. Critically, this failure is not a matter of statistical power:
-it is a structural consequence of the statistical asymmetry between
-representational levels. We then show that the correct model can be
-recovered when the analysis is required to jointly account for
-representation and computation---that is, to predict not just current
-neural activity but where neural activity is headed. The implication is
-that commonly used neural analysis methods are unreliable without
-plausible cognitive models. 
+physics features, even though those features are linearly decodable by
+construction. Critically, this failure is not a matter of statistical
+power: it is a structural consequence of the informational asymmetry
+between representational levels. However, when the analysis is required
+to jointly account for representation and computation---predicting not
+just current neural activity but where neural activity is headed---the
+correct model is recovered. The implication is that commonly used
+neural analysis methods are unreliable without cognitive insight into
+what representations are for.
 
 % ===================================================================
 \section{Methods}
