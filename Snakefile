@@ -78,6 +78,7 @@ rule dissociation:
     input:
         scenes="data/scenes.npz",
         neural="data/neural.npz",
+        encoder="data/encoder.joblib",
     output:
         results="outputs/dissociation_results.json",
         plot_data="data/dissociation_plot_data.npz",

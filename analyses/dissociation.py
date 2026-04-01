@@ -16,12 +16,12 @@ Two behavioral sufficiency objectives are supported (set in config.py):
 
 import numpy as np
 from sklearn.decomposition import PCA
-from sklearn.linear_model import RidgeCV, LogisticRegressionCV
+from sklearn.linear_model import LogisticRegressionCV
 from sklearn.model_selection import cross_val_score
 from sklearn.neural_network import MLPRegressor
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
-from config import PIXEL_PCA_DIM as _CFG_PIXEL_PCA_DIM
+from analyses.encoding import ridge_r2_per_neuron
 from config import BEHAVIORAL_PCA_DIM as _CFG_BEHAVIORAL_PCA_DIM
 from config import BEHAVIORAL_OBJECTIVE as _CFG_BEHAVIORAL_OBJECTIVE
 
@@ -148,8 +148,9 @@ def _score_kinetic_energy(pixel_pca, physics_scaled, behavior_labels):
 # ---------------------------------------------------------------------------
 
 def run_dissociation_analysis(neural_activity, scenes, neural_meta,
+                               encoder,
                                objective=None,
-                               *, pixel_pca_dim=None, behavioral_pca_dim=None):
+                               *, behavioral_pca_dim=None):
     """
     Compute and plot the R² vs. behavioral sufficiency dissociation.
 
@@ -160,11 +161,15 @@ def run_dissociation_analysis(neural_activity, scenes, neural_meta,
     For each, measure:
       - Neural R² (how well it predicts neural activity)
       - Behavioral sufficiency score (determined by `objective`)
+
+    Parameters
+    ----------
+    encoder : dict
+        Fitted encoder from encoding analysis: {'scaler', 'pca', 'ridge', 'scaler_phys'}.
+        Reused for render PCA and physics scaling to avoid redundant fitting.
     """
     if objective is None:
         objective = _CFG_BEHAVIORAL_OBJECTIVE
-    if pixel_pca_dim is None:
-        pixel_pca_dim = _CFG_PIXEL_PCA_DIM
     if behavioral_pca_dim is None:
         behavioral_pca_dim = _CFG_BEHAVIORAL_PCA_DIM
 
@@ -186,32 +191,17 @@ def run_dissociation_analysis(neural_activity, scenes, neural_meta,
 
     n_scenes, n_neurons = neural_activity.shape
 
-    # --- Prepare final-frame render features (used for neural R²) ---
-    print("\nPreparing render features (pixel PCA of final frame)...")
+    # --- Prepare final-frame render features (reuse encoder's scaler + PCA) ---
+    print("\nPreparing render features (reusing encoder PCA)...")
     pixel_data = program_states[:, render_indices]
-    scaler_pix = StandardScaler()
-    pixel_scaled = scaler_pix.fit_transform(pixel_data)
-    pca = PCA(n_components=pixel_pca_dim, random_state=42)
-    pixel_pca = pca.fit_transform(pixel_scaled)
+    pixel_pca = encoder['pca'].transform(encoder['scaler'].transform(pixel_data))
 
-    scaler_phys = StandardScaler()
-    physics_scaled = scaler_phys.fit_transform(physics_labels)
+    physics_scaled = encoder['scaler_phys'].transform(physics_labels)
 
-    # --- Neural R² ---
-    print("Computing neural R² for each model...")
-    alphas = np.logspace(-2, 6, 20)
-
-    r2_render = np.zeros(n_neurons)
-    for j in range(n_neurons):
-        ridge = RidgeCV(alphas=alphas)
-        ridge.fit(pixel_pca, neural_activity[:, j])
-        r2_render[j] = ridge.score(pixel_pca, neural_activity[:, j])
-
-    r2_physics = np.zeros(n_neurons)
-    for j in range(n_neurons):
-        ridge = RidgeCV(alphas=alphas)
-        ridge.fit(physics_scaled, neural_activity[:, j])
-        r2_physics[j] = ridge.score(physics_scaled, neural_activity[:, j])
+    # --- Neural R² (cross-validated, consistent with encoding analysis) ---
+    print("Computing cross-validated neural R² for each model...")
+    r2_render = ridge_r2_per_neuron(pixel_pca, neural_activity)
+    r2_physics = ridge_r2_per_neuron(physics_scaled, neural_activity)
 
     mean_r2_render = r2_render.mean()
     mean_r2_physics = r2_physics.mean()
