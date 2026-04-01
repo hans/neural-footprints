@@ -13,7 +13,7 @@ neural, neural_meta = load_neural(snakemake.input.neural)
 results = run_rsa_analysis(
     neural, scenes, neural_meta,
     rsa_subsample=cfg['rsa_subsample'],
-    pixel_pca_dim=cfg['pixel_pca_dim'],
+    render_pca_dim=cfg['render_pca_dim'],
 )
 
 # Separate large arrays from JSON results

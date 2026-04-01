@@ -132,8 +132,8 @@ def run_dynamics_analysis(neural_activity, scenes, neural_meta,
     render_data_pixel = np.tile(enc_scaler.mean_, (n_scenes, 1))
     render_data_pixel[:, rgba_offset:rgba_offset + pixel_len] = pred_final_pixels
 
-    pixel_pca = enc_pca.transform(enc_scaler.transform(render_data_pixel))
-    pred_neural_pixel = enc_ridge.predict(pixel_pca)
+    render_pca = enc_pca.transform(enc_scaler.transform(render_data_pixel))
+    pred_neural_pixel = enc_ridge.predict(render_pca)
 
     r2_pixel_forward = _r2_per_neuron(pred_neural_pixel, neural_activity)
     mean_r2_pixel = r2_pixel_forward.mean()

@@ -13,7 +13,7 @@ neural, neural_meta = load_neural(snakemake.input.neural)
 results = run_dissociation_analysis(
     neural, scenes, neural_meta,
     objective=cfg['behavioral_objective'],
-    pixel_pca_dim=cfg['pixel_pca_dim'],
+    render_pca_dim=cfg['render_pca_dim'],
     behavioral_pca_dim=cfg['behavioral_pca_dim'],
 )
 

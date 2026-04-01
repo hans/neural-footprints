@@ -12,7 +12,7 @@ neural, neural_meta = load_neural(snakemake.input.neural)
 
 results = run_encoding_analysis(
     neural, scenes, neural_meta,
-    pixel_pca_dim=cfg['pixel_pca_dim'],
+    render_pca_dim=cfg['render_pca_dim'],
 )
 encoder = results.pop('encoder')
 save_results(results, snakemake.output.results)

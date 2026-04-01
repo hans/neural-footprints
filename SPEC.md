@@ -213,7 +213,7 @@ n_timesteps: 30           # physics steps per scene
 noise_level: 0.3          # noise as fraction of signal std
 random_seed: 42
 rsa_subsample: 500        # scenes used for RDM computation
-pixel_pca_dim: 500        # PCA components for pixel features in analyses
+render_pca_dim: 500       # PCA components for render features in analyses
 behavioral_pca_dim: 50    # PCA dims for behavioral task MLP
 behavioral_objective: "next_frame_pixels"
 ```
