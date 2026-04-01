@@ -7,6 +7,7 @@ rule all:
         "figures/encoding_analysis.pdf",
         "figures/rsa_analysis.pdf",
         "figures/dissociation.pdf",
+        "figures/dissociation_combined.pdf",
         "figures/predicted_frames.pdf",
         "figures/pca_analysis.pdf",
         "figures/pca_variance_decoding.pdf",
@@ -20,6 +21,7 @@ rule figures:
         "figures/encoding_analysis.pdf",
         "figures/rsa_analysis.pdf",
         "figures/dissociation.pdf",
+        "figures/dissociation_combined.pdf",
         "figures/predicted_frames.pdf",
         "figures/pca_analysis.pdf",
         "figures/pca_variance_decoding.pdf",
@@ -146,6 +148,7 @@ rule plot_dissociation:
         plot_data="data/dissociation_plot_data.npz",
     output:
         figure="figures/dissociation.pdf",
+        combined="figures/dissociation_combined.pdf",
         predicted="figures/predicted_frames.pdf",
     script:
         "scripts/plot_dissociation.py"

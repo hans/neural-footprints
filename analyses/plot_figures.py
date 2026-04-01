@@ -3,6 +3,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
+from scipy.cluster.hierarchy import leaves_list, linkage
 from scipy.spatial.distance import squareform
 
 from analyses.plot_style import COLORS, COL_WIDTH, FULL_WIDTH, paper_style
@@ -80,37 +81,58 @@ def plot_rsa(plot_data, fig_dir="figures"):
     corr_neural_physics = float(plot_data['corr_neural_physics'])
 
     with paper_style():
-        n_show = min(25, n_sub)
-        rdm_neural_sq = squareform(rdm_neural)[:n_show, :n_show]
-        rdm_render_sq = squareform(rdm_render)[:n_show, :n_show]
-        rdm_physics_sq = squareform(rdm_physics)[:n_show, :n_show]
+        # Reorder scenes via hierarchical clustering on render RDM
+        # so shared structure between Neural and Sensory is visible
+        rdm_render_full = squareform(rdm_render)
+        Z = linkage(rdm_render, method='average')
+        order = leaves_list(Z)
+
+        n_show = min(40, n_sub)
+        order = order[:n_show]
+        rdm_neural_sq = squareform(rdm_neural)[np.ix_(order, order)]
+        rdm_render_sq = rdm_render_full[np.ix_(order, order)]
+        rdm_physics_sq = squareform(rdm_physics)[np.ix_(order, order)]
 
         # Shared color range across all RDMs
         all_rdms = [rdm_neural_sq, rdm_render_sq, rdm_physics_sq]
         vmin = min(r.min() for r in all_rdms)
         vmax = max(r.max() for r in all_rdms)
 
-        # 2x2 grid with a thin colorbar column between the two main columns
-        fig = plt.figure(figsize=(COL_WIDTH, COL_WIDTH * 0.85))
-        gs = fig.add_gridspec(2, 3, width_ratios=[1, 0.04, 1],
-                              wspace=0.4, hspace=0.5)
+        # Top row: RDM | colorbar | RDM; bottom row: RDM | bar chart
+        fig = plt.figure(figsize=(COL_WIDTH, COL_WIDTH * 0.9))
+        gs = fig.add_gridspec(2, 3, width_ratios=[1, 0.05, 1],
+                              hspace=0.45, wspace=0.15)
 
-        rdm_positions = [(0, 0), (0, 2), (1, 0)]
-        rdm_titles = ['Neural RDM', f'{LABEL_RENDER} RDM', f'{LABEL_PHYSICS} RDM']
-        for (r, c), rdm, title in zip(rdm_positions, all_rdms, rdm_titles):
-            ax = fig.add_subplot(gs[r, c])
-            im = ax.imshow(rdm, cmap='viridis', aspect='equal',
-                           vmin=vmin, vmax=vmax)
-            ax.set_title(title)
-            ax.set_xticks([])
-            ax.set_yticks([])
+        # Top-left: Neural RDM
+        ax_nr = fig.add_subplot(gs[0, 0])
+        im = ax_nr.imshow(rdm_neural_sq, cmap='viridis', aspect='equal',
+                          vmin=vmin, vmax=vmax)
+        ax_nr.set_title('Neural RDM')
+        ax_nr.set_xticks([]); ax_nr.set_yticks([])
 
-        # Colorbar in the thin middle column, bottom row only
-        cax = fig.add_subplot(gs[1, 1])
-        fig.colorbar(im, cax=cax, orientation='vertical')
-        cax.set_ylabel('Corr. dist.', fontsize=5, rotation=270, labelpad=8)
+        # Top-right: Render RDM
+        ax_rr = fig.add_subplot(gs[0, 2])
+        ax_rr.imshow(rdm_render_sq, cmap='viridis', aspect='equal',
+                     vmin=vmin, vmax=vmax)
+        ax_rr.set_title(f'{LABEL_RENDER} RDM')
+        ax_rr.set_xticks([]); ax_rr.set_yticks([])
 
-        # Correlation bar plot in bottom-right
+        # Vertical colorbar between top two RDMs
+        cax = fig.add_subplot(gs[0, 1])
+        cb = fig.colorbar(im, cax=cax, orientation='vertical')
+        cb.ax.tick_params(labelsize=4, length=1.5, pad=1)
+        cb.set_ticks([vmin, (vmin + vmax) / 2, vmax])
+        cb.set_ticklabels([f'{vmin:.1f}', f'{(vmin+vmax)/2:.1f}',
+                           f'{vmax:.1f}'])
+
+        # Bottom-left: Physics RDM
+        ax_pr = fig.add_subplot(gs[1, 0])
+        ax_pr.imshow(rdm_physics_sq, cmap='viridis', aspect='equal',
+                     vmin=vmin, vmax=vmax)
+        ax_pr.set_title(f'{LABEL_PHYSICS} RDM')
+        ax_pr.set_xticks([]); ax_pr.set_yticks([])
+
+        # Correlation bar plot spanning bottom middle+right
         ax = fig.add_subplot(gs[1, 2])
         labels = [f'Neural\u2013\n{LABEL_RENDER}', f'Neural\u2013\n{LABEL_PHYSICS}']
         values = [corr_neural_render, corr_neural_physics]

@@ -95,10 +95,11 @@ for k, label in [(1, "One"), (5, "Five"), (10, "Ten"), (50, "Fifty")]:
 pc_counts = pca["pc_counts"]
 decode_accs = pca["decode_accuracies"]
 
-# Decoding accuracy at 10 PCs
-idx_ten = pc_counts.index(10) if 10 in pc_counts else None
-if idx_ten is not None:
-    add("pcaDecodeTopTen", pct(decode_accs[idx_ten]))
+# Decoding accuracy at specific PC counts
+for k, label in [(5, "Five"), (10, "Ten")]:
+    if k in pc_counts:
+        idx = pc_counts.index(k)
+        add(f"pcaDecodeTop{label}", pct(decode_accs[idx]))
 
 # First PC count where motion decoding exceeds 60%
 for k, acc in zip(pc_counts, decode_accs):
