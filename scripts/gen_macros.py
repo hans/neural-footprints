@@ -88,9 +88,9 @@ add("dynamicsGap", fmt(np.mean(r2_phys_fwd) - np.mean(r2_pix_fwd), 4))
 
 # --- PCA ---
 cumvar = np.array(pca["cumulative_variance"])
-for k in [1, 5, 10, 50]:
+for k, label in [(1, "One"), (5, "Five"), (10, "Ten"), (50, "Fifty")]:
     if k <= len(cumvar):
-        add(f"pcaVarExplained{k}", pct(cumvar[k - 1]))
+        add(f"pcaVarExplained{label}", pct(cumvar[k - 1]))
 
 pc_counts = pca["pc_counts"]
 decode_accs = pca["decode_accuracies"]
