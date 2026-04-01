@@ -1,5 +1,36 @@
 # Neural Footprints Simulation — Project Spec
 
+## Glossary
+
+**Pixel state.**
+The RGBA color buffer alone — what a camera would capture. A subset of render state, excluding depth and segmentation.
+
+**Render state.**
+All render buffers from PyBullet: RGBA color, depth map, and segmentation mask. A superset of pixel state. The high-dimensional sensory signal that dominates the program state.
+
+**Physics labels.**
+Per-object state extracted via the PyBullet API: position, orientation, linear velocity, angular velocity, mass, and friction. Concatenated into program state (and thus linearly present in neural activity), but occupying a tiny fraction of total dimensions. Also collected separately for use as analysis regressors.
+
+**Scene config.**
+Per-object shape and launch parameters (shape type, dimensions, initial position, velocity, acceleration) encoded as a fixed-length float vector.
+
+**Program state.**
+The full state vector fed to the random projection. Concatenation of render state, physics labels, and scene config. Contains everything sufficient to resimulate the scene.
+
+**Neural activity.**
+Synthetic "brain data" produced by random linear projection of program state plus noise. Since program state contains both render and physics information, both are linearly decodable in principle.
+
+**Behavior label.**
+Binary label derived from final kinetic energy (median split). Recoverable from physics labels (which include velocity and mass) but not from pixels (which carry no velocity signal).
+
+**Render model** / **Physics model.**
+The two competing analysis-side models. The render model uses PCA-reduced render state as regressors; the physics model uses the low-dimensional physics labels. The core result is a double dissociation: the render model explains neural variance but not behavior; the physics model explains behavior but not neural variance.
+
+**Information asymmetry.**
+The structural reason variance-based methods fail. Render dimensions vastly outnumber physics dimensions in the program state, so encoding models, RSA, and PCA are dominated by render structure and systematically miss the physics signal — even though physics is linearly present and causally determines scene dynamics.
+
+---
+
 ## Project Structure
 
 ```
