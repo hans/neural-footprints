@@ -21,7 +21,9 @@ encoding) is exactly what you need for temporal prediction.
 
 import numpy as np
 from sklearn.decomposition import PCA
-from sklearn.model_selection import cross_val_predict
+from sklearn.linear_model import RidgeCV
+from sklearn.model_selection import KFold, cross_val_predict
+from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 from analyses.dissociation import _make_mlp
 from config import BEHAVIORAL_PCA_DIM as _CFG_BEHAVIORAL_PCA_DIM
@@ -92,13 +94,25 @@ def run_dynamics_analysis(neural_activity, scenes, neural_meta,
             lighting=lightings[i],
         )
 
+    render_data = program_states[:, render_indices]
     resim_render = resim_program_states[:, render_indices]
-    resim_pca = enc_pca.transform(enc_scaler.transform(resim_render))
-    pred_neural_physics = enc_ridge.predict(resim_pca)
+
+    print("  Cross-validating encoder on resimulated renders (5-fold)...")
+    kf = KFold(n_splits=5, shuffle=False)
+    pred_neural_physics = np.zeros_like(neural_activity)
+
+    for fold, (train_idx, test_idx) in enumerate(kf.split(render_data), 1):
+        pipe = make_pipeline(
+            StandardScaler(),
+            PCA(n_components=enc_pca.n_components_, random_state=42),
+            RidgeCV(alphas=np.logspace(-2, 6, 20), alpha_per_target=True),
+        )
+        pipe.fit(render_data[train_idx], neural_activity[train_idx])
+        pred_neural_physics[test_idx] = pipe.predict(resim_render[test_idx])
 
     r2_physics_forward = _r2_per_neuron(pred_neural_physics, neural_activity)
     mean_r2_physics = r2_physics_forward.mean()
-    print(f"  Physics forward model mean R²: {mean_r2_physics:.4f}")
+    print(f"  Physics forward model mean R² (CV): {mean_r2_physics:.4f}")
 
     # ------------------------------------------------------------------
     # Pixel forward model: MLP predicts RGBA → partial render → encoder
