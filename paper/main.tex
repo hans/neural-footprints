@@ -29,11 +29,9 @@ neuroscience analysis techniques which rely on variance explained as a
 measure of model fit (brain encoding, RSA, PCA). In a series of simulation
 experiments, we demonstrate that variance-based techniques fail to
 distinguish between obviously correct and incorrect models of visual
-perception. While this leaves many neural analysis methods defunct, we show
-that a successful model can be recovered if the analysis is required to
-jointly model representation and computation. Reliable neural analysis therefore requires more than variance
+perception. Reliable neural analysis therefore requires more than variance
 explained: it demands models that link representations to the
-computations and behaviors they support.
+computations they support.
 \end{abstract}
 
 % ===================================================================
@@ -91,10 +89,7 @@ encoding models, RSA, and PCA uniformly fail to detect the abstract
 physics features, even though those features are linearly decodable by
 construction. Critically, this failure is not a matter of statistical
 power: it is a structural consequence of the informational asymmetry
-between representational levels. However, when the analysis is required
-to jointly account for representation and computation---predicting not
-just current neural activity but where neural activity is headed---the
-correct model is recovered. The implication is that commonly used
+between representational levels. The implication is that commonly used
 neural analysis methods are unreliable without cognitive insight into
 what representations are for.
 
@@ -119,31 +114,11 @@ Since the program state contains both render and physics bytes, both are
 linearly decodable in principle.
 
 All analyses compare a \textbf{render model} (render bytes, PCA-reduced to
-500 dims) against a \textbf{physics model} (75-dim API labels). Behavioral
-sufficiency is measured by predicting future scene states from current
-features via ridge regression.
+500 dims) against a \textbf{physics model} (75-dim API labels).
 
 % ===================================================================
 \section{Results}
 % ===================================================================
-
-\begin{figure}[t]
-  \centering
-  \includegraphics[width=\columnwidth]{../figures/dissociation.pdf}
-  \caption{Double dissociation between neural variance explained and
-  behavioral sufficiency. Render features dominate encoding models but
-  cannot predict future scene states; physics features predict behavior
-  but are neurally invisible.}
-  \label{fig:dissociation}
-\end{figure}
-
-\textbf{Double dissociation} (Fig.~\ref{fig:dissociation}).\quad
-The render model explains most neural variance (cross-validated
-$R^2 = \encodingRsqPixels$) but poorly predicts future scene states
-($R^2 = \dynamicsRsqPixel$). The physics model accurately predicts future
-dynamics ($R^2 = \dynamicsRsqPhysics$) but contributes almost nothing to
-the encoding model ($\Delta R^2 = \encodingDeltaRsq$). The features that
-explain the brain cannot explain the world, and vice versa.
 
 \textbf{Encoding models.}\quad
 A pixel-only model achieves $R^2 = \encodingRsqPixels$; adding all 75
@@ -167,51 +142,6 @@ of variance). Encoding models,
 RSA, and PCA all miss the same causal variables for the same reason:
 each privileges high-variance directions dominated by pixels.
 
-\begin{figure}[t]
-  \centering
-  \includegraphics[width=0.7\columnwidth]{../figures/dynamics_analysis.pdf}
-  \caption{Predicting future simulated brain states from initial-timestep
-  features. Physics-based forward models far outperform render-based
-  models, recovering the causal signal that static variance-based methods
-  miss.}
-  \label{fig:dynamics}
-\end{figure}
-
-\textbf{Dynamics} (Fig.~\ref{fig:dynamics}).\quad
-Every analysis above asks the same question: which features best explain
-a snapshot of neural activity? Encoding models, RSA, and PCA all operate
-on static correspondences between features and neural responses at a
-single time point. This is precisely why they fail. A feature set can
-dominate the variance of a snapshot without carrying any information
-about what happens next. The shift from static explanation to temporal
-prediction changes what counts as a good model---and recovers exactly
-the variables that variance-based methods miss.
-
-The mechanism is not correlational. The physics-based forward model
-succeeds because it literally runs the physics engine forward:
-given initial object states (position, velocity, mass, friction), it
-resimulates the scene through PyBullet, renders the final frame, and
-passes the result through a learned encoder to predict future neural
-activity. This prediction is accurate because the physics engine
-\emph{is} the generative process---it implements the same causal laws
-that produced the original neural data. The pixel-based model, by
-contrast, trains an MLP to map initial pixels to final pixels, then
-routes those predictions through the same encoder. It fails because
-initial pixels lack the information needed to predict the future:
-velocity has no pixel signature, and occluded objects are invisible.
-No amount of statistical power can overcome a missing input.
-
-The quantitative gap reflects this structural difference. The
-physics forward model achieves $R^2 = \dynamicsRsqPhysics$; the
-pixel forward model achieves $R^2 = \dynamicsRsqPixel$---a gap of
-$\dynamicsGap$. This is not a modest advantage; it is the difference
-between a model that captures the causal structure of the world and
-one that captures only its surface appearance. The result suggests a
-concrete criterion for real neural data: evaluate candidate models not
-by how much variance they explain in a snapshot, but by whether they
-predict where neural activity is headed. Models that support accurate
-temporal prediction are those with access to the causally operative
-variables.
 
 % ===================================================================
 \section{Discussion}
@@ -241,19 +171,6 @@ swamp the low-dimensional planning variables that govern action selection.
 In each case, variance-based methods will find the statistically dominant
 signal, not the computationally relevant one.
 
-What distinguishes our positive result---the dynamics analysis---is that
-it requires a model to jointly account for representation and computation.
-Predicting future neural states from current features is not merely a
-more demanding regression; it imposes a qualitatively different constraint.
-A model that captures only the sensory surface of a scene cannot predict
-where neural activity is headed, because the trajectory of neural
-activity is governed by the causal structure of the world, not by its
-momentary appearance. Only a model with access to the right level of
-abstraction---the physical variables that determine how the scene
-unfolds---can satisfy this criterion. The lesson generalizes: in real
-neural data, candidate models should be evaluated not just by how much
-variance they explain, but by whether they support predictions about
-downstream neural states, motor outputs, or task-relevant decisions.
 Variance explained tells you what dominates the signal. Cognitive insight
 into what representations are \emph{for} is what tells you whether a
 model is right.
