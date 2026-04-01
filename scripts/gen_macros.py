@@ -20,6 +20,16 @@ def fmt(value, decimals=2):
 def pct(value):
     return f"{value * 100:.1f}"
 
+def latex_int(n):
+    """Format integer with LaTeX thousands separators: 49152 -> '49{,}152'."""
+    s = str(n)
+    parts = []
+    while len(s) > 3:
+        parts.append(s[-3:])
+        s = s[:-3]
+    parts.append(s)
+    return "{,}".join(reversed(parts))
+
 macros = {}
 
 def add(name, value):
@@ -32,6 +42,24 @@ add("imageSize", str(config["image_size"]))
 add("noiseLevel", fmt(config["noise_level"]))
 add("nTimesteps", str(config["n_timesteps"]))
 add("rsaSubsample", str(config["rsa_subsample"]))
+
+# --- dimensions (computed from config) ---
+image_size = config["image_size"]
+n_objects = config["n_objects"]
+d_render = image_size * image_size * 12  # RGBA(4) + depth(4) + seg(4) raw bytes, each cast to float32
+d_physics_per_obj = 15  # pos(3) + orn(4) + lin_vel(3) + ang_vel(3) + mass(1) + friction(1)
+d_config_per_obj = 10   # shape_is_box(1) + radius(1) + half_extents(3) + color(4) + x_accel(1)
+d_physics = d_physics_per_obj * n_objects
+d_config = d_config_per_obj * n_objects
+d_total = d_render + d_physics + d_config
+
+add("nObjects", str(n_objects))
+add("dRender", latex_int(d_render))
+add("dPhysics", str(d_physics))
+add("dConfig", str(d_config))
+add("dTotal", latex_int(d_total))
+add("dPhysicsPerObject", str(d_physics_per_obj))
+add("dConfigPerObject", str(d_config_per_obj))
 
 # --- encoding ---
 r2_pixels = np.array(encoding["r2_pixels_only"])

@@ -153,7 +153,7 @@ def _collect_physics_labels(body_ids, masses, frictions, physics_client):
     """
     Collect per-object physics labels from the API.
     Per object: position(3), orientation(4), linear_vel(3), angular_vel(3), mass(1), friction(1) = 15
-    Total: 15 * N_OBJECTS = 75 floats
+    Total: 15 * N_OBJECTS floats
     """
     labels = []
     for i, bid in enumerate(body_ids):

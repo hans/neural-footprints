@@ -80,46 +80,52 @@ neural_footprints/
 ## Data Flow
 
 ```
-PyBullet scene (N_SCENES = 2000)
+PyBullet scene (N_SCENES = 2000, N_OBJECTS = 1)
     │
     ├──▶ render buffers: RGBA + depth + segmentation
-    │      64×64×4 + 64×64×4 + 64×64×4 = 49,152 bytes
+    │      64×64×4 + 64×64×4 + 64×64×4 = 49,152 raw bytes → cast to float32
     │
-    ├──▶ saveBullet blob: ~20-24KB, padded to K = 28,872 bytes
+    ├──▶ physics_labels: 15 × N_OBJECTS = 15 floats
+    │      per object: pos(3), orn(4), lin_vel(3), ang_vel(3), mass(1), friction(1)
     │
-    └──▶ API labels (NEVER enter neural generation):
-           physics_labels: [n_scenes × 75] floats
-             per object: pos(3), orn(4), lin_vel(3), ang_vel(3), mass(1), friction(1)
-             × 5 objects = 75
-           behavior_label: binary
-             did ≥2 non-launcher objects move >0.5 units?
+    ├──▶ scene_config: 10 × N_OBJECTS = 10 floats
+    │      per object: shape_is_box(1), radius(1), half_extents(3), color(4), x_accel(1)
+    │
+    └──▶ behavior_label: binary (median split on final kinetic energy)
 
                     │
                     ▼
-    program_state = concat(render_bytes, bullet_bytes)
-                  = 78,024 bytes → cast to float32 → [78024] vector
+    program_state = concat(render_bytes, physics_labels, scene_config)
+                  = 49,152 + 15 + 10 = 49,177 floats
                     │
                     ▼  z-score per dimension across scenes
                     │
-                    ▼  W ~ N(0, 1/√D), shape [500 × 78024]
+                    ▼  W ~ N(0, 1/√D), shape [500 × 49,177]
                     │
     neural_activity = standardized @ W.T + noise
                     = [n_scenes × 500]
 ```
+
+Physics labels are part of the program state (and thus linearly present in
+neural activity), but they are also extracted separately via the API for use
+as analysis regressors — mirroring how neuroscientists construct feature sets
+from external measurements rather than from the neural code itself.
 
 ### What the analyses receive
 
 | Data | Source | Used in neural generation? |
 |---|---|---|
 | `neural_activity` [2000 × 500] | W @ program_state + noise | YES — this is the output |
-| `program_states` [2000 × 78024] | raw bytes | YES — this is the input to W |
+| `program_states` [2000 × 49,177] | render + physics + config | YES — this is the input to W |
 | `pixel_indices` slice(0, 16384) | RGBA portion of program_state | YES (as part of program_state) |
-| `physics_labels` [2000 × 75] | pybullet API calls | NO — collected separately |
-| `behavior_labels` [2000] | computed from API positions | NO — computed separately |
+| `render_indices` slice(0, 49152) | RGBA + depth + seg portion | YES (as part of program_state) |
+| `physics_labels` [2000 × 15] | pybullet API calls | YES (concatenated into program_state) and also collected separately as analysis regressors |
+| `behavior_labels` [2000] | median split on final KE | NO — computed separately |
 
-The critical asymmetry: pixel features used in analysis are a **direct linear readout**
-of bytes that entered the projection. Physics labels used in analysis are a **separate,
-lossy, low-dimensional summary** of the engine state that entered the projection.
+The critical asymmetry: render features used in analysis are a **direct linear readout**
+of 49,152 bytes that entered the projection. Physics labels used as analysis regressors
+are the same 15 floats that entered the projection, but they represent only 0.03% of the
+total program state dimensions — too small a subspace to register in variance-based methods.
 
 ---
 
@@ -222,29 +228,23 @@ behavioral_objective: "next_frame_pixels"
 
 ## Known Issues / Open Questions
 
-1. **saveBullet blob opacity.** The 28,872 physics bytes include serialization
-   headers, broadphase trees, solver cache, padding — not just positions/masses.
-   We can't decompose how much is "high-level physics" vs. engine bookkeeping.
-   The variance diagnostic (40.6%) overstates the physics *content* contribution.
+1. **Dimension asymmetry is extreme by design.** The program state is 49,177
+   floats: 49,152 render bytes vs. 15 physics labels + 10 scene config. Physics
+   is ~0.05% of the signal. This makes the false negative airtight — physics is
+   literally in the neural code but occupies too small a subspace to register.
 
-2. **Analysis-side asymmetry is doing work.** The false negative result depends
-   partly on the fact that 75 API floats don't span the same subspace as 29K raw
-   bytes. A fairer version would use an explicit two-component program state
-   where physics_vector IS the 75 API floats, making the claim airtight:
-   you know exactly what's in each component.
-
-3. **Subsampling curve is incomplete.** Currently only shows ΔR² (physics
+2. **Subsampling curve is incomplete.** Currently only shows ΔR² (physics
    detectability). Spec asks for differential degradation: two curves showing
    render vs. physics detection rates diverging under subsampling.
 
-4. **Dynamics analysis is a stub.** The Buster vs. Aaron comparison (temporal
+3. **Dynamics analysis is a stub.** The Buster vs. Aaron comparison (temporal
    prediction from high-level vs. low-level state) is the positive proposal
    and is not yet implemented.
 
-5. **False positive simulation not built.** The Canada vs. Mexico pixel
+4. **False positive simulation not built.** The Canada vs. Mexico pixel
    decoding demonstration (spec line 64-66) is a separate experiment.
 
-6. **Pixel/render slice consistency across analyses.** Previously, encoding
+5. **Pixel/render slice consistency across analyses.** Previously, encoding
    used `render_indices` (RGBA + depth + seg, 49,152 dims) while RSA and
    dissociation used `pixel_indices` (RGBA only, 16,384 dims). This was
    fixed to use `render_indices` everywhere. **Before finalizing results,

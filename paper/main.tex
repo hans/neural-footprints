@@ -65,11 +65,13 @@ We simulate \nScenes{} scenes in PyBullet with random rigid objects
 launched on a ground plane. A vertical wall at $x{=}0$ partially occludes
 objects from the camera ($\imageSize{\times}\imageSize$ pixels,
 \nTimesteps{} steps). The \emph{program state} concatenates all render
-buffers (RGBA, depth, segmentation; 49{,}152 floats) with the serialized
-physics engine state. \emph{Physics labels}---position, velocity, mass,
-friction per object (75 floats)---are extracted separately via the API,
-never concatenated into the program state, mirroring how neuroscientists
-construct regressors.
+buffers (RGBA, depth, segmentation; \dRender{} raw-byte floats) with
+physics labels (\dPhysics{} floats) and scene configuration (\dConfig{}
+floats), totaling \dTotal{} dimensions. Physics is thus linearly present
+in the neural code by construction. For analysis, \emph{physics
+labels}---position, orientation, velocity, mass, friction per object---are
+extracted separately via the API as regressors, mirroring how
+neuroscientists construct feature sets.
 
 Synthetic neural activity for \nNeurons{} units is:
 $\mathbf{z} = \bar{\mathbf{x}}\,\mathbf{W}^\top + \boldsymbol{\epsilon}$,
@@ -78,7 +80,7 @@ Since the program state contains both render and physics bytes, both are
 linearly decodable in principle.
 
 All analyses compare a \textbf{render model} (render bytes, PCA-reduced to
-500 dims) against a \textbf{physics model} (75-dim API labels). Behavioral
+500 dims) against a \textbf{physics model} (\dPhysics{}-dim API labels). Behavioral
 sufficiency is measured by predicting future scene states from current
 features via ridge regression.
 
@@ -105,7 +107,7 @@ the encoding model ($\Delta R^2 = \encodingDeltaRsq$). The features that
 explain the brain cannot explain the world, and vice versa.
 
 \textbf{Encoding models.}\quad
-A pixel-only model achieves $R^2 = \encodingRsqPixels$; adding all 75
+A pixel-only model achieves $R^2 = \encodingRsqPixels$; adding all \dPhysics{}
 physics variables yields $R^2 = \encodingRsqCombined$---negligible
 $\Delta R^2 = \encodingDeltaRsq$. Standard encoding model logic would
 conclude physics is not represented, yet we know by construction it is.
