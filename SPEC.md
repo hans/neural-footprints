@@ -39,17 +39,25 @@ neural_footprints/
 ├── requirements.txt          # pybullet, numpy, scipy, scikit-learn, matplotlib, snakemake
 ├── config.yaml               # all simulation parameters (YAML)
 ├── config.py                 # backward-compat shim (loads config.yaml)
-├── Snakefile                 # pipeline DAG (replaces run_all.py)
+├── Snakefile                 # pipeline DAG
 ├── scripts/
 │   ├── load_config.py        # YAML config loader
 │   ├── io_utils.py           # save/load intermediates (scenes, neural, results)
-│   ├── calibrate.py          # rule: calibrate bullet file size
 │   ├── gen_scenes.py         # rule: generate PyBullet scenes
 │   ├── gen_neural.py         # rule: generate neural activity
 │   ├── run_encoding.py       # rule: encoding model analysis
 │   ├── run_rsa.py            # rule: RSA analysis
 │   ├── run_dissociation.py   # rule: dissociation analysis
-│   └── run_evaluate.py       # rule: evaluation pass/fail
+│   ├── run_pca.py            # rule: PCA analysis
+│   ├── run_dynamics.py       # rule: dynamics analysis
+│   ├── run_evaluate.py       # rule: evaluation pass/fail
+│   ├── gen_macros.py         # rule: generate LaTeX macros for paper
+│   ├── plot_encoding.py      # rule: encoding figure
+│   ├── plot_rsa.py           # rule: RSA figure
+│   ├── plot_dissociation.py  # rule: dissociation figure
+│   ├── plot_pca.py           # rule: PCA figure
+│   ├── plot_dynamics.py      # rule: dynamics figure
+│   └── plot_scenes.py        # rule: sample scene visualization
 ├── scene_generator.py        # PyBullet scene generation + raw state capture
 ├── neural_model.py           # random projection: program_state → neural activity
 ├── analyses/
@@ -57,22 +65,21 @@ neural_footprints/
 │   ├── encoding.py           # Simulation 1: encoding model false negatives
 │   ├── rsa.py                # Simulation 2: RSA dominated by render
 │   ├── dissociation.py       # Simulation 3: R² vs. behavioral sufficiency
-│   └── dynamics.py           # STUB — Buster vs. Aaron temporal models
+│   ├── dynamics.py           # Simulation 4: future brain-state prediction
+│   ├── pca_analysis.py       # Negative result: variance ≠ information
+│   └── plot_style.py         # shared plot styling utilities
 ├── evaluation.py             # pass/fail checks
 ├── data/                     # expensive intermediates (gitignored)
 │   ├── scenes.npz
 │   └── neural.npz
 ├── outputs/                  # cheap derived results (gitignored)
-│   ├── bullet_k.json
 │   ├── encoding_results.json
 │   ├── rsa_results.json
 │   ├── dissociation_results.json
+│   ├── pca_results.json
+│   ├── dynamics_results.json
 │   └── evaluation.json
-└── figures/                  # all output figures saved here
-    ├── encoding_analysis.png
-    ├── rsa_analysis.png
-    ├── dissociation.png
-    └── predicted_frames.png
+└── figures/                  # all output figures saved here (PDF)
 ```
 
 ---
@@ -80,30 +87,34 @@ neural_footprints/
 ## Data Flow
 
 ```
-PyBullet scene (N_SCENES = 2000, N_OBJECTS = 1)
+PyBullet scene (N_SCENES scenes)
     │
     ├──▶ render buffers: RGBA + depth + segmentation
-    │      64×64×4 + 64×64×4 + 64×64×4 = 49,152 raw bytes → cast to float32
+    │      three image-sized buffers → tens of thousands of floats
     │
-    ├──▶ physics_labels: 15 × N_OBJECTS = 15 floats
-    │      per object: pos(3), orn(4), lin_vel(3), ang_vel(3), mass(1), friction(1)
+    ├──▶ physics labels (via API):
+    │      per object: pos, orn, lin_vel, ang_vel, mass, friction
+    │      low-dimensional vector (tens of floats)
     │
-    ├──▶ scene_config: 10 × N_OBJECTS = 10 floats
-    │      per object: shape_is_box(1), radius(1), half_extents(3), color(4), x_accel(1)
+    ├──▶ scene config:
+    │      per object: shape type, dimensions, color, launch parameters
+    │      low-dimensional vector
     │
-    └──▶ behavior_label: binary (median split on final kinetic energy)
+    └──▶ behavior label (derived from physics labels):
+           binary kinetic-energy median split
+           KE = Σ 0.5 × mass × |velocity|² at final timestep
 
                     │
                     ▼
     program_state = concat(render_bytes, physics_labels, scene_config)
-                  = 49,152 + 15 + 10 = 49,177 floats
+                  = [D] vector, dominated by render dimensions
                     │
                     ▼  z-score per dimension across scenes
                     │
-                    ▼  W ~ N(0, 1/√D), shape [500 × 49,177]
+                    ▼  W ~ N(0, 1/√D), shape [n_neurons × D]
                     │
     neural_activity = standardized @ W.T + noise
-                    = [n_scenes × 500]
+                    = [n_scenes × n_neurons]
 ```
 
 Physics labels are part of the program state (and thus linearly present in
@@ -113,19 +124,18 @@ from external measurements rather than from the neural code itself.
 
 ### What the analyses receive
 
-| Data | Source | Used in neural generation? |
+| Data | Source | Part of program state? |
 |---|---|---|
-| `neural_activity` [2000 × 500] | W @ program_state + noise | YES — this is the output |
-| `program_states` [2000 × 49,177] | render + physics + config | YES — this is the input to W |
-| `pixel_indices` slice(0, 16384) | RGBA portion of program_state | YES (as part of program_state) |
-| `render_indices` slice(0, 49152) | RGBA + depth + seg portion | YES (as part of program_state) |
-| `physics_labels` [2000 × 15] | pybullet API calls | YES (concatenated into program_state) and also collected separately as analysis regressors |
-| `behavior_labels` [2000] | median split on final KE | NO — computed separately |
+| `neural_activity` | W @ program_state + noise | YES — this is the output |
+| `program_states` | render + physics + config concat | YES — this is the input to W |
+| `render_indices` | render portion of program_state | YES (as part of program_state) |
+| `physics_labels` | PyBullet API calls | YES — concatenated into program_state |
+| `behavior_labels` | KE median split from physics | NO — computed separately |
 
-The critical asymmetry: render features used in analysis are a **direct linear readout**
-of 49,152 bytes that entered the projection. Physics labels used as analysis regressors
-are the same 15 floats that entered the projection, but they represent only 0.03% of the
-total program state dimensions — too small a subspace to register in variance-based methods.
+The critical asymmetry: render dimensions vastly outnumber physics dimensions
+in the program state (hundreds-to-one ratio). Encoding models, RSA, and PCA
+are dominated by render structure and systematically miss the physics signal —
+even though physics is linearly present and causally determines scene dynamics.
 
 ---
 
@@ -210,43 +220,26 @@ the world can't be found in the brain data.
 
 ## Config Parameters (`config.yaml`)
 
-```yaml
-n_scenes: 2000            # number of PyBullet scenes
-n_objects: 1              # objects per scene
-image_size: 64            # render resolution
-n_neurons: 500            # simulated neurons
-n_timesteps: 30           # physics steps per scene
-noise_level: 0.3          # noise as fraction of signal std
-random_seed: 42
-rsa_subsample: 500        # scenes used for RDM computation
-render_pca_dim: 500       # PCA components for render features in analyses
-behavioral_pca_dim: 50    # PCA dims for behavioral task MLP
-behavioral_objective: "next_frame_pixels"
-```
+All pipeline parameters live in `config.yaml`. Key settings:
+
+- **Scene generation:** number of scenes, objects per scene, image resolution, physics timesteps
+- **Neural model:** number of simulated neurons, noise level, random seed
+- **Analysis:** RSA subsample size, PCA dimensions for render features, PCA dimensions for behavioral MLP
+- **Behavioral objective:** `"next_frame_pixels"` (MLP R²) or `"kinetic_energy"` (logistic accuracy)
 
 ---
 
 ## Known Issues / Open Questions
 
-1. **Dimension asymmetry is extreme by design.** The program state is 49,177
-   floats: 49,152 render bytes vs. 15 physics labels + 10 scene config. Physics
-   is ~0.05% of the signal. This makes the false negative airtight — physics is
-   literally in the neural code but occupies too small a subspace to register.
-
-2. **Subsampling curve is incomplete.** Currently only shows ΔR² (physics
+1. **Subsampling curve is incomplete.** Currently only shows ΔR² (physics
    detectability). Spec asks for differential degradation: two curves showing
    render vs. physics detection rates diverging under subsampling.
 
-3. **Dynamics analysis is a stub.** The Buster vs. Aaron comparison (temporal
-   prediction from high-level vs. low-level state) is the positive proposal
-   and is not yet implemented.
+2. **False positive simulation not built.** The Canada vs. Mexico pixel
+   decoding demonstration is a separate experiment.
 
-4. **False positive simulation not built.** The Canada vs. Mexico pixel
-   decoding demonstration (spec line 64-66) is a separate experiment.
-
-5. **Pixel/render slice consistency across analyses.** Previously, encoding
-   used `render_indices` (RGBA + depth + seg, 49,152 dims) while RSA and
-   dissociation used `pixel_indices` (RGBA only, 16,384 dims). This was
-   fixed to use `render_indices` everywhere. **Before finalizing results,
+3. **Pixel/render slice consistency across analyses.** Previously, encoding
+   used all render buffers while RSA and dissociation used RGBA only. This was
+   fixed to use the full render slice everywhere. **Before finalizing results,
    verify all analyses use the same render slice** — this kind of silent
    mismatch can change numerical outcomes without any obvious error.
