@@ -150,22 +150,20 @@ A pixel-only model achieves $R^2 = \encodingRsqPixels$; adding all 75
 physics variables yields $R^2 = \encodingRsqCombined$---negligible
 $\Delta R^2 = \encodingDeltaRsq$. Standard encoding model logic would
 conclude physics is not represented, yet we know by construction it is.
-This false negative persists across neuron subsampling (10--500 units).
 A control MLP predicting future dynamics from physics labels alone achieves
 $\controlAccuracy\%$ accuracy, confirming the labels are informative.
 
 \textbf{RSA.}\quad
 Neural--render RDM correlation is $r = \rsaCorrNeuralRender$;
 neural--physics is $r = \rsaCorrNeuralPhysics$ (\rsaRatio$\times$ ratio).
-Partialling out render reduces neural--physics correlation to
-$r = \rsaPartialNeuralPhysics$: the representational geometry is entirely
-render-shaped.
 
 \textbf{PCA.}\quad
 The top PC explains \pcaVarExplainedOne\% of variance; 10 PCs explain
-\pcaVarExplainedTen\%. These components are render-dominated. Decoding
-object motion direction from leading PCs yields near-chance accuracy;
-physics information resides in tail components only. Encoding models,
+\pcaVarExplainedTen\%. These components are render-dominated. Decoding motion direction from the top 10 PCs
+(\pcaVarExplainedTen\% of variance) yields only \pcaDecodeTopTen\% accuracy
+(chance $= 50\%$); \pcaDecodeThresholdK{} PCs are required before accuracy
+exceeds $60\%$ (\pcaDecodeThresholdAcc\%, capturing \pcaDecodeThresholdVar\%
+of variance). Encoding models,
 RSA, and PCA all miss the same causal variables for the same reason:
 each privileges high-variance directions dominated by pixels.
 
