@@ -11,9 +11,14 @@ scenes = load_scenes(snakemake.input.scenes)
 neural, neural_meta = load_neural(snakemake.input.neural)
 encoder = load_encoder(snakemake.input.encoder)
 
+encoding_results = {
+    'r2_pixels_only': encoder.pop('r2_pixels_only'),
+    'r2_physics_only': encoder.pop('r2_physics_only'),
+}
+
 results = run_dissociation_analysis(
     neural, scenes, neural_meta,
-    encoder,
+    encoder, encoding_results,
     objective=cfg['behavioral_objective'],
     behavioral_pca_dim=cfg['behavioral_pca_dim'],
 )

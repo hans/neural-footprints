@@ -21,7 +21,7 @@ from sklearn.model_selection import cross_val_score
 from sklearn.neural_network import MLPRegressor
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
-from analyses.encoding import ridge_r2_per_neuron
+
 from config import BEHAVIORAL_PCA_DIM as _CFG_BEHAVIORAL_PCA_DIM
 from config import BEHAVIORAL_OBJECTIVE as _CFG_BEHAVIORAL_OBJECTIVE
 
@@ -148,7 +148,7 @@ def _score_kinetic_energy(render_pca, physics_scaled, behavior_labels):
 # ---------------------------------------------------------------------------
 
 def run_dissociation_analysis(neural_activity, scenes, neural_meta,
-                               encoder,
+                               encoder, encoding_results,
                                objective=None,
                                *, behavioral_pca_dim=None):
     """
@@ -191,23 +191,21 @@ def run_dissociation_analysis(neural_activity, scenes, neural_meta,
 
     n_scenes, n_neurons = neural_activity.shape
 
-    # --- Prepare final-frame render features (reuse encoder's scaler + PCA) ---
-    print("\nPreparing render features (reusing encoder PCA)...")
-    render_data = program_states[:, render_indices]
-    render_pca = encoder['pca'].transform(encoder['scaler'].transform(render_data))
-
-    physics_scaled = encoder['scaler_phys'].transform(physics_labels)
-
-    # --- Neural R² (cross-validated, consistent with encoding analysis) ---
-    print("Computing cross-validated neural R² for each model...")
-    r2_render = ridge_r2_per_neuron(render_pca, neural_activity)
-    r2_physics = ridge_r2_per_neuron(physics_scaled, neural_activity)
+    # --- Reuse neural R² from encoding analysis ---
+    print("\nReusing neural R² from encoding analysis...")
+    r2_render = encoding_results['r2_pixels_only']
+    r2_physics = encoding_results['r2_physics_only']
 
     mean_r2_render = r2_render.mean()
     mean_r2_physics = r2_physics.mean()
 
     print(f"  Render model mean R²:  {mean_r2_render:.4f}")
     print(f"  Physics model mean R²: {mean_r2_physics:.4f}")
+
+    # --- Prepare features for behavioral sufficiency scoring ---
+    render_data = program_states[:, render_indices]
+    render_pca = encoder['pca'].transform(encoder['scaler'].transform(render_data))
+    physics_scaled = encoder['scaler_phys'].transform(physics_labels)
 
     # --- RGBA-only pixel PCA for behavioral sufficiency (matches resimulate output) ---
     rgba_data = program_states[:, pixel_indices]

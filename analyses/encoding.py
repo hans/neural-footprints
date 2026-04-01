@@ -74,6 +74,10 @@ def run_encoding_analysis(neural_activity, scenes, neural_meta,
     print("\nFitting encoding model: neural ~ render_PCA ...")
     r2_pixels_only = ridge_r2_per_neuron(render_pca, neural_activity)
 
+    # --- Encoding model: physics only ---
+    print("Fitting encoding model: neural ~ physics_labels ...")
+    r2_physics_only = ridge_r2_per_neuron(physics_scaled, neural_activity)
+
     # --- Encoding model: render + physics labels ---
     print("Fitting encoding model: neural ~ render_PCA + physics_labels ...")
     combined = np.hstack([render_pca, physics_scaled])
@@ -81,10 +85,12 @@ def run_encoding_analysis(neural_activity, scenes, neural_meta,
 
     delta_r2 = r2_combined - r2_pixels_only
     mean_r2_pix = r2_pixels_only.mean()
+    mean_r2_phys = r2_physics_only.mean()
     mean_r2_comb = r2_combined.mean()
     mean_delta = delta_r2.mean()
 
     print(f"\n  Mean R² (pixels only):    {mean_r2_pix:.4f}")
+    print(f"  Mean R² (physics only):   {mean_r2_phys:.4f}")
     print(f"  Mean R² (pixels+physics): {mean_r2_comb:.4f}")
     print(f"  Mean ΔR²:                 {mean_delta:.6f}")
 
@@ -130,6 +136,7 @@ def run_encoding_analysis(neural_activity, scenes, neural_meta,
 
     return {
         'r2_pixels_only': r2_pixels_only,
+        'r2_physics_only': r2_physics_only,
         'r2_combined': r2_combined,
         'delta_r2': delta_r2,
         'control_accuracy': control_acc,
