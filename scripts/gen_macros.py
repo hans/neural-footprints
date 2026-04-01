@@ -92,6 +92,22 @@ for k in [1, 5, 10, 50]:
     if k <= len(cumvar):
         add(f"pcaVarExplained{k}", pct(cumvar[k - 1]))
 
+pc_counts = pca["pc_counts"]
+decode_accs = pca["decode_accuracies"]
+
+# Decoding accuracy at 10 PCs
+idx_ten = pc_counts.index(10) if 10 in pc_counts else None
+if idx_ten is not None:
+    add("pcaDecodeTopTen", pct(decode_accs[idx_ten]))
+
+# First PC count where motion decoding exceeds 60%
+for k, acc in zip(pc_counts, decode_accs):
+    if acc > 0.60:
+        add("pcaDecodeThresholdK", str(k))
+        add("pcaDecodeThresholdAcc", pct(acc))
+        add("pcaDecodeThresholdVar", pct(cumvar[k - 1]))
+        break
+
 # --- evaluation summary ---
 evaluation = load_results(snakemake.input.evaluation)
 add("evalPassed", str(evaluation["n_passed"]))
