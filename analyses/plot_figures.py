@@ -8,6 +8,11 @@ from scipy.spatial.distance import squareform
 from analyses.plot_style import COLORS, COL_WIDTH, FULL_WIDTH, paper_style
 
 
+# Model names
+LABEL_RENDER = "Render"
+LABEL_PHYSICS = "Physics"
+
+
 def plot_encoding(plot_data, fig_dir="figures"):
     r2_pixels_only = plot_data['r2_pixels_only']
     r2_combined = plot_data['r2_combined']
@@ -101,7 +106,7 @@ def plot_rsa(plot_data, fig_dir="figures"):
 
         # Correlation bar plot
         ax = axes[1, 1]
-        labels = ['Neural\u2013Render', 'Neural\u2013Physics']
+        labels = [f'Neural\u2013{LABEL_RENDER}', f'Neural\u2013{LABEL_PHYSICS}']
         values = [corr_neural_render, corr_neural_physics]
         colors = [COLORS['pixels'], COLORS['physics']]
         bars = ax.bar(labels, values, color=colors, width=0.6)
@@ -134,7 +139,7 @@ def plot_dissociation(plot_data, fig_dir="figures"):
 
         bar_width = 0.5
         colors = [COLORS['pixels'], COLORS['physics']]
-        labels = ['Render', 'Physics']
+        labels = [LABEL_RENDER, LABEL_PHYSICS]
 
         bars1 = ax1.bar(labels, [mean_r2_render, mean_r2_physics],
                         width=bar_width, color=colors,
