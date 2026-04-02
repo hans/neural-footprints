@@ -11,8 +11,9 @@ Key design choices that make pixels insufficient for behavior prediction:
   3. Initial pixels cannot predict whether the object ends up behind the pillar
 
 The program_state contains everything sufficient to resimulate the scene:
-  render_bytes (49,152 floats) + physics_labels (15) + scene_config (10) = 49,177 floats.
-Physics+config is ~0.05% of the signal — swamped by pixels in the random projection.
+  render_bytes + physics_labels + scene_config + scene_lighting.
+Non-render variables are a tiny fraction of the signal — swamped by pixels
+in the random projection.
 """
 
 import numpy as np
@@ -193,6 +194,22 @@ def _encode_scene_config(shape_configs):
 SCENE_CONFIG_DIM = 10  # per object
 
 
+def _encode_scene_lighting(pillar_gray, lighting):
+    """
+    Encode per-scene lighting parameters into a fixed-length float32 vector.
+
+    pillar_gray(1), lightDirection(3), lightColor(3), lightDistance(1) = 8 floats.
+    """
+    vec = [pillar_gray]
+    vec.extend(lighting['lightDirection'])
+    vec.extend(lighting['lightColor'])
+    vec.append(lighting['lightDistance'])
+    return np.array(vec, dtype=np.float32)
+
+
+SCENE_LIGHTING_DIM = 8
+
+
 def _compute_total_kinetic_energy(body_ids, masses, physics_client):
     """
     Total kinetic energy of all objects: KE = Σ 0.5 * mass_i * |lin_vel_i|².
@@ -370,9 +387,10 @@ def resimulate_scene(shape_configs, initial_physics_row, *,
         rgba_bytes, depth_bytes, seg_bytes = _render_scene(pc, lighting=lighting)
         final_physics = _collect_physics_labels(body_ids, masses_list, frictions_list, pc)
         scene_config_vec = _encode_scene_config(shape_configs)
+        lighting_vec = _encode_scene_lighting(pillar_gray, lighting or _DEFAULT_LIGHTING)
         p.disconnect(pc)
         return _build_program_state(rgba_bytes, depth_bytes, seg_bytes,
-                                    final_physics, scene_config_vec)
+                                    final_physics, scene_config_vec, lighting_vec)
     else:
         rgba_bytes, _, _ = _render_scene(pc, lighting=lighting)
         p.disconnect(pc)
@@ -380,18 +398,18 @@ def resimulate_scene(shape_configs, initial_physics_row, *,
             IMAGE_SIZE, IMAGE_SIZE, 4)
 
 
-def _build_program_state(rgba_bytes, depth_bytes, seg_bytes, physics_labels, scene_config_vec):
+def _build_program_state(rgba_bytes, depth_bytes, seg_bytes, physics_labels,
+                         scene_config_vec, lighting_vec):
     """
-    Concatenate render bytes (uint8->float32) with physics labels and scene config
-    (native float32).
+    Concatenate render bytes (uint8->float32) with physics labels, scene config,
+    and lighting parameters (native float32).
 
-    Render: 49,152 floats (values 0-255, from byte casts)
-    Physics+config: 24 floats (native float32, varying ranges)
-    The z-scoring in neural_model.py handles the scale difference.
+    The z-scoring in neural_model.py handles the scale difference between
+    render bytes (0-255) and native float32 values.
     """
     all_render_bytes = rgba_bytes + depth_bytes + seg_bytes
     render_vec = np.frombuffer(all_render_bytes, dtype=np.uint8).astype(np.float32)
-    return np.concatenate([render_vec, physics_labels, scene_config_vec])
+    return np.concatenate([render_vec, physics_labels, scene_config_vec, lighting_vec])
 
 
 def generate_scenes(n_scenes, seed, *, n_timesteps=None):
@@ -399,7 +417,7 @@ def generate_scenes(n_scenes, seed, *, n_timesteps=None):
     Generate n_scenes PyBullet scenes, returning program states and analysis labels.
 
     Returns dict with:
-      'program_states':         ndarray [n_scenes x D]   — render + physics_labels + scene_config
+      'program_states':         ndarray [n_scenes x D]   — render + physics_labels + scene_config + scene_lighting
       'physics_labels':         ndarray [n_scenes x 15*N_OBJECTS]  — final-state API labels
       'initial_physics_labels': ndarray [n_scenes x 15*N_OBJECTS]  — t=0 API labels
       'initial_renders':        ndarray [n_scenes x IMAGE_SIZE**2*4]  — t=0 RGBA bytes
@@ -419,7 +437,7 @@ def generate_scenes(n_scenes, seed, *, n_timesteps=None):
 
     physics_dim = 15 * N_OBJECTS
     config_dim = SCENE_CONFIG_DIM * N_OBJECTS
-    D = render_bytes_total + physics_dim + config_dim
+    D = render_bytes_total + physics_dim + config_dim + SCENE_LIGHTING_DIM
     program_states = np.zeros((n_scenes, D), dtype=np.float32)
     physics_labels = np.zeros((n_scenes, physics_dim), dtype=np.float32)
     initial_physics_labels = np.zeros((n_scenes, physics_dim), dtype=np.float32)
@@ -468,10 +486,12 @@ def generate_scenes(n_scenes, seed, *, n_timesteps=None):
         # Render final frame
         rgba_bytes, depth_bytes, seg_bytes = _render_scene(pc, lighting=lighting)
 
-        # Build program state: render + physics labels + scene config
+        # Build program state: render + physics labels + scene config + lighting
         scene_config_vec = _encode_scene_config(shape_configs)
+        lighting_vec = _encode_scene_lighting(pillar_gray, lighting)
         program_states[i] = _build_program_state(
-            rgba_bytes, depth_bytes, seg_bytes, physics_labels[i], scene_config_vec
+            rgba_bytes, depth_bytes, seg_bytes, physics_labels[i],
+            scene_config_vec, lighting_vec
         )
 
         p.disconnect(pc)
@@ -487,6 +507,7 @@ def generate_scenes(n_scenes, seed, *, n_timesteps=None):
         'D_render_bytes': render_bytes_total,
         'D_physics_labels': physics_dim,
         'D_scene_config': config_dim,
+        'D_scene_lighting': SCENE_LIGHTING_DIM,
         'D_total': D,
         'pixel_indices': slice(0, rgba_bytes_count),       # RGBA only (for visualization / pixel prediction)
         'render_indices': slice(0, render_bytes_total),    # RGBA + depth + seg (for encoding models)

@@ -12,10 +12,13 @@ All render buffers from PyBullet: RGBA color, depth map, and segmentation mask. 
 Per-object state extracted via the PyBullet API: position, orientation, linear velocity, angular velocity, mass, and friction. Concatenated into program state (and thus linearly present in neural activity), but occupying a tiny fraction of total dimensions. Also collected separately for use as analysis regressors.
 
 **Scene config.**
-Per-object shape and launch parameters (shape type, dimensions, initial position, velocity, acceleration) encoded as a fixed-length float vector.
+Per-object shape and appearance parameters (shape type, dimensions, color, acceleration) encoded as a fixed-length float vector.
+
+**Scene lighting.**
+Per-scene rendering parameters not tied to any individual object: pillar gray level, light direction, light color, and light distance. Together with scene config and physics labels, these are sufficient to deterministically re-render the scene.
 
 **Program state.**
-The full state vector fed to the random projection. Concatenation of render state, physics labels, and scene config. Contains everything sufficient to resimulate the scene.
+The full state vector fed to the random projection. Concatenation of render state, physics labels, scene config, and scene lighting. Contains everything sufficient to resimulate the scene.
 
 **Neural activity.**
 Synthetic "brain data" produced by random linear projection of program state plus noise. Since program state contains both render and physics information, both are linearly decodable in principle.
@@ -97,7 +100,11 @@ PyBullet scene (N_SCENES scenes)
     │      low-dimensional vector (tens of floats)
     │
     ├──▶ scene config:
-    │      per object: shape type, dimensions, color, launch parameters
+    │      per object: shape type, dimensions, color, acceleration
+    │      low-dimensional vector
+    │
+    ├──▶ scene lighting:
+    │      per scene: pillar gray, light direction, light color, light distance
     │      low-dimensional vector
     │
     └──▶ behavior label (derived from physics labels):
@@ -106,7 +113,7 @@ PyBullet scene (N_SCENES scenes)
 
                     │
                     ▼
-    program_state = concat(render_bytes, physics_labels, scene_config)
+    program_state = concat(render_bytes, physics_labels, scene_config, scene_lighting)
                   = [D] vector, dominated by render dimensions
                     │
                     ▼  z-score per dimension across scenes
@@ -127,7 +134,7 @@ from external measurements rather than from the neural code itself.
 | Data | Source | Part of program state? |
 |---|---|---|
 | `neural_activity` | W @ program_state + noise | YES — this is the output |
-| `program_states` | render + physics + config concat | YES — this is the input to W |
+| `program_states` | render + physics + config + lighting concat | YES — this is the input to W |
 | `render_indices` | render portion of program_state | YES (as part of program_state) |
 | `physics_labels` | PyBullet API calls | YES — concatenated into program_state |
 | `behavior_labels` | KE median split from physics | NO — computed separately |
