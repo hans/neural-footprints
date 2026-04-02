@@ -187,7 +187,7 @@ def plot_dissociation(plot_data, fig_dir="figures"):
             ax2.set_ylim(0, 1.1)
             ax2.legend()
         ax2.set_ylabel(metric_label)
-        ax2.set_title('Behavioral sufficiency')
+        ax2.set_title('Computational sufficiency')
         for bar, val in zip(bars2, [render_score, physics_score]):
             ax2.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.01,
                      f'{val:.3f}', ha='center', va='bottom', fontweight='bold')
