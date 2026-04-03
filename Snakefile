@@ -9,6 +9,7 @@ rule all:
         "figures/dissociation.pdf",
         "figures/dissociation_combined.pdf",
         "figures/predicted_frames.pdf",
+        "figures/predicted_frames_compact.pdf",
         "figures/pca_analysis.pdf",
         "figures/pca_variance_decoding.pdf",
         "figures/dynamics_analysis.pdf",
@@ -23,6 +24,7 @@ rule figures:
         "figures/dissociation.pdf",
         "figures/dissociation_combined.pdf",
         "figures/predicted_frames.pdf",
+        "figures/predicted_frames_compact.pdf",
         "figures/pca_analysis.pdf",
         "figures/pca_variance_decoding.pdf",
         "figures/dynamics_analysis.pdf",
@@ -150,6 +152,7 @@ rule plot_dissociation:
         figure="figures/dissociation.pdf",
         combined="figures/dissociation_combined.pdf",
         predicted="figures/predicted_frames.pdf",
+        predicted_compact="figures/predicted_frames_compact.pdf",
     script:
         "scripts/plot_dissociation.py"
 

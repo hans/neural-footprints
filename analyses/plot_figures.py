@@ -2,6 +2,7 @@
 
 import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib import ticker as mticker
 from matplotlib.lines import Line2D
 from scipy.cluster.hierarchy import leaves_list, linkage
 from scipy.spatial.distance import squareform
@@ -281,6 +282,32 @@ def plot_predicted_frames(plot_data, fig_dir="figures"):
         plt.close()
 
 
+def plot_predicted_frames_compact(plot_data, fig_dir="figures", scene_idx=1):
+    """Predicted frames as a 2x2 grid for a single-column figure."""
+    init_imgs = plot_data['predicted_init_imgs']
+    render_imgs = plot_data['predicted_render_imgs']
+    physics_imgs = plot_data['predicted_physics_imgs']
+    final_imgs = plot_data['predicted_final_imgs']
+
+    titles = ['t=0 (input)', 'Sensory model\nprediction',
+              'Physics model\nprediction', 't=N (actual)']
+    imgs = [init_imgs[scene_idx], render_imgs[scene_idx],
+            physics_imgs[scene_idx], final_imgs[scene_idx]]
+
+    with paper_style():
+        fig, axes = plt.subplots(2, 2, figsize=(COL_WIDTH, COL_WIDTH * 0.95),
+                                 gridspec_kw={'hspace': 0.15, 'wspace': 0.05})
+
+        for ax, title, img in zip(axes.flat, titles, imgs):
+            ax.imshow(img)
+            ax.set_title(title, pad=2)
+            ax.axis('off')
+
+        fig_path = f"{fig_dir}/predicted_frames_compact.pdf"
+        plt.savefig(fig_path)
+        plt.close()
+
+
 def plot_dynamics(plot_data, fig_dir="figures"):
     r2_physics_forward = plot_data['r2_physics_forward']
     r2_pixel_forward = plot_data['r2_pixel_forward']
@@ -381,32 +408,35 @@ def plot_pca(plot_data, fig_dir="figures"):
 
     # Figure 2: elbow + decoding overlay with twinx
     with paper_style():
-        fig, ax_var = plt.subplots(figsize=(COL_WIDTH, 2.4))
+        fig, ax_var = plt.subplots(figsize=(COL_WIDTH * 0.7, 1.6))
         ax_dec = ax_var.twinx()
 
         ax_var.plot(range(1, n_neurons + 1), cumvar,
-                    color=COLORS['pixels'], label='Cumulative variance')
+                    color=COLORS['pixels'], label='Cumulative\nvariance')
         ax_var.set_xlabel('Number of principal components')
         ax_var.set_ylabel('Cumulative explained variance',
                           color=COLORS['pixels'])
         ax_var.tick_params(axis='y', labelcolor=COLORS['pixels'])
         ax_var.set_xlim(1, n_neurons)
         ax_var.set_ylim(0, 1.05)
+        ax_var.set_xscale("log")
+        ax_var.yaxis.set_major_formatter(mticker.PercentFormatter(xmax=1.0))
 
         ax_dec.plot(pc_counts, decode_accs, marker='o',
                     color=COLORS['physics'], markersize=3,
-                    label='Motion decoding accuracy')
+                    label='Motion decoding\naccuracy')
         ax_dec.axhline(0.5, color='gray', linestyle=':', alpha=0.5)
         ax_dec.set_ylabel('Decoding accuracy', color=COLORS['physics'])
         ax_dec.tick_params(axis='y', labelcolor=COLORS['physics'])
         ax_dec.set_ylim(0.4, 1.05)
+        ax_dec.yaxis.set_major_formatter(mticker.PercentFormatter(xmax=1.0))
 
         lines_var, labels_var = ax_var.get_legend_handles_labels()
         lines_dec, labels_dec = ax_dec.get_legend_handles_labels()
         ax_var.legend(lines_var + lines_dec, labels_var + labels_dec,
-                      loc='center right')
+                      loc='upper left')
 
-        ax_var.set_title('PCA variance vs motion decoding')
+        # ax_var.set_title('PCA variance vs motion decoding')
 
         fig_path2 = f"{fig_dir}/pca_variance_decoding.pdf"
         plt.savefig(fig_path2)
