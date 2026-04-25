@@ -9,3 +9,9 @@ rsa_subsample: 500
 render_pca_dim: 500
 behavioral_pca_dim: 50
 behavioral_objective: "next_frame_pixels"
+
+# Predictive processing
+pp_hidden_dim: 256
+pp_pixel_pca_dim: 50
+pp_early_frame: 5
+pp_dropout_rate: 0.05
