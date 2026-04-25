@@ -163,6 +163,10 @@ def plot_dissociation(plot_data, fig_dir="figures"):
     chance_val = float(plot_data['chance'])
     chance = None if np.isnan(chance_val) else chance_val
 
+    pp_chain_score = None
+    if 'pp_chain_score' in plot_data:
+        pp_chain_score = float(plot_data['pp_chain_score'])
+
     with paper_style():
         fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(COL_WIDTH, 2.0))
 
@@ -181,15 +185,24 @@ def plot_dissociation(plot_data, fig_dir="figures"):
             ax1.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.01,
                      f'{val:.3f}', ha='center', va='bottom', fontweight='bold')
 
-        bars2 = ax2.bar(labels, [render_score, physics_score],
-                        width=bar_width, color=colors, capsize=3)
+        if pp_chain_score is not None:
+            beh_labels = [LABEL_RENDER, 'PP chain', LABEL_PHYSICS]
+            beh_values = [render_score, pp_chain_score, physics_score]
+            beh_colors = [COLORS['pixels'], COLORS['neutral'], COLORS['physics']]
+        else:
+            beh_labels = labels
+            beh_values = [render_score, physics_score]
+            beh_colors = colors
+
+        bars2 = ax2.bar(beh_labels, beh_values,
+                        width=bar_width, color=beh_colors, capsize=3)
         if chance is not None:
             ax2.axhline(chance, color='gray', linestyle='--', alpha=0.5, label='Chance')
             ax2.set_ylim(0, 1.1)
             ax2.legend()
         ax2.set_ylabel(metric_label)
         ax2.set_title('Computational sufficiency')
-        for bar, val in zip(bars2, [render_score, physics_score]):
+        for bar, val in zip(bars2, beh_values):
             ax2.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.01,
                      f'{val:.3f}', ha='center', va='bottom', fontweight='bold')
 
@@ -440,6 +453,91 @@ def plot_pca(plot_data, fig_dir="figures"):
 
         fig_path2 = f"{fig_dir}/pca_variance_decoding.pdf"
         plt.savefig(fig_path2)
+        plt.close()
+
+
+def plot_pp(plot_data, fig_dir="figures"):
+    """Predictive-processing summary: behavioral + neural R² bars and per-dim quality."""
+    prior_r2 = float(plot_data['prior_r2'])
+    oracle_r2 = float(plot_data['oracle_r2'])
+    pp_r2 = float(plot_data['pp_r2'])
+    render_r2 = float(plot_data['render_r2'])
+    neural_r2_t0 = float(plot_data['neural_r2_t0'])
+    neural_r2_two_frame = float(plot_data['neural_r2_two_frame'])
+    neural_r2_inferred_physics = float(plot_data['neural_r2_inferred_physics'])
+    full_per_dim_r2 = plot_data['full_per_dim_r2']
+
+    with paper_style():
+        fig, axes = plt.subplots(1, 3, figsize=(FULL_WIDTH, 2.0))
+
+        # Behavioral R² (next-frame pixel prediction)
+        ax = axes[0]
+        labels = ['Render-only', 'PP chain', 'Oracle']
+        values = [render_r2, pp_r2, oracle_r2]
+        colors = [COLORS['pixels'], COLORS['neutral'], COLORS['physics']]
+        bars = ax.bar(labels, values, color=colors, width=0.6)
+        ax.axhline(prior_r2, color=COLORS['neutral'], linestyle='--',
+                   alpha=0.7, linewidth=0.8, label=f'Prior MLP={prior_r2:.2f}')
+        ax.set_ylabel('Next-frame pixel R²')
+        ax.set_title('Behavioral sufficiency')
+        ax.legend(loc='upper left')
+        for bar, val in zip(bars, values):
+            ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.01,
+                    f'{val:.2f}', ha='center', va='bottom', fontweight='bold')
+
+        # Neural encoding R²
+        ax = axes[1]
+        n_labels = ['t=0 PCA', 'Two-frame\nPCA', 'Inferred\nphysics']
+        n_values = [neural_r2_t0, neural_r2_two_frame, neural_r2_inferred_physics]
+        n_colors = [COLORS['pixels'], COLORS['pixels'], COLORS['physics']]
+        bars = ax.bar(n_labels, n_values, color=n_colors, width=0.6)
+        ax.set_ylabel('Mean neural R²')
+        ax.set_title('Neural encoding of PP representations')
+        for bar, val in zip(bars, n_values):
+            ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.005,
+                    f'{val:.3f}', ha='center', va='bottom', fontweight='bold')
+
+        # InverseModel per-dim R²
+        ax = axes[2]
+        dims = np.arange(len(full_per_dim_r2))
+        ax.bar(dims, full_per_dim_r2, color=COLORS['blue'], width=0.9)
+        ax.axhline(0, color='black', linestyle='-', alpha=0.4, linewidth=0.6)
+        ax.set_xlabel('Physics dimension')
+        ax.set_ylabel('R²')
+        ax.set_title('InverseModel per-dim quality')
+
+        plt.tight_layout()
+        fig_path = f"{fig_dir}/predictive_processing.pdf"
+        plt.savefig(fig_path)
+        plt.close()
+
+
+def plot_pp_frames(plot_data, fig_dir="figures"):
+    """4-column visual comparison: t=0 | t=early | PP chain pred | t=N actual."""
+    init_imgs = plot_data['init_frame_imgs']
+    early_imgs = plot_data['early_frame_imgs']
+    pp_imgs = plot_data['pp_frame_imgs']
+    final_imgs = plot_data['final_frame_imgs']
+    n = len(init_imgs)
+
+    col_titles = ['t=0 (input)', 't=early\n(motion cue)',
+                  'PP chain pred\n(MC sample)', 't=N (actual)']
+    cols = [init_imgs, early_imgs, pp_imgs, final_imgs]
+
+    with paper_style():
+        fig, axes = plt.subplots(n, 4, figsize=(FULL_WIDTH, 1.4 * n))
+        if n == 1:
+            axes = axes[np.newaxis, :]
+
+        for col_idx, (title, imgs) in enumerate(zip(col_titles, cols)):
+            axes[0, col_idx].set_title(title)
+            for row_idx in range(n):
+                axes[row_idx, col_idx].imshow(imgs[row_idx])
+                axes[row_idx, col_idx].axis('off')
+
+        plt.tight_layout(pad=0.3)
+        fig_path = f"{fig_dir}/pp_frames.pdf"
+        plt.savefig(fig_path)
         plt.close()
 
 

@@ -53,6 +53,7 @@ neural_footprints/
 │   ├── run_dissociation.py   # rule: dissociation analysis
 │   ├── run_pca.py            # rule: PCA analysis
 │   ├── run_dynamics.py       # rule: dynamics analysis
+│   ├── run_pp.py             # rule: predictive-processing analysis
 │   ├── run_evaluate.py       # rule: evaluation pass/fail
 │   ├── gen_macros.py         # rule: generate LaTeX macros for paper
 │   ├── plot_encoding.py      # rule: encoding figure
@@ -60,6 +61,7 @@ neural_footprints/
 │   ├── plot_dissociation.py  # rule: dissociation figure
 │   ├── plot_pca.py           # rule: PCA figure
 │   ├── plot_dynamics.py      # rule: dynamics figure
+│   ├── plot_pp.py            # rule: PP figures (summary + frame grid)
 │   └── plot_scenes.py        # rule: sample scene visualization
 ├── scene_generator.py        # PyBullet scene generation + raw state capture
 ├── neural_model.py           # random projection: program_state → neural activity
@@ -69,7 +71,11 @@ neural_footprints/
 │   ├── rsa.py                # Simulation 2: RSA dominated by render
 │   ├── dissociation.py       # Simulation 3: R² vs. behavioral sufficiency
 │   ├── dynamics.py           # Simulation 4: future brain-state prediction
+│   ├── predictive_processing.py  # Simulation 5: InverseModel (pixels→physics) +
+│   │                              # PP chain (PyBullet forward); inferred-physics
+│   │                              # array fed to encoding/rsa/dissociation
 │   ├── pca_analysis.py       # Negative result: variance ≠ information
+│   ├── plot_figures.py       # all figure rendering
 │   └── plot_style.py         # shared plot styling utilities
 ├── evaluation.py             # pass/fail checks
 ├── data/                     # expensive intermediates (gitignored)
@@ -81,9 +87,16 @@ neural_footprints/
 │   ├── dissociation_results.json
 │   ├── pca_results.json
 │   ├── dynamics_results.json
+│   ├── pp_results.json
 │   └── evaluation.json
 └── figures/                  # all output figures saved here (PDF)
 ```
+
+> **TODO (deferred from main):** `analyses/subtractive.py` (feature-removal
+> importance analysis) was developed on the `main` branch but has not been
+> ported to this scaffold. Resurrecting it would require a new Snakemake
+> rule, plot script, and config knobs. Not blocked by anything in the PP
+> port; revisit if the result is wanted in the paper.
 
 ---
 

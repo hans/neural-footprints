@@ -10,9 +10,14 @@ cfg = load_config()
 scenes = load_scenes(snakemake.input.scenes)
 neural, neural_meta = load_neural(snakemake.input.neural)
 
+inferred_physics = None
+if hasattr(snakemake.input, 'inferred'):
+    inferred_physics = np.load(snakemake.input.inferred)['inferred_physics_all']
+
 results = run_encoding_analysis(
     neural, scenes, neural_meta,
     render_pca_dim=cfg['render_pca_dim'],
+    inferred_physics=inferred_physics,
 )
 encoder = results.pop('encoder')
 encoder['r2_pixels_only'] = results['r2_pixels_only']
@@ -22,7 +27,7 @@ save_results(results, snakemake.output.results)
 save_encoder(encoder, snakemake.output.encoder)
 
 # Save plot data
-np.savez_compressed(snakemake.output.plot_data,
+plot_arrays = dict(
     r2_pixels_only=results['r2_pixels_only'],
     r2_physics_only=results['r2_physics_only'],
     r2_combined=results['r2_combined'],
@@ -32,3 +37,7 @@ np.savez_compressed(snakemake.output.plot_data,
     control_accuracy=np.array(results['control_accuracy']),
     control_accuracy_std=np.array(results['control_accuracy_std']),
 )
+if results.get('r2_inferred') is not None:
+    plot_arrays['r2_inferred'] = results['r2_inferred']
+    plot_arrays['r2_inferred_combined'] = results['r2_inferred_combined']
+np.savez_compressed(snakemake.output.plot_data, **plot_arrays)

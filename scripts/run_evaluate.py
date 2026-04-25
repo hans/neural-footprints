@@ -10,12 +10,18 @@ rsa = load_results(snakemake.input.rsa)
 dissociation = load_results(snakemake.input.dissociation)
 dynamics = load_results(snakemake.input.dynamics)
 
+pp_results = None
+if hasattr(snakemake.input, 'pp_results'):
+    pp_results = load_results(snakemake.input.pp_results)
+
 # Convert lists back to arrays where evaluate() expects them
-for key in ['r2_pixels_only', 'r2_physics_only', 'r2_combined', 'delta_r2']:
-    if key in encoding:
+for key in ['r2_pixels_only', 'r2_physics_only', 'r2_combined', 'delta_r2',
+            'r2_inferred', 'r2_inferred_combined', 'delta_r2_inferred']:
+    if key in encoding and encoding[key] is not None:
         encoding[key] = np.array(encoding[key])
 
 n_passed, n_total, checks = evaluate(encoding, rsa, dissociation,
+                                     pp_results=pp_results,
                                      dynamics_results=dynamics)
 
 save_results({

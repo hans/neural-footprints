@@ -150,7 +150,8 @@ def _score_kinetic_energy(render_pca, physics_scaled, behavior_labels):
 def run_dissociation_analysis(neural_activity, scenes, neural_meta,
                                encoder, encoding_results,
                                objective=None,
-                               *, behavioral_pca_dim=None):
+                               *, behavioral_pca_dim=None,
+                               pp_results=None):
     """
     Compute and plot the R² vs. behavioral sufficiency dissociation.
 
@@ -167,6 +168,11 @@ def run_dissociation_analysis(neural_activity, scenes, neural_meta,
     encoder : dict
         Fitted encoder from encoding analysis: {'scaler', 'pca', 'ridge', 'scaler_phys'}.
         Reused for render PCA and physics scaling to avoid redundant fitting.
+    pp_results : dict, optional
+        If provided, the behavioral-sufficiency panel grows a third entry,
+        `pp_chain_score`, sitting between render and physics. Numbers come
+        straight from `pp_results['pp_r2']` and `pp_results['render_r2']`;
+        no retraining. Only meaningful when `objective="next_frame_pixels"`.
     """
     if objective is None:
         objective = _CFG_BEHAVIORAL_OBJECTIVE
@@ -271,6 +277,13 @@ def run_dissociation_analysis(neural_activity, scenes, neural_meta,
     print(f"    Physics model:         R² = {mean_r2_physics:.4f}  |  {metric_label} = {physics_score:.4f}")
     print(f"    Render+physics model:  R² = {mean_r2_combined:.4f}  |  {metric_label} = {combined_score:.4f}")
 
+    pp_chain_score = None
+    pp_chain_label = None
+    if pp_results is not None and objective == "next_frame_pixels":
+        pp_chain_score = float(pp_results['pp_r2'])
+        pp_chain_label = "PP chain"
+        print(f"  PP chain        → {metric_label}: {pp_chain_score:.4f}  (from pp_results)")
+
     return {
         'mean_r2_render': mean_r2_render,
         'mean_r2_physics': mean_r2_physics,
@@ -281,6 +294,8 @@ def run_dissociation_analysis(neural_activity, scenes, neural_meta,
         'render_behavioral_score': render_score,
         'physics_behavioral_score': physics_score,
         'combined_behavioral_score': combined_score,
+        'pp_chain_score': pp_chain_score,
+        'pp_chain_label': pp_chain_label,
         'metric_label': metric_label,
         'objective': objective,
         'chance': chance if chance is not None else float('nan'),

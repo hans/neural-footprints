@@ -3,7 +3,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import numpy as np
 from load_config import load_config
-from io_utils import load_scenes, load_neural, load_encoder, save_results
+from io_utils import load_scenes, load_neural, load_encoder, load_results, save_results
 from analyses.dissociation import run_dissociation_analysis
 
 cfg = load_config()
@@ -17,11 +17,16 @@ encoding_results = {
     'r2_combined': encoder.pop('r2_combined'),
 }
 
+pp_results = None
+if hasattr(snakemake.input, 'pp_results'):
+    pp_results = load_results(snakemake.input.pp_results)
+
 results = run_dissociation_analysis(
     neural, scenes, neural_meta,
     encoder, encoding_results,
     objective=cfg['behavioral_objective'],
     behavioral_pca_dim=cfg['behavioral_pca_dim'],
+    pp_results=pp_results,
 )
 
 # Separate large arrays / plot-only data from JSON results
@@ -36,6 +41,8 @@ plot_arrays['render_score'] = np.array(results['render_behavioral_score'])
 plot_arrays['physics_score'] = np.array(results['physics_behavioral_score'])
 plot_arrays['combined_score'] = np.array(results['combined_behavioral_score'])
 plot_arrays['metric_label'] = np.array(results['metric_label'])
+if results.get('pp_chain_score') is not None:
+    plot_arrays['pp_chain_score'] = np.array(results['pp_chain_score'])
 
 save_results(results, snakemake.output.results)
 

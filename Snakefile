@@ -13,6 +13,8 @@ rule all:
         "figures/pca_analysis.pdf",
         "figures/pca_variance_decoding.pdf",
         "figures/dynamics_analysis.pdf",
+        "figures/predictive_processing.pdf",
+        "figures/pp_frames.pdf",
         "figures/sample_scenes.pdf",
         "paper/results_macros.tex",
 
@@ -28,6 +30,8 @@ rule figures:
         "figures/pca_analysis.pdf",
         "figures/pca_variance_decoding.pdf",
         "figures/dynamics_analysis.pdf",
+        "figures/predictive_processing.pdf",
+        "figures/pp_frames.pdf",
         "figures/sample_scenes.pdf",
 
 
@@ -55,10 +59,23 @@ rule generate_neural:
 # Analysis (computation only — no figures)
 # ---------------------------------------------------------------------------
 
+rule predictive_processing:
+    input:
+        scenes="data/scenes.npz",
+        neural="data/neural.npz",
+    output:
+        results="outputs/pp_results.json",
+        inferred="data/inferred_physics.npz",
+        plot_data="data/pp_plot_data.npz",
+    script:
+        "scripts/run_pp.py"
+
+
 rule encoding:
     input:
         scenes="data/scenes.npz",
         neural="data/neural.npz",
+        inferred="data/inferred_physics.npz",
     output:
         results="outputs/encoding_results.json",
         encoder="data/encoder.joblib",
@@ -71,6 +88,7 @@ rule rsa:
     input:
         scenes="data/scenes.npz",
         neural="data/neural.npz",
+        inferred="data/inferred_physics.npz",
     output:
         results="outputs/rsa_results.json",
         plot_data="data/rsa_plot_data.npz",
@@ -83,6 +101,7 @@ rule dissociation:
         scenes="data/scenes.npz",
         neural="data/neural.npz",
         encoder="data/encoder.joblib",
+        pp_results="outputs/pp_results.json",
     output:
         results="outputs/dissociation_results.json",
         plot_data="data/dissociation_plot_data.npz",
@@ -176,6 +195,16 @@ rule plot_dynamics:
         "scripts/plot_dynamics.py"
 
 
+rule plot_pp:
+    input:
+        plot_data="data/pp_plot_data.npz",
+    output:
+        figure="figures/predictive_processing.pdf",
+        frames="figures/pp_frames.pdf",
+    script:
+        "scripts/plot_pp.py"
+
+
 # ---------------------------------------------------------------------------
 # Evaluation & paper macros
 # ---------------------------------------------------------------------------
@@ -199,6 +228,7 @@ rule evaluate:
         rsa="outputs/rsa_results.json",
         dissociation="outputs/dissociation_results.json",
         dynamics="outputs/dynamics_results.json",
+        pp_results="outputs/pp_results.json",
     output:
         "outputs/evaluation.json",
     script:

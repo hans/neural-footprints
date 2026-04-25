@@ -45,13 +45,18 @@ def _partial_spearman(x, y, z):
 
 
 def run_rsa_analysis(neural_activity, scenes, neural_meta,
-                     *, rsa_subsample=None, render_pca_dim=None):
+                     *, rsa_subsample=None, render_pca_dim=None,
+                     inferred_physics=None):
     """
     Run RSA analysis on a subsample of scenes.
 
     1. Compute RDMs for neural, render, and physics spaces
     2. Spearman correlations: neural<->render (high), neural<->physics (low)
     3. Partial correlation: neural<->physics | render -> near zero
+
+    If `inferred_physics` is provided ([n_scenes × physics_dim] from the
+    PP InverseModel), the same correlations are computed against an
+    inferred-physics RDM (corr_neural_inferred, partial_neural_inferred).
     """
     if rsa_subsample is None:
         rsa_subsample = _CFG_RSA_SUBSAMPLE
@@ -113,13 +118,31 @@ def run_rsa_analysis(neural_activity, scenes, neural_meta,
     partial_corr, partial_p = _partial_spearman(rdm_neural, rdm_physics, rdm_render)
     print(f"  Partial neural<->physics | render: r={partial_corr:.4f}  (p={partial_p:.2e})")
 
+    corr_neural_inferred = None
+    partial_neural_inferred = None
+    rdm_inferred = None
+    if inferred_physics is not None:
+        scaler_inf = StandardScaler()
+        inferred_sub = scaler_inf.fit_transform(inferred_physics[sub_idx])
+        rdm_inferred = _compute_rdm(inferred_sub)
+        rdm_inferred[np.isnan(rdm_inferred)] = 0.0
+        corr_neural_inferred, p_ni = spearmanr(rdm_neural, rdm_inferred)
+        partial_neural_inferred, p_pni = _partial_spearman(
+            rdm_neural, rdm_inferred, rdm_render
+        )
+        print(f"  Spearman neural<->inferred:        r={corr_neural_inferred:.4f}  (p={p_ni:.2e})")
+        print(f"  Partial neural<->inferred | render: r={partial_neural_inferred:.4f}  (p={p_pni:.2e})")
+
     return {
         'corr_neural_render': corr_neural_render,
         'corr_neural_physics': corr_neural_physics,
         'corr_render_physics': corr_render_physics,
         'partial_neural_physics': partial_corr,
+        'corr_neural_inferred': corr_neural_inferred,
+        'partial_neural_inferred': partial_neural_inferred,
         'rdm_neural': rdm_neural,
         'rdm_render': rdm_render,
         'rdm_physics': rdm_physics,
+        'rdm_inferred': rdm_inferred,
         'n_sub': n_sub,
     }

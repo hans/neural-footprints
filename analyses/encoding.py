@@ -35,7 +35,7 @@ def ridge_r2_per_neuron(X, neural_activity, alphas=None, cv=5):
 
 
 def run_encoding_analysis(neural_activity, scenes, neural_meta,
-                          *, render_pca_dim=None):
+                          *, render_pca_dim=None, inferred_physics=None):
     """
     Run encoding model analysis.
 
@@ -45,6 +45,13 @@ def run_encoding_analysis(neural_activity, scenes, neural_meta,
     4. DeltaR² should be tiny
     5. Subsampling curve: vary neurons sampled, plot DeltaR² + significance
     6. Control: MLP physics_labels -> behavior_label
+
+    If `inferred_physics` is provided (output of the predictive-processing
+    InverseModel, [n_scenes × physics_dim]), three extra Ridge fits are run:
+      - neural ~ inferred_physics              -> r2_inferred
+      - neural ~ render_PCA + inferred_physics -> r2_inferred_combined
+    The resulting `delta_r2_inferred = combined - pixels_only` is the same
+    quantity the evaluation pipeline already gates on.
     """
     if render_pca_dim is None:
         render_pca_dim = _CFG_RENDER_PCA_DIM
@@ -94,6 +101,23 @@ def run_encoding_analysis(neural_activity, scenes, neural_meta,
     print(f"  Mean R² (pixels+physics): {mean_r2_comb:.4f}")
     print(f"  Mean ΔR²:                 {mean_delta:.6f}")
 
+    # --- Optional: same comparison with PP-inferred physics ---
+    r2_inferred = None
+    r2_inferred_combined = None
+    delta_r2_inferred = None
+    if inferred_physics is not None:
+        print("\nFitting encoding model: neural ~ inferred_physics ...")
+        scaler_inf = StandardScaler()
+        inferred_scaled = scaler_inf.fit_transform(inferred_physics)
+        r2_inferred = ridge_r2_per_neuron(inferred_scaled, neural_activity)
+        print("Fitting encoding model: neural ~ render_PCA + inferred_physics ...")
+        combined_inf = np.hstack([render_pca, inferred_scaled])
+        r2_inferred_combined = ridge_r2_per_neuron(combined_inf, neural_activity)
+        delta_r2_inferred = r2_inferred_combined - r2_pixels_only
+        print(f"  Mean R² (inferred only):           {r2_inferred.mean():.4f}")
+        print(f"  Mean R² (pixels+inferred):         {r2_inferred_combined.mean():.4f}")
+        print(f"  Mean ΔR² (inferred):               {delta_r2_inferred.mean():.6f}")
+
     # --- Control: physics_labels -> behavior_label ---
     # MLP because KE = 0.5*m*v² is nonlinear in the physics label features.
     print("\nControl: MLP physics_labels -> behavior_label ...")
@@ -139,6 +163,9 @@ def run_encoding_analysis(neural_activity, scenes, neural_meta,
         'r2_physics_only': r2_physics_only,
         'r2_combined': r2_combined,
         'delta_r2': delta_r2,
+        'r2_inferred': r2_inferred,
+        'r2_inferred_combined': r2_inferred_combined,
+        'delta_r2_inferred': delta_r2_inferred,
         'control_accuracy': control_acc,
         'control_accuracy_std': log_scores.std(),
         'subsample_means': subsample_means,
