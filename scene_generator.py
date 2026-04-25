@@ -19,7 +19,7 @@ in the random projection.
 import numpy as np
 import pybullet as p
 import pybullet_data
-from config import N_OBJECTS, IMAGE_SIZE, N_TIMESTEPS as _CFG_N_TIMESTEPS
+from config import N_OBJECTS, IMAGE_SIZE, N_TIMESTEPS as _CFG_N_TIMESTEPS, PP_EARLY_FRAME as _CFG_PP_EARLY_FRAME
 
 
 # Central vertical pillar at x=0 — occluder from camera's perspective
@@ -442,6 +442,7 @@ def generate_scenes(n_scenes, seed, *, n_timesteps=None):
     physics_labels = np.zeros((n_scenes, physics_dim), dtype=np.float32)
     initial_physics_labels = np.zeros((n_scenes, physics_dim), dtype=np.float32)
     initial_renders = np.zeros((n_scenes, rgba_bytes_count), dtype=np.float32)
+    early_renders = np.zeros((n_scenes, rgba_bytes_count), dtype=np.float32)
     kinetic_energies = np.zeros(n_scenes, dtype=np.float32)
     all_scene_configs = []
     all_pillar_grays = []
@@ -468,8 +469,9 @@ def generate_scenes(n_scenes, seed, *, n_timesteps=None):
         init_rgba_bytes, _, _ = _render_scene(pc, lighting=lighting)
         initial_renders[i] = np.frombuffer(init_rgba_bytes, dtype=np.uint8).astype(np.float32)
 
-        # Step physics (with per-scene random x-acceleration as external force)
-        for _ in range(n_timesteps):
+        # Step physics (with per-scene random x-acceleration as external force).
+        # Capture early frame at t=PP_EARLY_FRAME for two-frame velocity inference.
+        for t in range(n_timesteps):
             for obj_idx, bid in enumerate(body_ids):
                 x_accel = shape_configs[obj_idx].get('x_accel', 0.0)
                 if x_accel != 0.0:
@@ -478,6 +480,9 @@ def generate_scenes(n_scenes, seed, *, n_timesteps=None):
                                          [0, 0, 0], p.WORLD_FRAME,
                                          physicsClientId=pc)
             p.stepSimulation(physicsClientId=pc)
+            if t + 1 == _CFG_PP_EARLY_FRAME:
+                early_rgba_bytes, _, _ = _render_scene(pc, lighting=lighting)
+                early_renders[i] = np.frombuffer(early_rgba_bytes, dtype=np.uint8).astype(np.float32)
 
         # Collect final-state analysis labels (NOT used in neural generation)
         physics_labels[i] = _collect_physics_labels(body_ids, masses, frictions, pc)
@@ -523,6 +528,7 @@ def generate_scenes(n_scenes, seed, *, n_timesteps=None):
         'physics_labels': physics_labels,
         'initial_physics_labels': initial_physics_labels,
         'initial_renders': initial_renders,
+        'early_renders': early_renders,
         'behavior_labels': behavior_labels,
         'kinetic_energies': kinetic_energies,
         'scene_configs': all_scene_configs,

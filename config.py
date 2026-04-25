@@ -15,3 +15,8 @@ RSA_SUBSAMPLE = _cfg['rsa_subsample']
 RENDER_PCA_DIM = _cfg['render_pca_dim']
 BEHAVIORAL_PCA_DIM = _cfg['behavioral_pca_dim']
 BEHAVIORAL_OBJECTIVE = _cfg['behavioral_objective']
+
+PP_HIDDEN_DIM = _cfg['pp_hidden_dim']
+PP_PIXEL_PCA_DIM = _cfg['pp_pixel_pca_dim']
+PP_EARLY_FRAME = _cfg['pp_early_frame']
+PP_DROPOUT_RATE = _cfg['pp_dropout_rate']
