@@ -64,7 +64,14 @@ def _mean_neural_r2(features, neural_activity):
 # ---------------------------------------------------------------------------
 
 class InverseMLPNet(nn.Module):
-    """Three-hidden-layer MLP with dropout, kept active at inference for MC sampling."""
+    """Three-hidden-layer MLP with dropout, kept active at inference for MC sampling.
+
+    Layers are split into named blocks so post-ReLU activations of each hidden
+    layer are individually addressable via ``forward_with_activations``. Dropout
+    is applied AFTER the activation tap, so a tapped activation reflects the
+    deterministic representation when the net is in eval mode (and the
+    stochastic representation when in train mode for MC sampling).
+    """
     def __init__(self, input_dim, output_dim,
                  hidden_dim=None, dropout_rate=None):
         super().__init__()
@@ -72,21 +79,32 @@ class InverseMLPNet(nn.Module):
             hidden_dim = _CFG_PP_HIDDEN_DIM
         if dropout_rate is None:
             dropout_rate = _CFG_PP_DROPOUT_RATE
-        self.net = nn.Sequential(
-            nn.Linear(input_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Dropout(dropout_rate),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Dropout(dropout_rate),
-            nn.Linear(hidden_dim, hidden_dim // 2),
-            nn.ReLU(),
-            nn.Dropout(dropout_rate),
-            nn.Linear(hidden_dim // 2, output_dim),
-        )
+        self.input_dim = input_dim
+        self.output_dim = output_dim
+        self.hidden_dim = hidden_dim
+        self.dropout_rate = dropout_rate
+
+        self.h1 = nn.Sequential(nn.Linear(input_dim, hidden_dim), nn.ReLU())
+        self.d1 = nn.Dropout(dropout_rate)
+        self.h2 = nn.Sequential(nn.Linear(hidden_dim, hidden_dim), nn.ReLU())
+        self.d2 = nn.Dropout(dropout_rate)
+        self.h3 = nn.Sequential(nn.Linear(hidden_dim, hidden_dim // 2), nn.ReLU())
+        self.d3 = nn.Dropout(dropout_rate)
+        self.out = nn.Linear(hidden_dim // 2, output_dim)
 
     def forward(self, x):
-        return self.net(x)
+        h1 = self.h1(x)
+        h2 = self.h2(self.d1(h1))
+        h3 = self.h3(self.d2(h2))
+        return self.out(self.d3(h3))
+
+    def forward_with_activations(self, x):
+        """Returns (output, {'h1': ..., 'h2': ..., 'h3': ...}). Post-ReLU, pre-dropout."""
+        h1 = self.h1(x)
+        h2 = self.h2(self.d1(h1))
+        h3 = self.h3(self.d2(h2))
+        out = self.out(self.d3(h3))
+        return out, {'h1': h1, 'h2': h2, 'h3': h3}
 
 
 # ---------------------------------------------------------------------------
@@ -274,6 +292,59 @@ class InverseModel:
             for s in samples_scaled
         ])
 
+    def extract_activations(self, pixel_pca_two_frame, layer='h2'):
+        """Deterministic post-ReLU activations of one hidden layer.
+
+        layer: 'h1' | 'h2' | 'h3'. Dropout is off (eval mode), so the returned
+        activations are the deterministic representation the net would use at
+        inference time, not an MC sample.
+        """
+        if layer not in ('h1', 'h2', 'h3'):
+            raise ValueError(f"layer must be 'h1', 'h2', or 'h3'; got {layer!r}")
+        self.net_.eval()
+        X = torch.tensor(
+            self.input_scaler_.transform(pixel_pca_two_frame), dtype=torch.float32
+        )
+        with torch.no_grad():
+            _, acts = self.net_.forward_with_activations(X)
+        return acts[layer].numpy()
+
+    def save(self, path):
+        """Persist trained model + scalers + dim metadata to a single .pt file."""
+        torch.save({
+            'state_dict': self.net_.state_dict(),
+            'input_dim': self.net_.input_dim,
+            'output_dim': self.net_.output_dim,
+            'hidden_dim': self.net_.hidden_dim,
+            'dropout_rate': self.net_.dropout_rate,
+            'input_scaler': self.input_scaler_,
+            'phys_scaler': self.phys_scaler_,
+            'per_dim_r2': self.per_dim_r2_,
+            'valid_dims': self.valid_dims_,
+            'full_physics_dim': self.full_physics_dim_,
+            'const_values': self.const_values_,
+        }, path)
+
+    @classmethod
+    def load(cls, path):
+        ckpt = torch.load(path, weights_only=False)
+        m = cls()
+        m.net_ = InverseMLPNet(
+            input_dim=ckpt['input_dim'],
+            output_dim=ckpt['output_dim'],
+            hidden_dim=ckpt['hidden_dim'],
+            dropout_rate=ckpt['dropout_rate'],
+        )
+        m.net_.load_state_dict(ckpt['state_dict'])
+        m.net_.eval()
+        m.input_scaler_ = ckpt['input_scaler']
+        m.phys_scaler_ = ckpt['phys_scaler']
+        m.per_dim_r2_ = ckpt['per_dim_r2']
+        m.valid_dims_ = ckpt['valid_dims']
+        m.full_physics_dim_ = ckpt['full_physics_dim']
+        m.const_values_ = ckpt['const_values']
+        return m
+
 
 # ---------------------------------------------------------------------------
 # Helper MLPs and pixel R²
@@ -342,9 +413,20 @@ def physics_groups():
 # ---------------------------------------------------------------------------
 
 def run_predictive_processing_analysis(neural_activity, scenes,
-                                       *, pixel_pca_dim=None, n_oracle=200):
+                                       *, pixel_pca_dim=None, n_oracle=200,
+                                       inv_model=None):
     """
-    Train and evaluate the predictive-processing pipeline.
+    Evaluate the predictive-processing pipeline against neural activity.
+
+    If ``inv_model`` is provided (an already-trained ``InverseModel`` instance),
+    use it for all inference and skip in-function training. This is the path
+    taken when neural activity was generated from PP-model activations: the
+    same checkpoint must be reused so the inferred-physics array fed to
+    downstream encoding/RSA matches what was projected into neural activity.
+
+    If ``inv_model`` is None, fit a fresh InverseModel on the analysis-side
+    train split (legacy behavior — only useful when neural activity does not
+    depend on PP).
 
     Returns a results dict with scalar metrics, the per-scene
     inferred_physics_all array (for downstream encoding/RSA), and
@@ -416,10 +498,15 @@ def run_predictive_processing_analysis(neural_activity, scenes,
     )
     print(f"  Prior MLP R²: {prior_r2:.4f}")
 
-    # --- 4. Fit InverseModel ---
-    print("\nFitting InverseModel (two-frame pixels → physics, MC dropout)...")
-    inv_model = InverseModel()
-    inv_model.fit(pixel_pca_two_frame[train_idx], initial_physics[train_idx])
+    # --- 4. InverseModel (load pretrained, or fit fresh on analysis train split) ---
+    if inv_model is None:
+        print("\nFitting InverseModel (two-frame pixels → physics, MC dropout)...")
+        inv_model = InverseModel()
+        inv_model.fit(pixel_pca_two_frame[train_idx], initial_physics[train_idx])
+    else:
+        print("\nReusing pretrained InverseModel (same checkpoint used for neural projection).")
+        print(f"    InverseModel val per-dim R²: mean={inv_model.per_dim_r2_.mean():.4f}  "
+              f"max={inv_model.per_dim_r2_.max():.4f}")
 
     # --- 5. Render-only baseline ---
     print("\nFitting render-only baseline (two-frame pixels → pixels)...")

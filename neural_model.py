@@ -73,33 +73,41 @@ def generate_neural_activity(program_states, seed, *, n_neurons=None, noise_leve
     return neural_activity, metadata
 
 
-def print_variance_diagnostic(scene_metadata, neural_metadata):
+def print_variance_diagnostic(neural_input_metadata, neural_metadata):
     """
-    Print the key diagnostic: how much variance comes from render vs physics slices.
+    Print variance fractions for the three blocks of the cognitive-PP neural input:
+    [render | InverseMLP hidden activations | inferred physics output].
 
-    This ratio is NOT set by a parameter — it is printed as a finding.
+    The render block dominates dimensionally (~50k floats vs hundreds for the PP
+    blocks); whether it dominates the *neural* signal depends on the standardized
+    variance, which is what this prints.
     """
-    D_render = scene_metadata['D_render_bytes']
-    D_physics = (scene_metadata['D_physics_labels'] + scene_metadata['D_scene_config']
-                 + scene_metadata.get('D_scene_lighting', 0))
-    D_total = scene_metadata['D_total']
+    D_render = neural_input_metadata['D_render']
+    D_hidden = neural_input_metadata['D_hidden']
+    D_inferred = neural_input_metadata['D_inferred']
+    D_total = neural_input_metadata['D_total']
 
     var_per_dim = neural_metadata['var_per_dim']
-
-    render_var = var_per_dim[:D_render].sum()
-    physics_var = var_per_dim[D_render:].sum()
     total_var = neural_metadata['total_var']
 
-    render_frac = render_var / total_var * 100
-    physics_frac = physics_var / total_var * 100
-    ratio = D_render / D_physics
+    render_end   = D_render
+    hidden_end   = D_render + D_hidden
+    inferred_end = D_render + D_hidden + D_inferred
+
+    render_var   = var_per_dim[:render_end].sum()
+    hidden_var   = var_per_dim[render_end:hidden_end].sum()
+    inferred_var = var_per_dim[hidden_end:inferred_end].sum()
+
+    pct = lambda v: v / total_var * 100
+    pp_layer = neural_input_metadata.get('pp_layer', '?')
 
     print("\n" + "=" * 60)
-    print("VARIANCE DIAGNOSTIC (key result)")
+    print("VARIANCE DIAGNOSTIC (cognitive PP neural input)")
     print("=" * 60)
-    print(f"Program state: D_render={D_render}, D_physics={D_physics}, ratio={ratio:.1f}x")
-    print(f"Variance fraction from render slice:  {render_frac:.1f}%")
-    print(f"Variance fraction from physics slice: {physics_frac:.1f}%")
+    print(f"Block dims:   render={D_render}, hidden({pp_layer})={D_hidden}, inferred_physics={D_inferred}")
+    print(f"Variance frac (render):           {pct(render_var):.1f}%")
+    print(f"Variance frac (hidden_acts):      {pct(hidden_var):.1f}%")
+    print(f"Variance frac (inferred_physics): {pct(inferred_var):.1f}%")
     print(f"Total standardized variance: {total_var:.1f}")
     print(f"Signal std: {neural_metadata['signal_std']:.4f}")
     print("=" * 60 + "\n")

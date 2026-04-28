@@ -46,9 +46,20 @@ rule generate_scenes:
         "scripts/gen_scenes.py"
 
 
+rule train_pp_for_neural:
+    input:
+        scenes="data/scenes.npz",
+    output:
+        model="data/inverse_model.pt",
+        pp_acts="data/pp_activations.npz",
+    script:
+        "scripts/train_pp_for_neural.py"
+
+
 rule generate_neural:
     input:
         scenes="data/scenes.npz",
+        pp_activations="data/pp_activations.npz",
     output:
         neural="data/neural.npz",
     script:
@@ -63,6 +74,7 @@ rule predictive_processing:
     input:
         scenes="data/scenes.npz",
         neural="data/neural.npz",
+        model="data/inverse_model.pt",
     output:
         results="outputs/pp_results.json",
         inferred="data/inferred_physics.npz",

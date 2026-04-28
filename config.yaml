@@ -15,3 +15,8 @@ pp_hidden_dim: 256
 pp_pixel_pca_dim: 50
 pp_early_frame: 5
 pp_dropout_rate: 0.05
+
+# Neural generation source: cognitive PP model
+# neural_input = [render_bytes | InverseMLP.<pp_neural_layer> | inferred_physics]
+# pp_neural_layer: which hidden layer to tap (h1, h2, h3)
+pp_neural_layer: "h2"
