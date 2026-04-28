@@ -355,7 +355,13 @@ def run_predictive_processing_analysis(neural_activity, scenes,
     pca_early = PCA(n_components=pixel_pca_dim, whiten=True, random_state=42)
     pixel_pca_early = pca_early.fit_transform(scaler_early.fit_transform(early_renders))
 
-    pixel_pca_two_frame = np.concatenate([pixel_pca_t0, pixel_pca_early], axis=1)
+    # Frame-difference PCA gives the inverse model an explicit motion channel.
+    # Without it, linvel_x R² plateaus near 0.5 — see scripts/eval_pp.py sweeps.
+    scaler_diff = StandardScaler()
+    pca_diff = PCA(n_components=pixel_pca_dim, whiten=True, random_state=42)
+    pixel_pca_diff = pca_diff.fit_transform(scaler_diff.fit_transform(early_renders - initial_renders))
+
+    pixel_pca_two_frame = np.concatenate([pixel_pca_t0, pixel_pca_early, pixel_pca_diff], axis=1)
 
     # --- 2. Train / test split ---
     rng = np.random.default_rng(42)
