@@ -45,8 +45,80 @@ from sklearn.preprocessing import StandardScaler
 from torch.utils.data import DataLoader, TensorDataset
 
 from config import IMAGE_SIZE, N_OBJECTS
-from scripts.io_utils import load_scenes
 from scripts.load_config import load_config
+
+
+def load_scenes_any(path):
+    """Load scenes file. Auto-detects 3-frame format (mid_renders + late_renders)
+    and arbitrary FOV in metadata. Returns a dict with the union of fields.
+    Also monkey-patches scene_generator._render_scene if FOV != 60 so that
+    PyBullet resimulation matches the saved frames.
+    """
+    import json as _json
+    data = np.load(path, allow_pickle=False)
+    scenes = {}
+    for key in ['program_states', 'physics_labels', 'initial_physics_labels',
+                'initial_renders', 'early_renders', 'behavior_labels', 'kinetic_energies']:
+        if key in data.files:
+            scenes[key] = data[key]
+    if 'mid_renders' in data.files:
+        scenes['mid_renders'] = data['mid_renders']
+    if 'late_renders' in data.files:
+        scenes['late_renders'] = data['late_renders']
+
+    meta = _json.loads(str(data['metadata_json']))
+    pi = meta['pixel_indices']
+    meta['pixel_indices'] = slice(pi[0], pi[1])
+    ri = meta['render_indices']
+    meta['render_indices'] = slice(ri[0], ri[1])
+    scenes['metadata'] = meta
+
+    scenes['scene_configs'] = _json.loads(str(data['scene_configs_json']))
+    scenes['pillar_grays'] = data['pillar_grays'].tolist()
+    scenes['lightings'] = _json.loads(str(data['lightings_json']))
+
+    fov = meta.get('fov', 60.0)
+    if abs(fov - 60.0) > 1e-3:
+        _patch_render_scene_fov(fov)
+    return scenes
+
+
+def _patch_render_scene_fov(fov):
+    """Monkey-patch scene_generator._render_scene with one that uses the given FOV.
+    Required so resimulate_scene produces frames consistent with the saved scenes.
+    """
+    import pybullet as _p
+    import scene_generator as _sg
+
+    def render_with_fov(physics_client, lighting=None):
+        if lighting is None:
+            lighting = _sg._DEFAULT_LIGHTING
+        view_matrix = _p.computeViewMatrix(
+            cameraEyePosition=[0, -3, 2],
+            cameraTargetPosition=[0, 0, 0.3],
+            cameraUpVector=[0, 0, 1],
+            physicsClientId=physics_client,
+        )
+        proj_matrix = _p.computeProjectionMatrixFOV(
+            fov=fov, aspect=1.0, nearVal=0.1, farVal=10.0,
+            physicsClientId=physics_client,
+        )
+        _, _, rgba, depth, seg = _p.getCameraImage(
+            width=IMAGE_SIZE, height=IMAGE_SIZE,
+            viewMatrix=view_matrix, projectionMatrix=proj_matrix,
+            shadow=1,
+            lightDirection=lighting['lightDirection'],
+            lightColor=lighting['lightColor'],
+            lightDistance=lighting['lightDistance'],
+            physicsClientId=physics_client,
+        )
+        rgba_arr = np.array(rgba, dtype=np.uint8).reshape(IMAGE_SIZE, IMAGE_SIZE, 4)
+        depth_arr = np.array(depth, dtype=np.float32).reshape(IMAGE_SIZE, IMAGE_SIZE)
+        seg_arr = np.array(seg, dtype=np.int32).reshape(IMAGE_SIZE, IMAGE_SIZE)
+        return rgba_arr.tobytes(), depth_arr.tobytes(), seg_arr.tobytes()
+
+    _sg._render_scene = render_with_fov
+    print(f"  [patched scene_generator._render_scene FOV → {fov}°]")
 
 
 PHYSICS_LABELS = [
@@ -196,12 +268,16 @@ def _pixel_r2(predicted, actual):
 def _build_features(scenes, pca_dim, mode):
     """Build pixel-PCA features for the inverse model.
 
-    mode: concat (t0_pca || t_early_pca)
-          concat_diff (t0_pca || t_early_pca || (t_early - t0)_pca)
-          diff_only (t_early - t0)_pca
+    2-frame modes (require initial_renders + early_renders):
+        concat        : t0 || late
+        concat_diff   : t0 || late || (late - t0)
+        diff_only     : (late - t0)
+
+    3-frame modes (require initial_renders + mid_renders + late_renders):
+        3frame        : t0 || mid || late
+        3frame_diff   : t0 || mid || late || (mid - t0) || (late - mid)
     """
     init = scenes['initial_renders']
-    early = scenes['early_renders']
 
     def _pca(x):
         s = StandardScaler()
@@ -209,6 +285,18 @@ def _build_features(scenes, pca_dim, mode):
         pca = PCA(n_components=pca_dim, whiten=True, random_state=42)
         return pca.fit_transform(xs)
 
+    if mode.startswith('3frame'):
+        if 'mid_renders' not in scenes:
+            raise ValueError(f"feature mode {mode} requires mid_renders/late_renders in scenes file")
+        mid = scenes['mid_renders']
+        late = scenes['late_renders']
+        parts = [_pca(init), _pca(mid), _pca(late)]
+        if mode == '3frame_diff':
+            parts.append(_pca(mid - init))
+            parts.append(_pca(late - mid))
+        return np.concatenate(parts, axis=1)
+
+    early = scenes['early_renders']
     parts = []
     if mode in ('concat', 'concat_diff'):
         parts.append(_pca(init))
@@ -270,11 +358,14 @@ def main():
     ap.add_argument('--patience', type=int, default=50)
     ap.add_argument('--batch-size', type=int, default=64)
     ap.add_argument('--lr', type=float, default=1e-3)
-    ap.add_argument('--features', choices=['concat', 'concat_diff', 'diff_only'], default='concat')
+    ap.add_argument('--features',
+                    choices=['concat', 'concat_diff', 'diff_only', '3frame', '3frame_diff'],
+                    default='concat')
     ap.add_argument('--n-oracle', type=int, default=100)
     ap.add_argument('--no-pixel-r2', action='store_true')
     ap.add_argument('--tag', default='default')
     ap.add_argument('--seed', type=int, default=42)
+    ap.add_argument('--scenes', default='data/scenes.npz')
     args = ap.parse_args()
 
     out_dir = os.path.join('outputs', 'pp_eval', args.tag)
@@ -289,9 +380,9 @@ def main():
     log(f"=== PP eval: tag={args.tag} ===")
     log(f"args: {vars(args)}")
 
-    log("\nLoading scenes...")
+    log(f"\nLoading scenes from {args.scenes}...")
     t0 = time.time()
-    scenes = load_scenes('data/scenes.npz')
+    scenes = load_scenes_any(args.scenes)
     log(f"  loaded in {time.time()-t0:.1f}s; n={len(scenes['initial_renders'])}")
 
     log(f"\nBuilding features (mode={args.features}, pca_dim={args.pixel_pca_dim})...")
