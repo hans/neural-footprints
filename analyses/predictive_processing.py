@@ -105,6 +105,38 @@ class InverseModel:
     (b) actually have variance across the dataset. Mass, friction,
     orientation, and angular velocity are filled with the training-set mean
     on predict() since pixels can't recover them.
+
+    Why mean-fill of the non-observable dims is dynamically safe in this
+    scene generator (i.e. resimulating from inferred state still produces
+    the right trajectory, even though four of the 15 dims per object are
+    wrong per scene):
+
+      - Orientation: scene_generator always initializes with the identity
+        quaternion, so the dataset mean equals every scene's ground truth.
+      - Angular velocity: never set at t=0 (PyBullet default = 0), so the
+        initial value is always zero and the mean = GT.
+      - Mass: cancels out of the dynamics. Gravity is mass-independent, and
+        the per-scene x-acceleration is applied as force = x_accel * mass
+        (scene_generator._create_scene + resimulate_scene), so PyBullet's
+        a = F/m yields a = x_accel regardless of the mass passed in. There
+        are no inter-object collisions (single object per scene; pillar has
+        no collision shape), so there's no regime where mass matters.
+      - Friction: only enters during ground contact. Most 30-step rollouts
+        don't reach the ground; when contact does occur, sliding decel is
+        μ·g, and the gap between true μ and the dataset mean produces only
+        sub-pixel-scale trajectory deviations.
+
+    Consequence: the headline pp_r2 metric explicitly fills non-observable
+    dims with GT before resimulating, but the frame visualization in
+    run_predictive_processing_analysis can safely skip that step — the
+    resulting figure is unbiased relative to the metric (only difference
+    is single-MC-sample vs. 20-sample mean for the observable dims).
+
+    If scene_generator changes in ways that break the above (inter-object
+    collisions, longer rollouts that guarantee ground contact, randomized
+    initial orientation, non-zero initial angular velocity), revisit this:
+    mean-fill would then introduce bias and the visualization should mirror
+    the pp_r2 GT-fill loop.
     """
 
     def __init__(self):
