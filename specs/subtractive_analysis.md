@@ -1,70 +1,64 @@
-This specification document outlines a proposed "Subtractive Analysis" simulation. The goal is to demonstrate that the most common method in cognitive neuroscience—comparing two conditions to isolate a cognitive process—systematically fails when the target representation is low-dimensional (abstract) and the confounding representation is high-dimensional (sensory).
+**Spec: Subtractive Analysis & the "Loudness" of Sensory Variance**
+===================================================================
 
-**Scientific Motivation**
--------------------------
+**1\. Scientific Motivation: Defining the Subtractive Method**
+--------------------------------------------------------------
 
-The "Subtractive Method" assumes that by subtracting a control condition from a task condition, we cancel out shared "noise" and isolate the "signal." However, if the "signal" is a compact, abstract variable (like the number 5) and the "noise" is a high-variance sensory feature (like the distribution of 500 pixels), the subtraction will be dominated by sensory variance.
+The **Subtractive Method** (or "Cognitive Subtraction") is the foundational logic of functional brain mapping. It operates on the principle of **Pure Insertion**: the assumption that a cognitive process of interest (e.g., "counting") can be added to a task without altering the underlying baseline processes (e.g., "seeing dots").
 
-We aim to show that a "Sensory-Only" model can produce a brain map that looks identical to a "Full" model, leading a scientist to believe they have found an abstract module where none exists.
+By taking the neural activation of a **Task Condition** (Dots + Counting) and subtracting the activation of a **Control Condition** (Dots only), the scientist aims to "cancel out" the shared sensory processing and isolate the specific neural population responsible for the abstract computation.
 
-**Option 1: Motion (Velocity vs. Flicker)**
--------------------------------------------
+Our goal is to show that this logic collapses when the "canceled" sensory features possess high-dimensional variance. Even if a feature is shared between conditions, the _statistical footprint_ of that sensory information is so massive that it leaves behind a "residual shimmer" that masks or mimics the abstract signal.
 
-*   **The Scientist’s Task:** Identify a "Motion Region" (e.g., Area MT+).
-    
-*   **The Subtraction:** $\\text{Moving Dots} - \\text{Stationary Dots}$.
-    
-*   **The Target (Abstract):** A velocity vector (the physical direction and speed of an object).
-    
-*   **The Confound (Sensory):** Temporal Frequency/Flicker (the rate of change in pixel intensity at a specific location).
-    
-*   **Interpretation:** Because moving dots create massive amounts of local pixel variance (flicker) compared to static dots, the scientist identifies a "Motion Region" that is actually just a "High-Variance Change Detector."
-    
+**2\. Finding #1: The Sensible Threshold Failure**
+--------------------------------------------------
 
-**Option 2: Numerosity (Cardinality vs. Spatial Sums)**
--------------------------------------------------------
+Before exploring the nuances of thresholding, we first demonstrate a "Standard Failure."
 
-*   **The Scientist’s Task:** Identify a "Number Map" in the parietal lobe (IPS).
+*   **The Scenario:** A scientist applies a "sensible" statistical threshold (e.g., $p < 0.05$, Bonferroni corrected) to a subtraction between high-count and low-count scenes.
     
-*   **The Subtraction:** $\\text{High Count (N=12)} - \\text{Low Count (N=3)}$.
+*   **The Result:** The analysis yields a clear, statistically significant "blob" in a specific region. The scientist labels this the "Numerosity Module."
     
-*   **The Target (Abstract):** Cardinality (the abstract concept of "twelve-ness").
-    
-*   **The Confound (Sensory):** Total Surface Area, Edge Density, and Luminance.
-    
-*   **Interpretation:** A model that only knows "how much ink is on the screen" (high-dimensional sensory flux) will pass the subtraction test with a higher $z$-score than a model that actually "counts." The scientist mistakes sensory accumulation for abstract math.
+*   **The Ground Truth:** Our simulation reveals that the "blob" actually corresponds to the **Sensory Module** (neurons tuned to edge density or luminance). Because the sensory variance was so high, it did not "cancel out" perfectly, leaving a significant residue that the scientist mistakes for an abstract representation.
     
 
-**Option 3: Structural Coherence (Intact vs. Scrambled)**
----------------------------------------------------------
+**3\. Finding #2: The Thresholding Trap (The "No-Win" Regime)**
+---------------------------------------------------------------
 
-*   **The Scientist’s Task:** Identify an "Object-Selective Region" (e.g., LOC).
+Building on the first finding, we show that this isn't just a matter of the scientist being "too loose" or "too strict." There is a fundamental Goldilocks problem where **no threshold** can recover the ground truth.
+
+*   **The Low-Threshold Regime (False Positive Flood):** If the scientist lowers the threshold to ensure they don't miss the "real" signal, the map becomes overwhelmed. The "Abstract Module" may appear, but it is buried under a mountain of sensory noise and "leaky" variance from the sensory block. The signal-to-noise ratio makes the abstract computation unidentifiable.
     
-*   **The Subtraction:** $\\text{Intact Photos} - \\text{Scrambled Pixels}$.
+*   **The High-Threshold Regime (False Negative Silence):** If the scientist raises the threshold to be "rigorous" and eliminate noise, the compact, low-dimensional abstract signal is the first thing to disappear. Because the abstract signal is "quiet" (affecting fewer neurons or having lower weight variance), it fails to survive the strict filter that the "louder" sensory residuals easily pass.
     
-*   **The Target (Abstract):** Structural coherence and object identity (the "concept" of a chair).
-    
-*   **The Confound (Sensory):** Low-level spatial correlations and power spectra.
-    
-*   **Interpretation:** Scrambling an image radically alters its high-dimensional statistical fingerprint. The scientist thinks they have found a "Chair Detector," but they have actually found a "Non-Random Noise Detector."
+*   **The Conclusion:** The statistical asymmetry between sensory and abstract features ensures that the "Abstract Module" is never the most significant feature of the map.
     
 
-**Strategic Recommendation: Starting with Numerosity**
-------------------------------------------------------
+**4\. Architectural Shift: Localized Block-Mapping**
+----------------------------------------------------
 
-We recommend the **Numerosity** paradigm for the initial implementation for several reasons:
+To produce these findings, the simulation moves from random projections to a **block-structure mapping matrix**:
 
-1.  **Mathematical Clarity:** The abstract feature is a pure scalar (a single number). This provides the starkest possible contrast to the high-dimensional sensory input (the thousands of pixels/coordinates required to render those dots). It is the "cleanest" example of statistical asymmetry.
+*   **The Sensory Block:** A large population of neurons with high-variance weights linked to pixel-level data.
     
-2.  **Well-Documented Confounds:** The "Numerosity vs. Continuous Variables" debate is a classic in the literature. We don't have to invent the confounds; we can use established ones like total perimeter and occupancy.
+*   **The Abstract Block:** A smaller, compact population with lower-variance weights linked to scalar variables (like $N$).
     
-3.  **Provocative Interpretation:** Showing that a "Number Map"—one of the most cited results in functional brain mapping—could be a statistical artifact of sensory "loudness" provides the most compelling narrative for the paper. It perfectly illustrates our core thesis: **variance-based methods find the "commotion" of the sensory signal, not the "computation" of the abstract one.**
+*   **The Resulting Anatomy:** This creates a simulated brain with distinct "functional regions," allowing us to measure exactly how much "sensory leakage" contaminates the area the scientist is studying.
     
 
-### **Success Criteria for the Simulation**
+**5\. New Simulation Pipeline: Multi-Object Scenes**
+----------------------------------------------------
 
-*   **The False Positive:** A "Sensory-Only" model (with zero knowledge of number/motion) generates a statistically significant "Brain Map" that mimics experimental data.
+To generate the necessary data for these subtractions, we require a pipeline that can procedurally generate scenes with varying object counts and properties.
+
+*   **Primary Paradigm (Numerosity):** We will generate scenes with $N$ objects. The abstract feature is the scalar $N$; the sensory features are the sum of pixels, perimeters, and centroids.
     
-*   **The Failure of Fit:** Standard encoding models fail to show a significant improvement when the "True" abstract variable is added to the "Sensory-Only" model, because the sensory variance masks the abstract signal.
+*   **The Goal:** Show that $N$ is always "out-shouted" by the sum of pixels in any subtractive map, regardless of the threshold chosen.
     
-*   **The Ground Truth Gap:** We show that while the scientist's map is "significant," it is fundamentally unrelated to the causally relevant variables in the simulation.
+
+**6\. Summary of Interpretation**
+---------------------------------
+
+This addition demonstrates that subtractive analysis is fundamentally biased toward **representationally expensive** features. High-dimensional sensory information is "expensive" (it takes up a lot of neural real estate and variance), while abstract knowledge is "cheap" (compact and low-dimensional).
+
+We show that our current neural analysis tools are effectively "weighted" to find the most expensive features, leading scientists to build maps of the brain's "sensory overhead" while completely missing the "computational core."
