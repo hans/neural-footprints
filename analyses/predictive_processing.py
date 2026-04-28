@@ -408,6 +408,50 @@ def physics_groups():
     }
 
 
+def build_pp_features(scenes, pixel_pca_dim=None):
+    """Compute the InverseModel input features from a scenes dict.
+
+    Three-frame whitened pixel PCAs at t={0, PP_EARLY_FRAME, PP_LATE_FRAME},
+    concatenated. Used identically by scripts/train_pp_for_neural.py (to fit
+    the model once early in the pipeline) and by run_predictive_processing_analysis
+    (to apply the loaded checkpoint and produce inferred-physics for analysis).
+    Keeping it in one place avoids the silent failure mode where mismatched PCAs
+    let the loaded weights apply to the wrong feature basis.
+
+    Returns
+    -------
+    dict with keys:
+        pixel_pca_t0      : (n, pixel_pca_dim) array, t=0 PCA features
+        pixel_pca_early   : (n, pixel_pca_dim) array, t=PP_EARLY_FRAME features
+        pixel_pca_late    : (n, pixel_pca_dim) array, t=PP_LATE_FRAME features
+        pixel_pca_concat  : (n, 3*pixel_pca_dim), the InverseModel input
+    """
+    if pixel_pca_dim is None:
+        pixel_pca_dim = _CFG_PP_PIXEL_PCA_DIM
+
+    initial_renders = scenes['initial_renders']
+    early_renders   = scenes['early_renders']
+    late_renders    = scenes['late_renders']
+
+    def _whitened_pca(x):
+        scaler = StandardScaler()
+        pca = PCA(n_components=pixel_pca_dim, whiten=True, random_state=42)
+        return pca.fit_transform(scaler.fit_transform(x))
+
+    pixel_pca_t0    = _whitened_pca(initial_renders)
+    pixel_pca_early = _whitened_pca(early_renders)
+    pixel_pca_late  = _whitened_pca(late_renders)
+
+    return {
+        'pixel_pca_t0': pixel_pca_t0,
+        'pixel_pca_early': pixel_pca_early,
+        'pixel_pca_late': pixel_pca_late,
+        'pixel_pca_concat': np.concatenate(
+            [pixel_pca_t0, pixel_pca_early, pixel_pca_late], axis=1
+        ),
+    }
+
+
 # ---------------------------------------------------------------------------
 # Main analysis
 # ---------------------------------------------------------------------------
@@ -444,6 +488,7 @@ def run_predictive_processing_analysis(neural_activity, scenes,
     pixel_indices   = scenes['metadata']['pixel_indices']
     initial_renders = scenes['initial_renders']
     early_renders   = scenes['early_renders']
+    late_renders    = scenes['late_renders']
     initial_physics = scenes['initial_physics_labels']
     scene_configs   = scenes['scene_configs']
     program_states  = scenes['program_states']
@@ -451,31 +496,21 @@ def run_predictive_processing_analysis(neural_activity, scenes,
     lightings       = scenes['lightings']
     n = len(initial_renders)
 
-    # --- 1. Shared pixel PCAs (RGBA-only, three time points) ---
+    # --- 1. Shared pixel PCAs ---
     print("\nPreparing pixel representations...")
 
     final_pixels_raw = program_states[:, pixel_indices]  # final-frame RGBA bytes
-
     scaler_pix = StandardScaler()
     pix_scaled = scaler_pix.fit_transform(final_pixels_raw)
     pca_final = PCA(n_components=pixel_pca_dim, whiten=True, random_state=42)
     final_pixel_pca = pca_final.fit_transform(pix_scaled)
 
-    scaler_t0 = StandardScaler()
-    pca_t0 = PCA(n_components=pixel_pca_dim, whiten=True, random_state=42)
-    pixel_pca_t0 = pca_t0.fit_transform(scaler_t0.fit_transform(initial_renders))
-
-    scaler_early = StandardScaler()
-    pca_early = PCA(n_components=pixel_pca_dim, whiten=True, random_state=42)
-    pixel_pca_early = pca_early.fit_transform(scaler_early.fit_transform(early_renders))
-
-    # Frame-difference PCA gives the inverse model an explicit motion channel.
-    # Without it, linvel_x R² plateaus near 0.5 — see scripts/eval_pp.py sweeps.
-    scaler_diff = StandardScaler()
-    pca_diff = PCA(n_components=pixel_pca_dim, whiten=True, random_state=42)
-    pixel_pca_diff = pca_diff.fit_transform(scaler_diff.fit_transform(early_renders - initial_renders))
-
-    pixel_pca_two_frame = np.concatenate([pixel_pca_t0, pixel_pca_early, pixel_pca_diff], axis=1)
+    # Inverse-model input features: shared with scripts/train_pp_for_neural.py.
+    feats = build_pp_features(scenes, pixel_pca_dim=pixel_pca_dim)
+    pixel_pca_t0       = feats['pixel_pca_t0']
+    pixel_pca_early    = feats['pixel_pca_early']
+    pixel_pca_late     = feats['pixel_pca_late']
+    pixel_pca_two_frame = feats['pixel_pca_concat']
 
     # --- 2. Train / test split ---
     rng = np.random.default_rng(42)

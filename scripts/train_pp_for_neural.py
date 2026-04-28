@@ -14,42 +14,25 @@ import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import numpy as np
-from sklearn.decomposition import PCA
-from sklearn.preprocessing import StandardScaler
 
 from load_config import load_config
 from io_utils import load_scenes
-from analyses.predictive_processing import InverseModel
+from analyses.predictive_processing import InverseModel, build_pp_features
 from analyses.pp_io import save_inverse_model, extract_activations
 
 
 cfg = load_config()
 scenes = load_scenes(snakemake.input.scenes)
 
-initial_renders = scenes['initial_renders']
-early_renders   = scenes['early_renders']
 initial_physics = scenes['initial_physics_labels']
-n = len(initial_renders)
+n = len(scenes['initial_renders'])
 
 print(f"\nTraining InverseModel for neural generation on {n} scenes")
 print("=" * 60)
 
-pixel_pca_dim = cfg['pp_pixel_pca_dim']
-
-# Match run_predictive_processing_analysis exactly: t0 PCA + early PCA + frame-diff PCA.
-# The frame-diff channel is what gives the inverse model a usable motion signal.
-pca_t0 = PCA(n_components=pixel_pca_dim, whiten=True, random_state=42)
-pixel_pca_t0 = pca_t0.fit_transform(StandardScaler().fit_transform(initial_renders))
-
-pca_early = PCA(n_components=pixel_pca_dim, whiten=True, random_state=42)
-pixel_pca_early = pca_early.fit_transform(StandardScaler().fit_transform(early_renders))
-
-pca_diff = PCA(n_components=pixel_pca_dim, whiten=True, random_state=42)
-pixel_pca_diff = pca_diff.fit_transform(
-    StandardScaler().fit_transform(early_renders - initial_renders)
-)
-
-pixel_pca_two_frame = np.concatenate([pixel_pca_t0, pixel_pca_early, pixel_pca_diff], axis=1)
+# Shared with run_predictive_processing_analysis (analyses/predictive_processing.py).
+feats = build_pp_features(scenes, pixel_pca_dim=cfg['pp_pixel_pca_dim'])
+pixel_pca_two_frame = feats['pixel_pca_concat']
 print(f"  pixel PCA features: {pixel_pca_two_frame.shape}")
 
 inv = InverseModel()

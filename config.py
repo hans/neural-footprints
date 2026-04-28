@@ -19,5 +19,8 @@ BEHAVIORAL_OBJECTIVE = _cfg['behavioral_objective']
 PP_HIDDEN_DIM = _cfg['pp_hidden_dim']
 PP_PIXEL_PCA_DIM = _cfg['pp_pixel_pca_dim']
 PP_EARLY_FRAME = _cfg['pp_early_frame']
+PP_LATE_FRAME = _cfg['pp_late_frame']
 PP_DROPOUT_RATE = _cfg['pp_dropout_rate']
 PP_NEURAL_LAYER = _cfg.get('pp_neural_layer', 'h2')
+
+CAMERA_FOV = _cfg['camera_fov']

@@ -8,7 +8,8 @@ def save_scenes(scenes, path):
     """Save scenes dict to compressed .npz. Handles metadata and scene_configs as JSON."""
     arrays = {}
     for key in ['program_states', 'physics_labels', 'initial_physics_labels',
-                'initial_renders', 'early_renders', 'behavior_labels', 'kinetic_energies']:
+                'initial_renders', 'early_renders', 'late_renders',
+                'behavior_labels', 'kinetic_energies']:
         arrays[key] = scenes[key]
 
     arrays['pillar_grays'] = np.array(scenes['pillar_grays'])
@@ -32,7 +33,8 @@ def load_scenes(path):
     data = np.load(path, allow_pickle=False)
     scenes = {}
     for key in ['program_states', 'physics_labels', 'initial_physics_labels',
-                'initial_renders', 'early_renders', 'behavior_labels', 'kinetic_energies']:
+                'initial_renders', 'early_renders', 'late_renders',
+                'behavior_labels', 'kinetic_energies']:
         scenes[key] = data[key]
 
     meta = json.loads(str(data['metadata_json']))
