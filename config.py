@@ -24,3 +24,9 @@ PP_DROPOUT_RATE = _cfg['pp_dropout_rate']
 PP_NEURAL_LAYER = _cfg.get('pp_neural_layer', 'h2')
 
 CAMERA_FOV = _cfg['camera_fov']
+
+# Subtractive-analysis blocks. Scripts that need the full structure read
+# the dicts directly from load_config(); these are passthroughs for code
+# that imports symbols from config.py.
+NUMEROSITY = _cfg.get('numerosity', {})
+SUBTRACTIVE = _cfg.get('subtractive', {})

@@ -23,12 +23,9 @@ scripts/plot_pp.py to match the pre-pp pipeline pattern.
 
 import numpy as np
 import torch
-import torch.nn as nn
-from torch.utils.data import DataLoader, TensorDataset
 from sklearn.decomposition import PCA
 from sklearn.linear_model import RidgeCV
-from sklearn.metrics import r2_score
-from sklearn.model_selection import cross_val_predict, train_test_split
+from sklearn.model_selection import cross_val_predict
 from sklearn.neural_network import MLPRegressor
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
@@ -40,6 +37,7 @@ from config import (
     PP_PIXEL_PCA_DIM as _CFG_PP_PIXEL_PCA_DIM,
     PP_DROPOUT_RATE as _CFG_PP_DROPOUT_RATE,
 )
+from analyses.inferential_mlp import InferentialMLPNet, InferentialModel
 
 
 # ---------------------------------------------------------------------------
@@ -63,55 +61,28 @@ def _mean_neural_r2(features, neural_activity):
 # PyTorch network
 # ---------------------------------------------------------------------------
 
-class InverseMLPNet(nn.Module):
-    """Three-hidden-layer MLP with dropout, kept active at inference for MC sampling.
-
-    Layers are split into named blocks so post-ReLU activations of each hidden
-    layer are individually addressable via ``forward_with_activations``. Dropout
-    is applied AFTER the activation tap, so a tapped activation reflects the
-    deterministic representation when the net is in eval mode (and the
-    stochastic representation when in train mode for MC sampling).
+class InverseMLPNet(InferentialMLPNet):
+    """Inferential MLP for the PP pipeline. Identical layout to the base class;
+    kept as a named subclass so existing callers and checkpoints continue to
+    refer to the same name.
     """
     def __init__(self, input_dim, output_dim,
                  hidden_dim=None, dropout_rate=None):
-        super().__init__()
         if hidden_dim is None:
             hidden_dim = _CFG_PP_HIDDEN_DIM
         if dropout_rate is None:
             dropout_rate = _CFG_PP_DROPOUT_RATE
-        self.input_dim = input_dim
-        self.output_dim = output_dim
-        self.hidden_dim = hidden_dim
-        self.dropout_rate = dropout_rate
-
-        self.h1 = nn.Sequential(nn.Linear(input_dim, hidden_dim), nn.ReLU())
-        self.d1 = nn.Dropout(dropout_rate)
-        self.h2 = nn.Sequential(nn.Linear(hidden_dim, hidden_dim), nn.ReLU())
-        self.d2 = nn.Dropout(dropout_rate)
-        self.h3 = nn.Sequential(nn.Linear(hidden_dim, hidden_dim // 2), nn.ReLU())
-        self.d3 = nn.Dropout(dropout_rate)
-        self.out = nn.Linear(hidden_dim // 2, output_dim)
-
-    def forward(self, x):
-        h1 = self.h1(x)
-        h2 = self.h2(self.d1(h1))
-        h3 = self.h3(self.d2(h2))
-        return self.out(self.d3(h3))
-
-    def forward_with_activations(self, x):
-        """Returns (output, {'h1': ..., 'h2': ..., 'h3': ...}). Post-ReLU, pre-dropout."""
-        h1 = self.h1(x)
-        h2 = self.h2(self.d1(h1))
-        h3 = self.h3(self.d2(h2))
-        out = self.out(self.d3(h3))
-        return out, {'h1': h1, 'h2': h2, 'h3': h3}
+        super().__init__(
+            input_dim=input_dim, output_dim=output_dim,
+            hidden_dim=hidden_dim, dropout_rate=dropout_rate,
+        )
 
 
 # ---------------------------------------------------------------------------
 # InverseModel
 # ---------------------------------------------------------------------------
 
-class InverseModel:
+class InverseModel(InferentialModel):
     """
     Maps two-frame pixel PCA → inferred physical state.
 
@@ -157,17 +128,22 @@ class InverseModel:
     the pp_r2 GT-fill loop.
     """
 
-    def __init__(self):
-        self.net_ = None
-        self.input_scaler_ = None
+    NET_CLASS = InverseMLPNet
+
+    def __init__(self, hidden_dim=None, dropout_rate=None):
+        if hidden_dim is None:
+            hidden_dim = _CFG_PP_HIDDEN_DIM
+        if dropout_rate is None:
+            dropout_rate = _CFG_PP_DROPOUT_RATE
+        super().__init__(hidden_dim=hidden_dim, dropout_rate=dropout_rate)
         self.phys_scaler_ = None
-        self.per_dim_r2_ = None
         self.valid_dims_ = None
         self.full_physics_dim_ = None
         self.const_values_ = None
 
-    def fit(self, pixel_pca_two_frame, physics_labels,
-            n_epochs=300, batch_size=64, lr=1e-3, val_frac=0.15, patience=50):
+    # --- Subclass hooks ------------------------------------------------
+
+    def _preprocess_target(self, physics_labels):
         self.full_physics_dim_ = physics_labels.shape[1]
 
         # Stride of 15 per object: pos(0:3), orn(3:7), lin_vel(7:10),
@@ -192,89 +168,20 @@ class InverseModel:
               f"({self.full_physics_dim_} total)")
 
         physics_valid = physics_labels[:, self.valid_dims_]
-
-        self.input_scaler_ = StandardScaler()
-        X = self.input_scaler_.fit_transform(pixel_pca_two_frame)
         self.phys_scaler_ = StandardScaler()
-        y = self.phys_scaler_.fit_transform(physics_valid)
+        return self.phys_scaler_.fit_transform(physics_valid)
 
-        X_tr, X_val, y_tr, y_val = train_test_split(
-            X, y, test_size=val_frac, random_state=42
-        )
+    def _postprocess_prediction(self, y_scaled):
+        valid_preds = self.phys_scaler_.inverse_transform(y_scaled)
+        return self._expand_to_full(valid_preds)
 
-        input_dim = X.shape[1]
-        output_dim = y.shape[1]
-        self.net_ = InverseMLPNet(input_dim, output_dim)
-
-        optimizer = torch.optim.Adam(self.net_.parameters(), lr=lr)
-        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-            optimizer, factor=0.5, patience=10
-        )
-        loss_fn = nn.MSELoss()
-
-        X_tr_t = torch.tensor(X_tr, dtype=torch.float32)
-        y_tr_t = torch.tensor(y_tr, dtype=torch.float32)
-        X_val_t = torch.tensor(X_val, dtype=torch.float32)
-        y_val_t = torch.tensor(y_val, dtype=torch.float32)
-
-        loader = DataLoader(TensorDataset(X_tr_t, y_tr_t), batch_size=batch_size, shuffle=True)
-
-        best_val_loss = float('inf')
-        patience_count = 0
-        best_state = None
-
-        for epoch in range(n_epochs):
-            self.net_.train()
-            for xb, yb in loader:
-                optimizer.zero_grad()
-                loss_fn(self.net_(xb), yb).backward()
-                optimizer.step()
-
-            self.net_.eval()
-            with torch.no_grad():
-                val_loss = loss_fn(self.net_(X_val_t), y_val_t).item()
-
-            scheduler.step(val_loss)
-
-            if val_loss < best_val_loss:
-                best_val_loss = val_loss
-                best_state = {k: v.clone() for k, v in self.net_.state_dict().items()}
-                patience_count = 0
-            else:
-                patience_count += 1
-                if patience_count >= patience:
-                    print(f"    InverseModel early stop at epoch {epoch+1} (val loss={best_val_loss:.4f})")
-                    break
-
-        if best_state is not None:
-            self.net_.load_state_dict(best_state)
-
-        self.net_.eval()
-        with torch.no_grad():
-            y_pred_val = self.net_(X_val_t).numpy()
-        self.per_dim_r2_ = r2_score(y_val, y_pred_val, multioutput='raw_values')
-
-        print(f"    InverseModel val MSE={best_val_loss:.4f}  "
-              f"mean per-dim R²={self.per_dim_r2_.mean():.4f}  "
-              f"max={self.per_dim_r2_.max():.4f}")
-        return self
+    # --- Physics-specific machinery ------------------------------------
 
     def _expand_to_full(self, valid_predictions):
         n = valid_predictions.shape[0]
         full = np.tile(self.const_values_, (n, 1))
         full[:, self.valid_dims_] = valid_predictions
         return full
-
-    def predict(self, pixel_pca_two_frame):
-        """Deterministic prediction (dropout off). Returns physics in original units, full dims."""
-        self.net_.eval()
-        X = torch.tensor(
-            self.input_scaler_.transform(pixel_pca_two_frame), dtype=torch.float32
-        )
-        with torch.no_grad():
-            pred_scaled = self.net_(X).numpy()
-        valid_preds = self.phys_scaler_.inverse_transform(pred_scaled)
-        return self._expand_to_full(valid_preds)
 
     def predict_stochastic(self, pixel_pca_two_frame, n_samples=8):
         """MC dropout: stochastic forward passes with dropout active."""
@@ -292,25 +199,10 @@ class InverseModel:
             for s in samples_scaled
         ])
 
-    def extract_activations(self, pixel_pca_two_frame, layer='h2'):
-        """Deterministic post-ReLU activations of one hidden layer.
-
-        layer: 'h1' | 'h2' | 'h3'. Dropout is off (eval mode), so the returned
-        activations are the deterministic representation the net would use at
-        inference time, not an MC sample.
-        """
-        if layer not in ('h1', 'h2', 'h3'):
-            raise ValueError(f"layer must be 'h1', 'h2', or 'h3'; got {layer!r}")
-        self.net_.eval()
-        X = torch.tensor(
-            self.input_scaler_.transform(pixel_pca_two_frame), dtype=torch.float32
-        )
-        with torch.no_grad():
-            _, acts = self.net_.forward_with_activations(X)
-        return acts[layer].numpy()
+    # --- Legacy in-class save/load (preserved for any direct callers;
+    # the canonical I/O path goes through analyses/pp_io.py). -----------
 
     def save(self, path):
-        """Persist trained model + scalers + dim metadata to a single .pt file."""
         torch.save({
             'state_dict': self.net_.state_dict(),
             'input_dim': self.net_.input_dim,
