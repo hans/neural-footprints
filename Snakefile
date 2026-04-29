@@ -16,6 +16,7 @@ rule all:
         "figures/predictive_processing.pdf",
         "figures/pp_frames.pdf",
         "figures/sample_scenes.pdf",
+        "figures/residual_analysis.pdf",
         "paper/results_macros.tex",
 
 
@@ -33,6 +34,7 @@ rule figures:
         "figures/predictive_processing.pdf",
         "figures/pp_frames.pdf",
         "figures/sample_scenes.pdf",
+        "figures/residual_analysis.pdf",
 
 
 # ---------------------------------------------------------------------------
@@ -145,6 +147,18 @@ rule dynamics:
         "scripts/run_dynamics.py"
 
 
+rule residual:
+    input:
+        scenes="data/scenes.npz",
+        neural="data/neural.npz",
+        inferred="data/inferred_physics.npz",
+    output:
+        results="outputs/residual_results.json",
+        plot_data="data/residual_plot_data.npz",
+    script:
+        "scripts/run_residual.py"
+
+
 # ---------------------------------------------------------------------------
 # Plotting (fast — only reads cached plot_data NPZ files)
 # ---------------------------------------------------------------------------
@@ -215,6 +229,15 @@ rule plot_pp:
         frames="figures/pp_frames.pdf",
     script:
         "scripts/plot_pp.py"
+
+
+rule plot_residual:
+    input:
+        plot_data="data/residual_plot_data.npz",
+    output:
+        figure="figures/residual_analysis.pdf",
+    script:
+        "scripts/plot_residual.py"
 
 
 # ---------------------------------------------------------------------------

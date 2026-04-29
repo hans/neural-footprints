@@ -567,3 +567,77 @@ def plot_sample_scenes(initial_renders, program_states, pixel_indices,
         fig_path = f"{fig_dir}/sample_scenes.pdf"
         plt.savefig(fig_path)
         plt.close()
+
+
+def plot_residual(plot_data, fig_dir="figures"):
+    """
+    Two-panel figure for the residual encoding analysis.
+
+    Panel A: paired per-neuron R² scatter (raw vs render-residualized) for the
+    inferred-physics predictor.
+    Panel B: mean R² bars across {render, physics_gt, inferred, combined}
+    predictor sets, grouped by raw vs residualized neural.
+    """
+    raw = {
+        'render': plot_data['r2_raw_render'],
+        'physics_gt': plot_data['r2_raw_physics_gt'],
+        'inferred': plot_data['r2_raw_inferred'],
+        'combined': plot_data['r2_raw_combined'],
+    }
+    resid = {
+        'render': plot_data['r2_resid_render'],
+        'physics_gt': plot_data['r2_resid_physics_gt'],
+        'inferred': plot_data['r2_resid_inferred'],
+        'combined': plot_data['r2_resid_combined'],
+    }
+    var_kept = float(plot_data['residual_variance_fraction'])
+
+    with paper_style():
+        fig, axes = plt.subplots(1, 2, figsize=(FULL_WIDTH, COL_WIDTH * 0.9))
+
+        # Panel A: paired scatter, raw vs residualized R² for inferred physics
+        ax = axes[0]
+        x = raw['inferred']
+        y = resid['inferred']
+        lo = min(x.min(), y.min(), 0.0)
+        hi = max(x.max(), y.max(), 0.05)
+        ax.plot([lo, hi], [lo, hi], color=COLORS['neutral'], linestyle='--',
+                linewidth=0.8, alpha=0.7, label='y = x')
+        ax.scatter(x, y, s=4, alpha=0.4, color=COLORS['physics'],
+                   edgecolors='none')
+        ax.axhline(0, color=COLORS['neutral'], linestyle=':', linewidth=0.6)
+        ax.set_xlabel('R² raw (inferred predicting neural)')
+        ax.set_ylabel('R² residualized (inferred predicting y_resid)')
+        ax.set_title('Per-neuron R²: raw vs render-residualized')
+        ax.legend(loc='upper left', frameon=False)
+
+        # Panel B: grouped bars
+        ax = axes[1]
+        names = ['render', 'physics_gt', 'inferred', 'combined']
+        labels = ['Render', 'Physics\n(GT)', 'Inferred\nphysics', 'Render +\ninferred']
+        raw_means = [raw[n].mean() for n in names]
+        resid_means = [resid[n].mean() for n in names]
+        n_neurons = len(raw['render'])
+        raw_sems = [raw[n].std() / np.sqrt(n_neurons) for n in names]
+        resid_sems = [resid[n].std() / np.sqrt(n_neurons) for n in names]
+
+        idx = np.arange(len(names))
+        bw = 0.38
+        ax.bar(idx - bw / 2, raw_means, bw, yerr=raw_sems,
+               color=COLORS['pixels'], capsize=2, label='Raw neural')
+        ax.bar(idx + bw / 2, resid_means, bw, yerr=resid_sems,
+               color=COLORS['physics'], capsize=2,
+               label='Residualized (render removed)')
+        ax.axhline(0, color=COLORS['neutral'], linestyle='-', linewidth=0.5,
+                   alpha=0.5)
+        ax.set_xticks(idx)
+        ax.set_xticklabels(labels)
+        ax.set_ylabel('Mean R²')
+        ax.set_title(
+            f'Encoding R² by predictor set  (resid var fraction = {var_kept:.2f})')
+        ax.legend(loc='upper left', frameon=False)
+
+        plt.tight_layout()
+        fig_path = f"{fig_dir}/residual_analysis.pdf"
+        plt.savefig(fig_path)
+        plt.close()
