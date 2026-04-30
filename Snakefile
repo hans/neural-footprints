@@ -264,6 +264,7 @@ rule evaluate:
         dissociation="outputs/dissociation_results.json",
         dynamics="outputs/dynamics_results.json",
         pp_results="outputs/pp_results.json",
+        residual="outputs/residual_results.json",
     output:
         "outputs/evaluation.json",
     script:

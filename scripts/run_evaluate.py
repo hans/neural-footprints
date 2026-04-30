@@ -14,6 +14,15 @@ pp_results = None
 if hasattr(snakemake.input, 'pp_results'):
     pp_results = load_results(snakemake.input.pp_results)
 
+residual_results = None
+if hasattr(snakemake.input, 'residual'):
+    residual_results = load_results(snakemake.input.residual)
+    for key in ['r2_raw_render', 'r2_raw_physics_gt', 'r2_raw_inferred',
+                'r2_raw_combined', 'r2_resid_render', 'r2_resid_physics_gt',
+                'r2_resid_inferred', 'r2_resid_combined']:
+        if key in residual_results and residual_results[key] is not None:
+            residual_results[key] = np.array(residual_results[key])
+
 # Convert lists back to arrays where evaluate() expects them
 for key in ['r2_pixels_only', 'r2_physics_only', 'r2_combined', 'delta_r2',
             'r2_inferred', 'r2_inferred_combined', 'delta_r2_inferred']:
@@ -22,7 +31,8 @@ for key in ['r2_pixels_only', 'r2_physics_only', 'r2_combined', 'delta_r2',
 
 n_passed, n_total, checks = evaluate(encoding, rsa, dissociation,
                                      pp_results=pp_results,
-                                     dynamics_results=dynamics)
+                                     dynamics_results=dynamics,
+                                     residual_results=residual_results)
 
 save_results({
     'n_passed': n_passed,

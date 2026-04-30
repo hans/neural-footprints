@@ -21,7 +21,7 @@ def _check(name, passed, actual_str, threshold_str):
 
 
 def evaluate(encoding_results, rsa_results, dissociation_results,
-             pp_results=None, dynamics_results=None):
+             pp_results=None, dynamics_results=None, residual_results=None):
     """Run all checks and print colored evaluation report. Returns (n_passed, n_total)."""
 
     lines = []
@@ -169,6 +169,41 @@ def evaluate(encoding_results, rsa_results, dissociation_results,
         f"{metric} = {beh_rend:.4f}",
         "expect low" if obj == "next_frame_pixels" else "expect < 0.70",
     )
+
+    # --- Residual encoding analysis ---
+    if residual_results is not None:
+        r2_resid_render = float(residual_results['r2_resid_render'].mean())
+        r2_raw_inferred = float(residual_results['r2_raw_inferred'].mean())
+        r2_resid_inferred = float(residual_results['r2_resid_inferred'].mean())
+        var_kept = float(residual_results['residual_variance_fraction'])
+
+        lines.append(f"\n{BOLD}Residual Encoding{RESET}")
+        check(
+            "Stage-1 sanity: render does not predict its own residual",
+            abs(r2_resid_render) < 0.05,
+            f"R² = {r2_resid_render:.4f}",
+            "expect |R²| < 0.05",
+        )
+        check(
+            "Stage-1 leaves substantial residual variance",
+            var_kept > 0.05,
+            f"residual var fraction = {var_kept:.4f}",
+            "expect > 0.05 — otherwise Stage-1 has absorbed all signal",
+        )
+        check(
+            "Raw neural carries inferred-physics signal (pre-residualization)",
+            r2_raw_inferred > 0.01,
+            f"R² = {r2_raw_inferred:.4f}",
+            "expect > 0.01 — needed for the collapse to be meaningful"
+            + ("" if inverse_ok else " (depends on inverse model)"),
+        )
+        check(
+            "Residualization removes inferred-physics signal (false negative)",
+            r2_resid_inferred < 0.01,
+            f"R² = {r2_resid_inferred:.4f}",
+            "expect < 0.01"
+            + ("" if inverse_ok else " (depends on inverse model)"),
+        )
 
     # --- Dynamics (future brain state) ---
     if dynamics_results is not None:
