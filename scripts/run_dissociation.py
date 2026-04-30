@@ -36,6 +36,16 @@ for key in ['r2_render', 'r2_physics', 'r2_combined', 'chance',
             'predicted_physics_imgs', 'predicted_final_imgs']:
     plot_arrays[key] = results.pop(key)
 
+# Override frame visualizations with PP-derived frames so all four panels come
+# from the same held-out scenes and the "physics model" panel reflects the
+# inferred-physics PP chain (matching the bar plot's pp_chain_score) rather
+# than the GT-physics oracle.
+pp_plot = np.load(snakemake.input.pp_plot_data, allow_pickle=False)
+plot_arrays['predicted_init_imgs']    = pp_plot['init_frame_imgs']
+plot_arrays['predicted_render_imgs']  = pp_plot['render_frame_imgs']
+plot_arrays['predicted_physics_imgs'] = pp_plot['pp_frame_imgs']
+plot_arrays['predicted_final_imgs']   = pp_plot['final_frame_imgs']
+
 # Add scalar plot data
 plot_arrays['render_score'] = np.array(results['render_behavioral_score'])
 plot_arrays['physics_score'] = np.array(results['physics_behavioral_score'])

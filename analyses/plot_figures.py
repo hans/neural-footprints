@@ -274,8 +274,8 @@ def plot_predicted_frames(plot_data, fig_dir="figures"):
     final_imgs = plot_data['predicted_final_imgs']
     n = len(init_imgs)
 
-    col_titles = ['t=0 (input)', 'Render model\nprediction',
-                  'Physics model\nprediction', 't=N (actual)']
+    col_titles = ['t=0 (input)', 'Sensory model\nprediction',
+                  'PP chain\nprediction', 't=N (actual)']
     cols = [init_imgs, render_imgs, physics_imgs, final_imgs]
 
     with paper_style():
@@ -303,7 +303,7 @@ def plot_predicted_frames_compact(plot_data, fig_dir="figures", scene_idx=1):
     final_imgs = plot_data['predicted_final_imgs']
 
     titles = ['t=0 (input)', 'Sensory model\nprediction',
-              'Physics model\nprediction', 't=N (actual)']
+              'PP chain\nprediction', 't=N (actual)']
     imgs = [init_imgs[scene_idx], render_imgs[scene_idx],
             physics_imgs[scene_idx], final_imgs[scene_idx]]
 

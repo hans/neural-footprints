@@ -626,6 +626,15 @@ def run_predictive_processing_analysis(neural_activity, scenes,
     final_frame_imgs = program_states[frame_idx][:, pixel_indices].astype(np.uint8).reshape(
         n_frame_samples, IMAGE_SIZE, IMAGE_SIZE, 4)
 
+    # Render-only baseline frames for the same scenes (two-frame MLP, no physics).
+    render_frame_pred_pca = render_mlp.predict(pixel_pca_two_frame[frame_idx])
+    render_frame_pred_raw = np.clip(
+        scaler_pix.inverse_transform(pca_final.inverse_transform(render_frame_pred_pca)),
+        0, 255,
+    ).astype(np.uint8)
+    render_frame_imgs = render_frame_pred_raw.reshape(
+        n_frame_samples, IMAGE_SIZE, IMAGE_SIZE, 4)
+
     # --- 11. Per-dim InverseModel quality (full physics dim) ---
     full_per_dim_r2 = np.zeros(inv_model.full_physics_dim_)
     full_per_dim_r2[inv_model.valid_dims_] = inv_model.per_dim_r2_
@@ -658,6 +667,7 @@ def run_predictive_processing_analysis(neural_activity, scenes,
             'init_frame_imgs': init_frame_imgs,
             'early_frame_imgs': early_frame_imgs,
             'pp_frame_imgs': pp_frame_imgs,
+            'render_frame_imgs': render_frame_imgs,
             'final_frame_imgs': final_frame_imgs,
         },
     }

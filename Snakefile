@@ -116,6 +116,7 @@ rule dissociation:
         neural="data/neural.npz",
         encoder="data/encoder.joblib",
         pp_results="outputs/pp_results.json",
+        pp_plot_data="data/pp_plot_data.npz",
     output:
         results="outputs/dissociation_results.json",
         plot_data="data/dissociation_plot_data.npz",
