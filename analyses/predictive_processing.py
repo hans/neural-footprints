@@ -119,10 +119,11 @@ class InverseModel:
     keeps it on for MC dropout sampling.
 
     Restricts the regression target to dimensions that are (a) in principle
-    observable from two pixel frames (position + linear velocity) and
-    (b) actually have variance across the dataset. Mass, friction,
-    orientation, and angular velocity are filled with the training-set mean
-    on predict() since pixels can't recover them.
+    observable from the three pixel frames (position from one frame, linear
+    velocity from two, x_accel from three via second-difference) and (b)
+    actually have variance across the dataset. Mass, friction, orientation,
+    and angular velocity are filled with the training-set mean on predict()
+    since pixels can't recover them.
 
     Why mean-fill of the non-observable dims is dynamically safe in this
     scene generator (i.e. resimulating from inferred state still produces
@@ -170,14 +171,17 @@ class InverseModel:
             n_epochs=300, batch_size=64, lr=1e-3, val_frac=0.15, patience=50):
         self.full_physics_dim_ = physics_labels.shape[1]
 
-        # Stride of 15 per object: pos(0:3), orn(3:7), lin_vel(7:10),
-        # ang_vel(10:13), mass(13), friction(14). Pixels can recover
-        # position (directly visible) and linear velocity (from inter-frame
-        # displacement). Everything else is filtered out of the target.
-        observable_offsets = list(range(0, 3)) + list(range(7, 10))
+        # Stride of 16 per object: pos(0:3), orn(3:7), lin_vel(7:10),
+        # ang_vel(10:13), mass(13), friction(14), x_accel(15). Pixels can
+        # recover position (directly visible from one frame), linear velocity
+        # (from inter-frame displacement, two frames), and x_accel (from
+        # second-difference, three frames at t={0, EARLY, LATE}). Orn / avel /
+        # mass / friction are filtered out of the target — see the dynamics-
+        # safety reasoning in the class docstring.
+        observable_offsets = list(range(0, 3)) + list(range(7, 10)) + [15]
         observable_indices = []
         for i in range(N_OBJECTS):
-            observable_indices.extend([i * 15 + j for j in observable_offsets])
+            observable_indices.extend([i * 16 + j for j in observable_offsets])
 
         std_per_dim = physics_labels.std(axis=0)
         has_variance = std_per_dim > 1e-4
@@ -397,14 +401,15 @@ def _pixel_r2(predicted_rgba, actual_raw_pixels):
 
 
 def physics_groups():
-    """Maps semantic label type → list of dimension indices (stride 15 per object)."""
+    """Maps semantic label type → list of dimension indices (stride 16 per object)."""
     return {
-        'Position':    [i * 15 + j for i in range(N_OBJECTS) for j in range(3)],
-        'Orientation': [i * 15 + j for i in range(N_OBJECTS) for j in range(3, 7)],
-        'Lin. Vel.':   [i * 15 + j for i in range(N_OBJECTS) for j in range(7, 10)],
-        'Ang. Vel.':   [i * 15 + j for i in range(N_OBJECTS) for j in range(10, 13)],
-        'Mass':        [i * 15 + 13 for i in range(N_OBJECTS)],
-        'Friction':    [i * 15 + 14 for i in range(N_OBJECTS)],
+        'Position':    [i * 16 + j for i in range(N_OBJECTS) for j in range(3)],
+        'Orientation': [i * 16 + j for i in range(N_OBJECTS) for j in range(3, 7)],
+        'Lin. Vel.':   [i * 16 + j for i in range(N_OBJECTS) for j in range(7, 10)],
+        'Ang. Vel.':   [i * 16 + j for i in range(N_OBJECTS) for j in range(10, 13)],
+        'Mass':        [i * 16 + 13 for i in range(N_OBJECTS)],
+        'Friction':    [i * 16 + 14 for i in range(N_OBJECTS)],
+        'Accel':       [i * 16 + 15 for i in range(N_OBJECTS)],
     }
 
 
