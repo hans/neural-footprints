@@ -1,6 +1,9 @@
 configfile: "config.yaml"
 
 
+SUBTRACTIVE_REGIMES = ["confounded", "area_controlled"]
+
+
 rule all:
     input:
         "outputs/evaluation.json",
@@ -270,3 +273,64 @@ rule evaluate:
         "outputs/evaluation.json",
     script:
         "scripts/run_evaluate.py"
+
+
+# ---------------------------------------------------------------------------
+# Subtractive analysis (numerosity paradigm). Parallel pipeline; runs only
+# when the user asks for `subtractive_all`. Not in `rule all`.
+# ---------------------------------------------------------------------------
+
+rule generate_numerosity_scenes:
+    output:
+        scenes="data/numerosity_scenes_{regime}.npz",
+    script:
+        "scripts/gen_scenes_numerosity.py"
+
+
+rule train_cardinality:
+    input:
+        scenes="data/numerosity_scenes_{regime}.npz",
+    output:
+        model="data/cardinality_model_{regime}.pt",
+        acts="data/cardinality_activations_{regime}.npz",
+    script:
+        "scripts/train_cardinality.py"
+
+
+rule generate_neural_subtractive:
+    input:
+        scenes="data/numerosity_scenes_{regime}.npz",
+        cardinality_acts="data/cardinality_activations_{regime}.npz",
+    output:
+        neural="data/neural_subtractive_{regime}.npz",
+    script:
+        "scripts/gen_neural_subtractive.py"
+
+
+rule subtractive:
+    input:
+        neural="data/neural_subtractive_{regime}.npz",
+    output:
+        results="outputs/subtractive_{regime}_results.json",
+        plot_data="data/subtractive_{regime}_plot_data.npz",
+    script:
+        "scripts/run_subtractive.py"
+
+
+rule plot_subtractive:
+    input:
+        expand("data/subtractive_{regime}_plot_data.npz",
+               regime=SUBTRACTIVE_REGIMES),
+    output:
+        figures=expand("figures/subtractive_{regime}.pdf",
+                       regime=SUBTRACTIVE_REGIMES),
+        headline="figures/subtractive_headline.pdf",
+    script:
+        "scripts/plot_subtractive.py"
+
+
+rule subtractive_all:
+    input:
+        expand("figures/subtractive_{regime}.pdf",
+               regime=SUBTRACTIVE_REGIMES),
+        "figures/subtractive_headline.pdf",
