@@ -74,12 +74,15 @@ def plot_encoding(plot_data, fig_dir="figures"):
 
 
 def plot_rsa(plot_data, fig_dir="figures"):
+    # Headline physics RDM is the PP-inferred physics readout, so the figure
+    # reflects what the InverseModel can recover from the program state rather
+    # than the GT label vector.
     rdm_neural = plot_data['rdm_neural']
     rdm_render = plot_data['rdm_render']
-    rdm_physics = plot_data['rdm_physics']
+    rdm_physics = plot_data['rdm_inferred']
     n_sub = int(plot_data['n_sub'])
     corr_neural_render = float(plot_data['corr_neural_render'])
-    corr_neural_physics = float(plot_data['corr_neural_physics'])
+    corr_neural_physics = float(plot_data['corr_neural_inferred'])
 
     with paper_style():
         # Reorder scenes via hierarchical clustering on render RDM

@@ -72,11 +72,16 @@ add("encodingDeltaRsq", fmt(np.mean(delta_r2), 4))
 add("controlAccuracy", pct(encoding["control_accuracy"]))
 
 # --- RSA ---
+# Headline physics correlations use the PP-inferred physics readout (what the
+# InverseModel can recover), not the GT label vector. The GT-based numbers
+# remain available under the *Gt suffix.
 add("rsaCorrNeuralRender", fmt(rsa["corr_neural_render"], 4))
-add("rsaCorrNeuralPhysics", fmt(rsa["corr_neural_physics"], 4))
+add("rsaCorrNeuralPhysics", fmt(rsa["corr_neural_inferred"], 4))
 add("rsaCorrRenderPhysics", fmt(rsa["corr_render_physics"], 4))
-add("rsaPartialNeuralPhysics", fmt(rsa["partial_neural_physics"], 4))
-add("rsaRatio", fmt(rsa["corr_neural_render"] / max(rsa["corr_neural_physics"], 1e-9), 1))
+add("rsaPartialNeuralPhysics", fmt(rsa["partial_neural_inferred"], 4))
+add("rsaRatio", fmt(rsa["corr_neural_render"] / max(rsa["corr_neural_inferred"], 1e-9), 1))
+add("rsaCorrNeuralPhysicsGt", fmt(rsa["corr_neural_physics"], 4))
+add("rsaPartialNeuralPhysicsGt", fmt(rsa["partial_neural_physics"], 4))
 
 # --- dynamics ---
 r2_phys_fwd = np.array(dynamics["r2_physics_forward"])
