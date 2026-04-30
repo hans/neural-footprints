@@ -40,4 +40,7 @@ plot_arrays = dict(
 if results.get('r2_inferred') is not None:
     plot_arrays['r2_inferred'] = results['r2_inferred']
     plot_arrays['r2_inferred_combined'] = results['r2_inferred_combined']
+if results.get('control_accuracy_inferred') is not None:
+    plot_arrays['control_accuracy_inferred'] = np.array(results['control_accuracy_inferred'])
+    plot_arrays['control_accuracy_inferred_std'] = np.array(results['control_accuracy_inferred_std'])
 np.savez_compressed(snakemake.output.plot_data, **plot_arrays)

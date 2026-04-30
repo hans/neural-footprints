@@ -105,6 +105,7 @@ def run_encoding_analysis(neural_activity, scenes, neural_meta,
     r2_inferred = None
     r2_inferred_combined = None
     delta_r2_inferred = None
+    inferred_scaled = None
     if inferred_physics is not None:
         print("\nFitting encoding model: neural ~ inferred_physics ...")
         scaler_inf = StandardScaler()
@@ -128,6 +129,20 @@ def run_encoding_analysis(neural_activity, scenes, neural_meta,
     control_acc = log_scores.mean()
     print(f"  Behavior prediction accuracy: {control_acc:.2%} (±{log_scores.std():.2%})")
     print("  (High accuracy expected: KE label is a deterministic function of physics labels)")
+
+    # --- Control (inferred): inferred_physics -> behavior_label ---
+    control_acc_inferred = None
+    control_acc_inferred_std = None
+    if inferred_scaled is not None:
+        print("\nControl: MLP inferred_physics -> behavior_label ...")
+        mlp_inf = MLPClassifier(hidden_layer_sizes=(64,), max_iter=500,
+                                random_state=42, early_stopping=True)
+        log_scores_inf = cross_val_score(mlp_inf, inferred_scaled, behavior_labels, cv=5,
+                                         scoring='accuracy')
+        control_acc_inferred = log_scores_inf.mean()
+        control_acc_inferred_std = log_scores_inf.std()
+        print(f"  Behavior prediction accuracy (inferred): "
+              f"{control_acc_inferred:.2%} (±{control_acc_inferred_std:.2%})")
 
     # --- Subsampling curve ---
     print("\nComputing subsampling curve...")
@@ -168,6 +183,8 @@ def run_encoding_analysis(neural_activity, scenes, neural_meta,
         'delta_r2_inferred': delta_r2_inferred,
         'control_accuracy': control_acc,
         'control_accuracy_std': log_scores.std(),
+        'control_accuracy_inferred': control_acc_inferred,
+        'control_accuracy_inferred_std': control_acc_inferred_std,
         'subsample_means': subsample_means,
         'subsample_sems': subsample_sems,
         'subsample_neuron_counts': neuron_counts,
