@@ -47,8 +47,8 @@ add("rsaSubsample", str(config["rsa_subsample"]))
 image_size = config["image_size"]
 n_objects = config["n_objects"]
 d_render = image_size * image_size * 12  # RGBA(4) + depth(4) + seg(4) raw bytes, each cast to float32
-d_physics_per_obj = 15  # pos(3) + orn(4) + lin_vel(3) + ang_vel(3) + mass(1) + friction(1)
-d_config_per_obj = 10   # shape_is_box(1) + radius(1) + half_extents(3) + color(4) + x_accel(1)
+d_physics_per_obj = 16  # pos(3) + orn(4) + lin_vel(3) + ang_vel(3) + mass(1) + friction(1) + x_accel(1)
+d_config_per_obj = 9    # shape_is_box(1) + radius(1) + half_extents(3) + color(4)
 d_physics = d_physics_per_obj * n_objects
 d_config = d_config_per_obj * n_objects
 d_total = d_render + d_physics + d_config

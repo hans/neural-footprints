@@ -150,22 +150,31 @@ def _get_current_positions(body_ids, physics_client):
     return positions
 
 
-def _collect_physics_labels(body_ids, masses, frictions, physics_client):
+def _collect_physics_labels(body_ids, masses, frictions, physics_client,
+                            applied_accels=None):
     """
     Collect per-object physics labels from the API.
-    Per object: position(3), orientation(4), linear_vel(3), angular_vel(3), mass(1), friction(1) = 15
-    Total: 15 * N_OBJECTS floats
+    Per object: pos(3), orn(4), lin_vel(3), ang_vel(3), mass(1), friction(1), x_accel(1) = 16
+    Total: 16 * N_OBJECTS floats.
+
+    `applied_accels` is the per-object x-acceleration (in m/s²) being injected
+    as an external force this scene; PyBullet has no notion of "acceleration"
+    as state, so the caller must pass it. If None, defaults to zero per object
+    (off-pipeline callers that don't apply acceleration).
     """
+    if applied_accels is None:
+        applied_accels = [0.0] * len(body_ids)
     labels = []
     for i, bid in enumerate(body_ids):
         pos, orn = p.getBasePositionAndOrientation(bid, physicsClientId=physics_client)
         lin_vel, ang_vel = p.getBaseVelocity(bid, physicsClientId=physics_client)
-        labels.extend(pos)        # 3
-        labels.extend(orn)        # 4
-        labels.extend(lin_vel)    # 3
-        labels.extend(ang_vel)    # 3
-        labels.append(masses[i])  # 1
-        labels.append(frictions[i])  # 1
+        labels.extend(pos)                  # 3
+        labels.extend(orn)                  # 4
+        labels.extend(lin_vel)              # 3
+        labels.extend(ang_vel)              # 3
+        labels.append(masses[i])            # 1
+        labels.append(frictions[i])         # 1
+        labels.append(applied_accels[i])    # 1
     return np.array(labels, dtype=np.float32)
 
 
@@ -173,8 +182,12 @@ def _encode_scene_config(shape_configs):
     """
     Encode scene shape configs into a fixed-length float32 vector.
 
-    Per object: shape_is_box(1), radius(1), half_extents(3), color(4), x_accel(1) = 10 floats.
+    Per object: shape_is_box(1), radius(1), half_extents(3), color(4) = 9 floats.
     Unused fields zeroed (radius=0 for box, half_extents=[0,0,0] for sphere).
+
+    Note: x_accel used to live here but moved to physics_labels — it is a
+    kinematic state field (recoverable from three frames), not a render-
+    determining scene parameter.
     """
     vec = []
     for cfg in shape_configs:
@@ -187,11 +200,10 @@ def _encode_scene_config(shape_configs):
             vec.append(cfg['params']['radius'])
             vec.extend([0.0, 0.0, 0.0])
         vec.extend(cfg['color'])
-        vec.append(cfg.get('x_accel', 0.0))
     return np.array(vec, dtype=np.float32)
 
 
-SCENE_CONFIG_DIM = 10  # per object
+SCENE_CONFIG_DIM = 9  # per object
 
 
 def _encode_scene_lighting(pillar_gray, lighting):
@@ -330,13 +342,15 @@ def resimulate_scene(shape_configs, initial_physics_row, *,
     masses_list = []
     frictions_list = []
     for i, cfg in enumerate(shape_configs):
-        off = i * 15
+        off = i * 16
         pos = initial_physics_row[off:off + 3].tolist()
         orn = initial_physics_row[off + 3:off + 7].tolist()
         lin_vel = initial_physics_row[off + 7:off + 10].tolist()
         ang_vel = initial_physics_row[off + 10:off + 13].tolist()
         mass = float(initial_physics_row[off + 13])
         friction = float(initial_physics_row[off + 14])
+        # off + 15 is x_accel (the per-scene applied acceleration), read from
+        # the cfg dict below for consistency with how _create_scene applies it.
         color = cfg['color']
 
         if cfg['shape'] == 'sphere':
@@ -385,7 +399,11 @@ def resimulate_scene(shape_configs, initial_physics_row, *,
 
     if return_program_state:
         rgba_bytes, depth_bytes, seg_bytes = _render_scene(pc, lighting=lighting)
-        final_physics = _collect_physics_labels(body_ids, masses_list, frictions_list, pc)
+        applied_accels = [cfg.get('x_accel', 0.0) for cfg in shape_configs]
+        final_physics = _collect_physics_labels(
+            body_ids, masses_list, frictions_list, pc,
+            applied_accels=applied_accels,
+        )
         scene_config_vec = _encode_scene_config(shape_configs)
         lighting_vec = _encode_scene_lighting(pillar_gray, lighting or _DEFAULT_LIGHTING)
         p.disconnect(pc)
@@ -418,8 +436,8 @@ def generate_scenes(n_scenes, seed, *, n_timesteps=None):
 
     Returns dict with:
       'program_states':         ndarray [n_scenes x D]   — render + physics_labels + scene_config + scene_lighting
-      'physics_labels':         ndarray [n_scenes x 15*N_OBJECTS]  — final-state API labels
-      'initial_physics_labels': ndarray [n_scenes x 15*N_OBJECTS]  — t=0 API labels
+      'physics_labels':         ndarray [n_scenes x 16*N_OBJECTS]  — final-state API labels (incl. x_accel)
+      'initial_physics_labels': ndarray [n_scenes x 16*N_OBJECTS]  — t=0 API labels (incl. x_accel)
       'initial_renders':        ndarray [n_scenes x IMAGE_SIZE**2*4]  — t=0 RGBA bytes
       'behavior_labels':        ndarray [n_scenes]       — binary, KE median split
       'kinetic_energies':       ndarray [n_scenes]       — continuous final KE
@@ -435,7 +453,7 @@ def generate_scenes(n_scenes, seed, *, n_timesteps=None):
     seg_bytes_count = IMAGE_SIZE * IMAGE_SIZE * 4    # int32 bytes
     render_bytes_total = rgba_bytes_count + depth_bytes_count + seg_bytes_count
 
-    physics_dim = 15 * N_OBJECTS
+    physics_dim = 16 * N_OBJECTS
     config_dim = SCENE_CONFIG_DIM * N_OBJECTS
     D = render_bytes_total + physics_dim + config_dim + SCENE_LIGHTING_DIM
     program_states = np.zeros((n_scenes, D), dtype=np.float32)
@@ -465,7 +483,10 @@ def generate_scenes(n_scenes, seed, *, n_timesteps=None):
         all_lightings.append(lighting)
 
         # Capture initial state (t=0) before stepping
-        initial_physics_labels[i] = _collect_physics_labels(body_ids, masses, frictions, pc)
+        applied_accels = [cfg.get('x_accel', 0.0) for cfg in shape_configs]
+        initial_physics_labels[i] = _collect_physics_labels(
+            body_ids, masses, frictions, pc, applied_accels=applied_accels,
+        )
         init_rgba_bytes, _, _ = _render_scene(pc, lighting=lighting)
         initial_renders[i] = np.frombuffer(init_rgba_bytes, dtype=np.uint8).astype(np.float32)
 
@@ -485,7 +506,9 @@ def generate_scenes(n_scenes, seed, *, n_timesteps=None):
                 early_renders[i] = np.frombuffer(early_rgba_bytes, dtype=np.uint8).astype(np.float32)
 
         # Collect final-state analysis labels (NOT used in neural generation)
-        physics_labels[i] = _collect_physics_labels(body_ids, masses, frictions, pc)
+        physics_labels[i] = _collect_physics_labels(
+            body_ids, masses, frictions, pc, applied_accels=applied_accels,
+        )
         kinetic_energies[i] = _compute_total_kinetic_energy(body_ids, masses, pc)
 
         # Render final frame
