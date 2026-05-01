@@ -124,6 +124,31 @@ require re-baselining the rest of the pipeline.
 
 If A doesn't move x_accel, escalate to B.
 
+### Re-evaluate the perceiver-bottleneck claim on the new fixture
+
+PR #4's row-3 conclusion ("perceiver isn't the bottleneck") was reached on the
+*current* generative regime. Once experiment A regenerates `data/scenes.npz`
+with longer / evenly-spaced frames, also re-run the CNN diagnostic from PR #4
+on that fixture:
+
+    uv run python scripts/eval_pp_cnn.py
+
+The script is parametric to the scenes file, so this is a one-command re-test.
+Two outcomes that matter:
+
+- **CNN still ties or trails the PCA-MLP baseline** on the new scenes → row-3
+  holds, the input representation genuinely isn't the lever, scene-gen
+  changes carried the win.
+- **CNN now beats the PCA-MLP baseline** on the new scenes → row-3 needs
+  revision: the CNN couldn't extract x_accel curvature at the *old* stride
+  but can at the new one, which means the perceiver was capacity-limited
+  relative to what the new fixture exposes. In that case, wire the CNN into
+  the pipeline.
+
+This re-evaluation is cheap and protects against the failure mode where we
+assume the row-3 finding generalizes across scene-gen regimes when it might
+not.
+
 ### B. Tighten linvel_x + further stride extension
 
 - `linvel_x ∼ U(−3, +3)` m/s, `n_timesteps: 120`, frames at `{0, 40, 80}`.
@@ -141,8 +166,10 @@ If A doesn't move x_accel, escalate to B.
 
 ## Out of scope for this scoping doc
 
-- Re-running the CNN. The perceiver isn't the lever (PR #4); the row-3 finding
-  is independent of perceiver class.
+- Iterating on the CNN architecture (BN, lr, model size, etc.). PR #4 ran four
+  configurations and none beat PCA50 — the perceiver isn't the lever at the
+  current stride. Re-running the existing CNN diagnostic on the *new* fixture
+  is in scope (see above) and counts as a sanity check, not iteration.
 - Architectural changes to InverseModel.
 - More scenes (`n_scenes`). The CNN didn't show an overfitting gap, so n is
   not the binding constraint at this layer.
