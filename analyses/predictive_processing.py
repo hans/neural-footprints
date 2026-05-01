@@ -351,6 +351,231 @@ class InverseModel:
 
 
 # ---------------------------------------------------------------------------
+# CNN inverse model (Phase 2 of specs/inverse_model_input_repr.md)
+#
+# Skips pixel PCA entirely. Same head dims (256→256→128→n_observable) so the
+# `extract_activations(layer='h2')` interface is interchangeable with
+# InverseModel for downstream neural projection.
+# ---------------------------------------------------------------------------
+
+class InverseCNNNet(nn.Module):
+    """Per-frame conv tower → global avg pool → concat across frames → MLP head.
+
+    Input shape: ``(B, F, C, H, W)`` where F=frames (default 3) and C=channels
+    (RGBA, 4). The conv tower is shared across frames to stay sample-efficient
+    at n≈1700. Layers are split so post-ReLU hidden activations are addressable
+    via ``forward_with_activations``, mirroring InverseMLPNet.
+    """
+    def __init__(self, n_frames, n_channels, output_dim,
+                 hidden_dim=None, dropout_rate=None):
+        super().__init__()
+        if hidden_dim is None:
+            hidden_dim = _CFG_PP_HIDDEN_DIM
+        if dropout_rate is None:
+            dropout_rate = _CFG_PP_DROPOUT_RATE
+        self.n_frames = n_frames
+        self.n_channels = n_channels
+        self.output_dim = output_dim
+        self.hidden_dim = hidden_dim
+        self.dropout_rate = dropout_rate
+        self.conv_feat_dim = 128
+
+        # 64 → 32 → 16 → 8 (stride-2 each), then GAP → 128-dim per frame.
+        self.conv = nn.Sequential(
+            nn.Conv2d(n_channels, 32, kernel_size=3, stride=2, padding=1),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(32, 64, kernel_size=3, stride=2, padding=1),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(64, self.conv_feat_dim, kernel_size=3, stride=2, padding=1),
+            nn.ReLU(inplace=True),
+            nn.AdaptiveAvgPool2d(1),
+            nn.Flatten(),
+        )
+        feat_dim = self.conv_feat_dim * n_frames
+
+        self.h1 = nn.Sequential(nn.Linear(feat_dim, hidden_dim), nn.ReLU())
+        self.d1 = nn.Dropout(dropout_rate)
+        self.h2 = nn.Sequential(nn.Linear(hidden_dim, hidden_dim), nn.ReLU())
+        self.d2 = nn.Dropout(dropout_rate)
+        self.h3 = nn.Sequential(nn.Linear(hidden_dim, hidden_dim // 2), nn.ReLU())
+        self.d3 = nn.Dropout(dropout_rate)
+        self.out = nn.Linear(hidden_dim // 2, output_dim)
+
+    def _frame_features(self, x):
+        B, F, C, H, W = x.shape
+        return self.conv(x.reshape(B * F, C, H, W)).reshape(B, F * self.conv_feat_dim)
+
+    def forward(self, x):
+        feats = self._frame_features(x)
+        h1 = self.h1(feats)
+        h2 = self.h2(self.d1(h1))
+        h3 = self.h3(self.d2(h2))
+        return self.out(self.d3(h3))
+
+    def forward_with_activations(self, x):
+        feats = self._frame_features(x)
+        h1 = self.h1(feats)
+        h2 = self.h2(self.d1(h1))
+        h3 = self.h3(self.d2(h2))
+        out = self.out(self.d3(h3))
+        return out, {'h1': h1, 'h2': h2, 'h3': h3}
+
+
+class InverseCNN:
+    """CNN-based inverse model: raw 3-frame stack → physics.
+
+    API mirrors :class:`InverseModel` (``fit`` / ``predict`` / ``extract_activations``)
+    so it can be swapped in without changes to ``run_predictive_processing_analysis``
+    or ``gen_neural.py`` if Phase 2 of ``specs/inverse_model_input_repr.md`` wins.
+
+    Input convention for ``fit`` / ``predict`` / ``extract_activations``: a numpy
+    array of shape ``(N, n_frames, n_channels, H, W)``. uint8 inputs are scaled
+    to [0, 1]; float inputs are passed through (assumed pre-normalized).
+    """
+
+    def __init__(self, hidden_dim=None, dropout_rate=None):
+        self.hidden_dim = hidden_dim
+        self.dropout_rate = dropout_rate
+        self.net_ = None
+        self.phys_scaler_ = None
+        self.per_dim_r2_ = None
+        self.valid_dims_ = None
+        self.full_physics_dim_ = None
+        self.const_values_ = None
+        self.history_ = None
+        self.best_epoch_ = None
+
+    @staticmethod
+    def _prep_frames(frames):
+        if frames.dtype == np.uint8 or frames.max() > 1.5:
+            return frames.astype(np.float32) / 255.0
+        return frames.astype(np.float32)
+
+    def fit(self, frames, physics_labels,
+            n_epochs=300, batch_size=64, lr=1e-3, val_frac=0.15, patience=50,
+            verbose=True):
+        frames = self._prep_frames(frames)
+        self.full_physics_dim_ = physics_labels.shape[1]
+
+        observable_offsets = list(range(0, 3)) + list(range(7, 10)) + [15]
+        observable_indices = []
+        for i in range(N_OBJECTS):
+            observable_indices.extend([i * 16 + j for j in observable_offsets])
+
+        std_per_dim = physics_labels.std(axis=0)
+        has_variance = std_per_dim > 1e-4
+        observable_mask = np.zeros(self.full_physics_dim_, dtype=bool)
+        observable_mask[observable_indices] = True
+        self.valid_dims_ = observable_mask & has_variance
+        self.const_values_ = physics_labels.mean(axis=0)
+
+        physics_valid = physics_labels[:, self.valid_dims_]
+        self.phys_scaler_ = StandardScaler()
+        y = self.phys_scaler_.fit_transform(physics_valid)
+
+        idx = np.arange(frames.shape[0])
+        idx_tr, idx_val = train_test_split(idx, test_size=val_frac, random_state=42)
+
+        n_frames, n_channels = frames.shape[1], frames.shape[2]
+        self.net_ = InverseCNNNet(
+            n_frames=n_frames, n_channels=n_channels, output_dim=y.shape[1],
+            hidden_dim=self.hidden_dim, dropout_rate=self.dropout_rate,
+        )
+        opt = torch.optim.Adam(self.net_.parameters(), lr=lr)
+        sch = torch.optim.lr_scheduler.ReduceLROnPlateau(opt, factor=0.5, patience=10)
+        loss_fn = nn.MSELoss()
+
+        X_tr_t = torch.tensor(frames[idx_tr], dtype=torch.float32)
+        y_tr_t = torch.tensor(y[idx_tr], dtype=torch.float32)
+        X_val_t = torch.tensor(frames[idx_val], dtype=torch.float32)
+        y_val_t = torch.tensor(y[idx_val], dtype=torch.float32)
+
+        loader = DataLoader(TensorDataset(X_tr_t, y_tr_t),
+                            batch_size=batch_size, shuffle=True)
+
+        best_val = float('inf')
+        best_state = None
+        best_epoch = 0
+        bad_epochs = 0
+        history = []
+        for epoch in range(n_epochs):
+            self.net_.train()
+            for xb, yb in loader:
+                opt.zero_grad()
+                loss_fn(self.net_(xb), yb).backward()
+                opt.step()
+            self.net_.eval()
+            with torch.no_grad():
+                vl = loss_fn(self.net_(X_val_t), y_val_t).item()
+                tl = loss_fn(self.net_(X_tr_t), y_tr_t).item()
+            history.append({'epoch': epoch + 1, 'train_loss': tl, 'val_loss': vl})
+            sch.step(vl)
+            if vl < best_val - 1e-5:
+                best_val = vl
+                best_state = {k: v.clone() for k, v in self.net_.state_dict().items()}
+                best_epoch = epoch + 1
+                bad_epochs = 0
+            else:
+                bad_epochs += 1
+                if bad_epochs >= patience:
+                    if verbose:
+                        print(f"    InverseCNN early stop at epoch {epoch+1} "
+                              f"(best val={best_val:.4f} @ epoch {best_epoch})")
+                    break
+
+        self.net_.load_state_dict(best_state)
+        self.net_.eval()
+        with torch.no_grad():
+            y_pred_val = self.net_(X_val_t).numpy()
+        self.per_dim_r2_ = r2_score(y[idx_val], y_pred_val, multioutput='raw_values')
+        self.history_ = history
+        self.best_epoch_ = best_epoch
+        if verbose:
+            print(f"    InverseCNN val MSE={best_val:.4f}  "
+                  f"mean per-dim R²={self.per_dim_r2_.mean():.4f}  "
+                  f"max={self.per_dim_r2_.max():.4f}")
+        return self
+
+    def _expand_to_full(self, valid_predictions):
+        n = valid_predictions.shape[0]
+        full = np.tile(self.const_values_, (n, 1))
+        full[:, self.valid_dims_] = valid_predictions
+        return full
+
+    def _forward_in_batches(self, frames, batch_size=128, return_acts=None):
+        """Run the net over frames in batches; return ndarray (or dict of arrays)."""
+        self.net_.eval()
+        X = torch.tensor(self._prep_frames(frames), dtype=torch.float32)
+        outs = []
+        acts = {k: [] for k in (return_acts or [])}
+        with torch.no_grad():
+            for i in range(0, X.shape[0], batch_size):
+                xb = X[i:i + batch_size]
+                if return_acts:
+                    out, a = self.net_.forward_with_activations(xb)
+                    for k in return_acts:
+                        acts[k].append(a[k].numpy())
+                else:
+                    out = self.net_(xb)
+                outs.append(out.numpy())
+        out = np.concatenate(outs, axis=0)
+        if return_acts:
+            return out, {k: np.concatenate(acts[k], axis=0) for k in return_acts}
+        return out
+
+    def predict(self, frames):
+        pred_scaled = self._forward_in_batches(frames)
+        return self._expand_to_full(self.phys_scaler_.inverse_transform(pred_scaled))
+
+    def extract_activations(self, frames, layer='h2'):
+        """Deterministic post-ReLU activations of one hidden layer (h1/h2/h3)."""
+        if layer not in ('h1', 'h2', 'h3'):
+            raise ValueError(f"layer must be 'h1', 'h2', or 'h3'; got {layer!r}")
+        _, acts = self._forward_in_batches(frames, return_acts=[layer])
+        return acts[layer]
+
+
+# ---------------------------------------------------------------------------
 # Helper MLPs and pixel R²
 # ---------------------------------------------------------------------------
 
