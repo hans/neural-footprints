@@ -2,9 +2,16 @@ n_scenes: 2000
 n_objects: 1
 image_size: 64
 n_neurons: 500
-n_timesteps: 30
+n_timesteps: 120
 noise_level: 0.3
 random_seed: 42
+
+# Generative scene parameters
+# linvel_x is sampled uniformly from [-linvel_x_max, +linvel_x_max].
+# Experiment B (specs/scene_generation_review.md): tightened from 8.0 to 3.0
+# so the object stays on-screen across the longer 500 ms window needed for
+# x_accel inference.
+linvel_x_max: 3.0
 rsa_subsample: 500
 render_pca_dim: 500
 behavioral_pca_dim: 50
@@ -19,10 +26,14 @@ camera_fov: 90
 # Inverse model takes three frames at t={0, pp_early_frame, pp_late_frame}.
 # Three evenly-spaced frames let the model disentangle initial velocity
 # from the per-scene x_accel injection.
+#
+# Experiment B (specs/scene_generation_review.md): n_timesteps=120 with frames
+# at {0, 40, 80} extends the late-frame window to ~333 ms, paired with the
+# tightened linvel_x range so the object stays in-frame across the window.
 pp_hidden_dim: 256
 pp_pixel_pca_dim: 50
-pp_early_frame: 5
-pp_late_frame: 15
+pp_early_frame: 40
+pp_late_frame: 80
 pp_dropout_rate: 0.05
 
 # Neural generation source: cognitive PP model

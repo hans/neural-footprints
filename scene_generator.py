@@ -26,6 +26,7 @@ from config import (
     PP_EARLY_FRAME as _CFG_PP_EARLY_FRAME,
     PP_LATE_FRAME as _CFG_PP_LATE_FRAME,
     CAMERA_FOV as _CFG_CAMERA_FOV,
+    LINVEL_X_MAX as _CFG_LINVEL_X_MAX,
 )
 
 
@@ -127,8 +128,10 @@ def _create_scene(physics_client, rng):
     is_occluded.append(False)
     shape_configs.append(shape_cfg)
 
-    # x-only velocity (left or right); gravity handles vertical fall
-    x_vel = float(rng.uniform(-8.0, 8.0))
+    # x-only velocity (left or right); gravity handles vertical fall.
+    # Range is configurable so the longer-window scene-gen experiments can
+    # tighten linvel_x to keep the object on-screen.
+    x_vel = float(rng.uniform(-_CFG_LINVEL_X_MAX, _CFG_LINVEL_X_MAX))
     p.resetBaseVelocity(body_ids[0], linearVelocity=[x_vel, 0.0, 0.0],
                         physicsClientId=physics_client)
 

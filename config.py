@@ -24,3 +24,4 @@ PP_DROPOUT_RATE = _cfg['pp_dropout_rate']
 PP_NEURAL_LAYER = _cfg.get('pp_neural_layer', 'h2')
 
 CAMERA_FOV = _cfg['camera_fov']
+LINVEL_X_MAX = _cfg.get('linvel_x_max', 8.0)

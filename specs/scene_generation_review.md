@@ -161,3 +161,62 @@ If A doesn't move x_accel, escalate to B.
   setup numerically, or only qualitatively?
 
 If both questions are "yes, but tolerable", A is a one-PR change.
+
+## Results (this branch)
+
+Per-dim val R² from `scripts/eval_pp.py` on freshly generated 3-frame fixtures.
+All runs use `pp_pixel_pca_dim=50`, `pp_hidden_dim=256`, `seed=42`, FOV 90.
+
+| run                             | n_timesteps | frames        | linvel_x  | image | features      | pos_z   | x_accel | mean valid |
+|---------------------------------|------------:|---------------|-----------|------:|---------------|--------:|--------:|-----------:|
+| baseline (per scoping table)    | 30          | {0,5,15}      | [-8,+8]   | 64    | 3frame        | +0.297  | -0.013  | 0.499      |
+| **A**                           | 60          | {0,20,40}     | [-8,+8]   | 64    | 3frame        | +0.273  | -0.152  | 0.497      |
+| **B (3frame)**                  | 120         | {0,40,80}     | [-3,+3]   | 64    | 3frame        | +0.508  | +0.222  | 0.617      |
+| B-fullwindow                    | 120         | {0,60,120}    | [-3,+3]   | 64    | 3frame        | +0.455  | +0.192  | 0.574      |
+| B+C                             | 120         | {0,40,80}     | [-3,+3]   | 128   | 3frame        | +0.482  | +0.039  | 0.567      |
+| B+C, pca100                     | 120         | {0,40,80}     | [-3,+3]   | 128   | 3frame        | +0.448  | +0.010  | 0.522      |
+| B+C, 3frame_diff                | 120         | {0,40,80}     | [-3,+3]   | 128   | 3frame_diff   | +0.537  | +0.235  | 0.622      |
+| **B + 3frame_diff (winner)**    | 120         | {0,40,80}     | [-3,+3]   | 64    | 3frame_diff   | +0.557  | +0.284  | 0.647      |
+
+Pass criterion (A's joint test): `x_accel R² ≥ 0.2 AND pos_z R² ≥ 0.4` —
+**cleared by B (`3frame`) and decisively by B (`3frame_diff`)**.
+
+Notes:
+
+- Experiment **A failed** the joint criterion. Plain window extension *without*
+  tightening linvel_x left the object outside the frame in many scenes and
+  added friction-/gravity-driven non-ballistic dynamics that drove `x_accel`
+  R² *below* baseline.
+- Frames `{0, 60, 120}` (full-window, B-fullwindow) regressed across the board
+  vs `{0, 40, 80}` — late dynamics get noisier as the object hits the ground
+  and rotates. `{0, 40, 80}` is the sweet spot.
+- Bumping `image_size` to 128 (Experiment C) *hurts* x_accel at fixed
+  `pixel_pca_dim=50` — more pixels dilute the relevant low-frequency motion
+  signal across the same-sized PCA basis. PCA100 didn't recover this.
+- Adding explicit `(mid - t0)` and `(late - mid)` difference features
+  (`--features 3frame_diff`) lifts both pos_z and x_accel by another 5 pp at
+  no model-size cost. Recommended as the default feature mode going forward.
+
+Adopted configuration (`config.yaml`):
+
+- `n_timesteps: 120`, `pp_early_frame: 40`, `pp_late_frame: 80`
+- `linvel_x_max: 3.0` (new config knob; `scene_generator._create_scene` reads it)
+- `image_size: 64`, `camera_fov: 90` (unchanged)
+
+`scripts/gen_scenes_3frame.py` had a stale `physics_dim = 15 * N_OBJECTS`
+predating the x_accel-as-physics-label promotion (commit 22cceae); fixed to
+`16 * N_OBJECTS`, and `_collect_physics_labels` now receives `applied_accels`
+on both calls so the saved `x_accel` label matches the in-pipeline generator.
+
+Open follow-ups (not done in this PR):
+
+- Snakemake pipeline still uses `scripts/gen_scenes.py` (2-frame), which
+  doesn't expose mid_renders. `analyses/predictive_processing.build_pp_features`
+  reads `early_renders` and `late_renders` but our 3-frame data file aliases
+  `early_renders = late_renders` — downstream pipeline runs with this fixture
+  would silently lose the mid frame.
+- KE distribution shift at n_timesteps=120: median-split behavior label is
+  computed in-script, so it adapts; but residual / dissociation analyses may
+  shift numerically.
+- Paper-figure regeneration not attempted; this is a forward-looking
+  scene-gen change, not a reproduction of the existing results.
