@@ -1,2 +1,12 @@
 *.png
+*.pdf
 *.pyc
+data/
+outputs/
+.snakemake/
+.venv/
+
+figures
+
+paper/results_macros.tex
+.DS_Store

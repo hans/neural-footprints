@@ -1,0 +1,31 @@
+n_scenes: 2000
+n_objects: 1
+image_size: 64
+n_neurons: 500
+n_timesteps: 30
+noise_level: 0.3
+random_seed: 42
+rsa_subsample: 500
+render_pca_dim: 500
+behavioral_pca_dim: 50
+behavioral_objective: "next_frame_pixels"
+
+# Camera
+# Wider FOV (90°) keeps the moving object on-screen for more frames and
+# substantially improves the PP inverse model's recovery of pos_y / pos_z.
+camera_fov: 90
+
+# Predictive processing
+# Inverse model takes three frames at t={0, pp_early_frame, pp_late_frame}.
+# Three evenly-spaced frames let the model disentangle initial velocity
+# from the per-scene x_accel injection.
+pp_hidden_dim: 256
+pp_pixel_pca_dim: 50
+pp_early_frame: 5
+pp_late_frame: 15
+pp_dropout_rate: 0.05
+
+# Neural generation source: cognitive PP model
+# neural_input = [render_bytes | InverseMLP.<pp_neural_layer> | inferred_physics]
+# pp_neural_layer: which hidden layer to tap (h1, h2, h3)
+pp_neural_layer: "h2"

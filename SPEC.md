@@ -1,72 +1,161 @@
 # Neural Footprints Simulation — Project Spec
 
+## Glossary
+
+**Pixel state.**
+The RGBA color buffer alone — what a camera would capture. A subset of render state, excluding depth and segmentation.
+
+**Render state.**
+All render buffers from PyBullet: RGBA color, depth map, and segmentation mask. A superset of pixel state. The high-dimensional sensory signal that dominates the program state.
+
+**Physics labels.**
+Per-object state extracted via the PyBullet API: position, orientation, linear velocity, angular velocity, mass, and friction. Concatenated into program state (and thus linearly present in neural activity), but occupying a tiny fraction of total dimensions. Also collected separately for use as analysis regressors.
+
+**Scene config.**
+Per-object shape and appearance parameters (shape type, dimensions, color, acceleration) encoded as a fixed-length float vector.
+
+**Scene lighting.**
+Per-scene rendering parameters not tied to any individual object: pillar gray level, light direction, light color, and light distance. Together with scene config and physics labels, these are sufficient to deterministically re-render the scene.
+
+**Program state.**
+The full state vector fed to the random projection. Concatenation of render state, physics labels, scene config, and scene lighting. Contains everything sufficient to resimulate the scene.
+
+**Neural activity.**
+Synthetic "brain data" produced by random linear projection of program state plus noise. Since program state contains both render and physics information, both are linearly decodable in principle.
+
+**Behavior label.**
+Binary label derived from final kinetic energy (median split). Recoverable from physics labels (which include velocity and mass) but not from pixels (which carry no velocity signal).
+
+**Render model** / **Physics model.**
+The two competing analysis-side models. The render model uses PCA-reduced render state as regressors; the physics model uses the low-dimensional physics labels. The core result is a double dissociation: the render model explains neural variance but not behavior; the physics model explains behavior but not neural variance.
+
+**Information asymmetry.**
+The structural reason variance-based methods fail. Render dimensions vastly outnumber physics dimensions in the program state, so encoding models, RSA, and PCA are dominated by render structure and systematically miss the physics signal — even though physics is linearly present and causally determines scene dynamics.
+
+---
+
 ## Project Structure
 
 ```
 neural_footprints/
 ├── SPEC.md                   # this file
-├── requirements.txt          # pybullet, numpy, scipy, scikit-learn, matplotlib
-├── config.py                 # all simulation parameters
+├── requirements.txt          # pybullet, numpy, scipy, scikit-learn, matplotlib, snakemake
+├── config.yaml               # all simulation parameters (YAML)
+├── config.py                 # backward-compat shim (loads config.yaml)
+├── Snakefile                 # pipeline DAG
+├── scripts/
+│   ├── load_config.py        # YAML config loader
+│   ├── io_utils.py           # save/load intermediates (scenes, neural, results)
+│   ├── gen_scenes.py         # rule: generate PyBullet scenes
+│   ├── gen_neural.py         # rule: generate neural activity
+│   ├── run_encoding.py       # rule: encoding model analysis
+│   ├── run_rsa.py            # rule: RSA analysis
+│   ├── run_dissociation.py   # rule: dissociation analysis
+│   ├── run_pca.py            # rule: PCA analysis
+│   ├── run_dynamics.py       # rule: dynamics analysis
+│   ├── run_pp.py             # rule: predictive-processing analysis
+│   ├── run_evaluate.py       # rule: evaluation pass/fail
+│   ├── gen_macros.py         # rule: generate LaTeX macros for paper
+│   ├── plot_encoding.py      # rule: encoding figure
+│   ├── plot_rsa.py           # rule: RSA figure
+│   ├── plot_dissociation.py  # rule: dissociation figure
+│   ├── plot_pca.py           # rule: PCA figure
+│   ├── plot_dynamics.py      # rule: dynamics figure
+│   ├── plot_pp.py            # rule: PP figures (summary + frame grid)
+│   └── plot_scenes.py        # rule: sample scene visualization
 ├── scene_generator.py        # PyBullet scene generation + raw state capture
 ├── neural_model.py           # random projection: program_state → neural activity
 ├── analyses/
 │   ├── __init__.py
 │   ├── encoding.py           # Simulation 1: encoding model false negatives
 │   ├── rsa.py                # Simulation 2: RSA dominated by render
-│   ├── dissociation.py       # NEW — Simulation 3: R² vs. behavioral sufficiency
-│   └── dynamics.py           # STUB — Buster vs. Aaron temporal models
-├── run_all.py                # orchestrator
-└── figures/                  # all output figures saved here
-    ├── encoding_analysis.png
-    ├── rsa_analysis.png
-    └── dissociation.png      # NEW
+│   ├── dissociation.py       # Simulation 3: R² vs. behavioral sufficiency
+│   ├── dynamics.py           # Simulation 4: future brain-state prediction
+│   ├── predictive_processing.py  # Simulation 5: InverseModel (pixels→physics) +
+│   │                              # PP chain (PyBullet forward); inferred-physics
+│   │                              # array fed to encoding/rsa/dissociation
+│   ├── pca_analysis.py       # Negative result: variance ≠ information
+│   ├── plot_figures.py       # all figure rendering
+│   └── plot_style.py         # shared plot styling utilities
+├── evaluation.py             # pass/fail checks
+├── data/                     # expensive intermediates (gitignored)
+│   ├── scenes.npz
+│   └── neural.npz
+├── outputs/                  # cheap derived results (gitignored)
+│   ├── encoding_results.json
+│   ├── rsa_results.json
+│   ├── dissociation_results.json
+│   ├── pca_results.json
+│   ├── dynamics_results.json
+│   ├── pp_results.json
+│   └── evaluation.json
+└── figures/                  # all output figures saved here (PDF)
 ```
+
+> **TODO (deferred from main):** `analyses/subtractive.py` (feature-removal
+> importance analysis) was developed on the `main` branch but has not been
+> ported to this scaffold. Resurrecting it would require a new Snakemake
+> rule, plot script, and config knobs. Not blocked by anything in the PP
+> port; revisit if the result is wanted in the paper.
 
 ---
 
 ## Data Flow
 
 ```
-PyBullet scene (N_SCENES = 2000)
+PyBullet scene (N_SCENES scenes)
     │
     ├──▶ render buffers: RGBA + depth + segmentation
-    │      64×64×4 + 64×64×4 + 64×64×4 = 49,152 bytes
+    │      three image-sized buffers → tens of thousands of floats
     │
-    ├──▶ saveBullet blob: ~20-24KB, padded to K = 28,872 bytes
+    ├──▶ physics labels (via API):
+    │      per object: pos, orn, lin_vel, ang_vel, mass, friction
+    │      low-dimensional vector (tens of floats)
     │
-    └──▶ API labels (NEVER enter neural generation):
-           physics_labels: [n_scenes × 75] floats
-             per object: pos(3), orn(4), lin_vel(3), ang_vel(3), mass(1), friction(1)
-             × 5 objects = 75
-           behavior_label: binary
-             did ≥2 non-launcher objects move >0.5 units?
+    ├──▶ scene config:
+    │      per object: shape type, dimensions, color, acceleration
+    │      low-dimensional vector
+    │
+    ├──▶ scene lighting:
+    │      per scene: pillar gray, light direction, light color, light distance
+    │      low-dimensional vector
+    │
+    └──▶ behavior label (derived from physics labels):
+           binary kinetic-energy median split
+           KE = Σ 0.5 × mass × |velocity|² at final timestep
 
                     │
                     ▼
-    program_state = concat(render_bytes, bullet_bytes)
-                  = 78,024 bytes → cast to float32 → [78024] vector
+    program_state = concat(render_bytes, physics_labels, scene_config, scene_lighting)
+                  = [D] vector, dominated by render dimensions
                     │
                     ▼  z-score per dimension across scenes
                     │
-                    ▼  W ~ N(0, 1/√D), shape [500 × 78024]
+                    ▼  W ~ N(0, 1/√D), shape [n_neurons × D]
                     │
     neural_activity = standardized @ W.T + noise
-                    = [n_scenes × 500]
+                    = [n_scenes × n_neurons]
 ```
+
+Physics labels are part of the program state (and thus linearly present in
+neural activity), but they are also extracted separately via the API for use
+as analysis regressors — mirroring how neuroscientists construct feature sets
+from external measurements rather than from the neural code itself.
 
 ### What the analyses receive
 
-| Data | Source | Used in neural generation? |
+| Data | Source | Part of program state? |
 |---|---|---|
-| `neural_activity` [2000 × 500] | W @ program_state + noise | YES — this is the output |
-| `program_states` [2000 × 78024] | raw bytes | YES — this is the input to W |
-| `pixel_indices` slice(0, 16384) | RGBA portion of program_state | YES (as part of program_state) |
-| `physics_labels` [2000 × 75] | pybullet API calls | NO — collected separately |
-| `behavior_labels` [2000] | computed from API positions | NO — computed separately |
+| `neural_activity` | W @ program_state + noise | YES — this is the output |
+| `program_states` | render + physics + config + lighting concat | YES — this is the input to W |
+| `render_indices` | render portion of program_state | YES (as part of program_state) |
+| `physics_labels` | PyBullet API calls | YES — concatenated into program_state |
+| `behavior_labels` | KE median split from physics | NO — computed separately |
 
-The critical asymmetry: pixel features used in analysis are a **direct linear readout**
-of bytes that entered the projection. Physics labels used in analysis are a **separate,
-lossy, low-dimensional summary** of the engine state that entered the projection.
+The critical asymmetry: render dimensions vastly outnumber physics dimensions
+in the program state (hundreds-to-one ratio). Encoding models, RSA, and PCA
+are dominated by render structure and systematically miss the physics signal —
+even though physics is linearly present and causally determines scene dynamics.
 
 ---
 
@@ -78,8 +167,8 @@ lossy, low-dimensional summary** of the engine state that entered the projection
 
 Three panels:
 
-1. **R² bar plot.** Two bars: "Pixels only" (R² ≈ 0.436) vs. "Pixels + Physics"
-   (R² ≈ 0.451). Near-identical height. Annotated with ΔR² = 0.015.
+1. **R² bar plot.** Two bars: "Pixels only" vs. "Pixels + Physics".
+   Near-identical height, annotated with ΔR².
    Message: adding physics to the encoding model does essentially nothing.
 
 2. **Subsampling curve.** X-axis: number of neurons sampled (10 → 500).
@@ -88,7 +177,7 @@ Three panels:
    TODO: add a complementary curve for render detectability to show
    differential degradation rates.
 
-3. **Control accuracy.** Single bar: physics → behavior prediction at 99.6%.
+3. **Control accuracy.** Single bar: physics → behavior prediction accuracy.
    Establishes that the physics labels are genuinely informative — the failure
    to detect them is a methodological failure, not a sign they're unimportant.
 
@@ -102,9 +191,9 @@ Four panels:
 2. **Render RDM** heatmap
 3. **Physics RDM** heatmap
 4. **Correlation bar plot.** Three bars:
-   - Neural ↔ Render: r = 0.238 (dominant)
-   - Neural ↔ Physics: r = 0.040 (small)
-   - Neural ↔ Physics | Render: r = 0.030 (near zero after partialing)
+   - Neural ↔ Render (dominant)
+   - Neural ↔ Physics (small)
+   - Neural ↔ Physics | Render (near zero after partialing)
 
    Message: neural similarity structure tracks render structure, not physics.
    What little physics signal exists is explained away by shared render variance.
@@ -125,8 +214,8 @@ Two "models" are compared:
 
 | Model | What it uses | Neural R² | Behavior prediction |
 |---|---|---|---|
-| Render model | pixel PCA (200 dims) | HIGH (~0.44) | LOW (near chance) |
-| Physics model | API physics labels (75 dims) | LOW (ΔR² ~0.015) | HIGH (~99.6%) |
+| Render model | pixel PCA | HIGH | LOW (near chance) |
+| Physics model | API physics labels | LOW | HIGH |
 
 The render model accounts for most of the neural variance but is useless for
 predicting what happens in the scene. The physics model is sufficient for
@@ -135,11 +224,11 @@ explaining environment dynamics but adds basically nothing to the encoding model
 **Panel layout — 2 panels side by side:**
 
 1. **Left panel: Neural R² contribution.**
-   Two bars: Render model R² (tall, ~0.44) vs. Physics model unique R² (short, ~0.015).
+   Two bars: Render model R² (tall) vs. Physics model unique R² (short).
    Y-axis: "Neural variance explained (R²)"
 
 2. **Right panel: Behavioral prediction accuracy.**
-   Two bars: Render model → behavior (near chance) vs. Physics model → behavior (~99.6%).
+   Two bars: Render model → behavior (near chance) vs. Physics model → behavior (high).
    Y-axis: "Behavior prediction accuracy"
    Dashed line at 50% (chance).
 
@@ -147,76 +236,30 @@ The visual: the tall bar on the left becomes the short bar on the right, and vic
 The model that explains the brain data can't explain the world; the model that explains
 the world can't be found in the brain data.
 
-**What needs to be computed:**
-- Render → behavior: logistic regression from pixel_PCA → behavior_label (cross-validated).
-  Expected: poor, because pixel similarity doesn't predict which objects moved.
-- Physics → behavior: already computed (99.6%).
-- Render → neural R²: already computed (0.436).
-- Physics unique → neural ΔR²: already computed (0.015).
-
 ---
 
-## Config Parameters
+## Config Parameters (`config.yaml`)
 
-```python
-N_SCENES = 2000          # number of PyBullet scenes
-N_OBJECTS = 5            # objects per scene
-IMAGE_SIZE = 64          # render resolution
-N_NEURONS = 500          # simulated neurons
-N_TIMESTEPS = 30         # physics steps per scene
-NOISE_LEVEL = 0.3        # noise as fraction of signal std
-RANDOM_SEED = 42
-RSA_SUBSAMPLE = 500      # scenes used for RDM computation
-BULLET_BYTES_K = None    # set by calibration (~28K)
-PIXEL_PCA_DIM = 200      # PCA components for pixel features in analyses
-```
+All pipeline parameters live in `config.yaml`. Key settings:
 
----
-
-## Current Results (from last run)
-
-```
-Variance diagnostic:
-  D_render = 49,152 dims, D_physics = 28,872 dims (ratio 1.7x)
-  Render variance fraction: 59.4%
-  Physics variance fraction: 40.6%
-
-Encoding model:
-  R² pixels only:        0.4356
-  R² pixels + physics:   0.4505
-  ΔR²:                   0.0149
-
-Control:
-  Physics → behavior:    99.60%
-
-RSA:
-  Neural ↔ Render:       r = 0.238
-  Neural ↔ Physics:      r = 0.040
-  Neural ↔ Phys|Render:  r = 0.030
-```
+- **Scene generation:** number of scenes, objects per scene, image resolution, physics timesteps
+- **Neural model:** number of simulated neurons, noise level, random seed
+- **Analysis:** RSA subsample size, PCA dimensions for render features, PCA dimensions for behavioral MLP
+- **Behavioral objective:** `"next_frame_pixels"` (MLP R²) or `"kinetic_energy"` (logistic accuracy)
 
 ---
 
 ## Known Issues / Open Questions
 
-1. **saveBullet blob opacity.** The 28,872 physics bytes include serialization
-   headers, broadphase trees, solver cache, padding — not just positions/masses.
-   We can't decompose how much is "high-level physics" vs. engine bookkeeping.
-   The variance diagnostic (40.6%) overstates the physics *content* contribution.
-
-2. **Analysis-side asymmetry is doing work.** The false negative result depends
-   partly on the fact that 75 API floats don't span the same subspace as 29K raw
-   bytes. A fairer version would use an explicit two-component program state
-   where physics_vector IS the 75 API floats, making the claim airtight:
-   you know exactly what's in each component.
-
-3. **Subsampling curve is incomplete.** Currently only shows ΔR² (physics
+1. **Subsampling curve is incomplete.** Currently only shows ΔR² (physics
    detectability). Spec asks for differential degradation: two curves showing
    render vs. physics detection rates diverging under subsampling.
 
-4. **Dynamics analysis is a stub.** The Buster vs. Aaron comparison (temporal
-   prediction from high-level vs. low-level state) is the positive proposal
-   and is not yet implemented.
+2. **False positive simulation not built.** The Canada vs. Mexico pixel
+   decoding demonstration is a separate experiment.
 
-5. **False positive simulation not built.** The Canada vs. Mexico pixel
-   decoding demonstration (spec line 64-66) is a separate experiment.
+3. **Pixel/render slice consistency across analyses.** Previously, encoding
+   used all render buffers while RSA and dissociation used RGBA only. This was
+   fixed to use the full render slice everywhere. **Before finalizing results,
+   verify all analyses use the same render slice** — this kind of silent
+   mismatch can change numerical outcomes without any obvious error.
