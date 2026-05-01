@@ -11,4 +11,5 @@ dependencies = [
     "snakemake>=9",
     "pyyaml",
     "seaborn>=0.13.2",
+    "torch>=2.11.0",
 ]
