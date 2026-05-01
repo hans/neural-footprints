@@ -19,7 +19,15 @@ in the random projection.
 import numpy as np
 import pybullet as p
 import pybullet_data
-from config import N_OBJECTS, IMAGE_SIZE, N_TIMESTEPS as _CFG_N_TIMESTEPS, PP_EARLY_FRAME as _CFG_PP_EARLY_FRAME
+from config import (
+    N_OBJECTS,
+    IMAGE_SIZE,
+    N_TIMESTEPS as _CFG_N_TIMESTEPS,
+    PP_EARLY_FRAME as _CFG_PP_EARLY_FRAME,
+    PP_LATE_FRAME as _CFG_PP_LATE_FRAME,
+    CAMERA_FOV as _CFG_CAMERA_FOV,
+    LINVEL_X_MAX as _CFG_LINVEL_X_MAX,
+)
 
 
 # Central vertical pillar at x=0 — occluder from camera's perspective
@@ -120,8 +128,10 @@ def _create_scene(physics_client, rng):
     is_occluded.append(False)
     shape_configs.append(shape_cfg)
 
-    # x-only velocity (left or right); gravity handles vertical fall
-    x_vel = float(rng.uniform(-8.0, 8.0))
+    # x-only velocity (left or right); gravity handles vertical fall.
+    # Range is configurable so the longer-window scene-gen experiments can
+    # tighten linvel_x to keep the object on-screen.
+    x_vel = float(rng.uniform(-_CFG_LINVEL_X_MAX, _CFG_LINVEL_X_MAX))
     p.resetBaseVelocity(body_ids[0], linearVelocity=[x_vel, 0.0, 0.0],
                         physicsClientId=physics_client)
 
