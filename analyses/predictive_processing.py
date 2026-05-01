@@ -367,7 +367,7 @@ class InverseCNNNet(nn.Module):
     via ``forward_with_activations``, mirroring InverseMLPNet.
     """
     def __init__(self, n_frames, n_channels, output_dim,
-                 hidden_dim=None, dropout_rate=None):
+                 hidden_dim=None, dropout_rate=None, batch_norm=False):
         super().__init__()
         if hidden_dim is None:
             hidden_dim = _CFG_PP_HIDDEN_DIM
@@ -378,26 +378,30 @@ class InverseCNNNet(nn.Module):
         self.output_dim = output_dim
         self.hidden_dim = hidden_dim
         self.dropout_rate = dropout_rate
+        self.batch_norm = batch_norm
         self.conv_feat_dim = 128
+
+        bn2 = (lambda c: nn.BatchNorm2d(c)) if batch_norm else (lambda c: nn.Identity())
+        bn1 = (lambda c: nn.BatchNorm1d(c)) if batch_norm else (lambda c: nn.Identity())
 
         # 64 → 32 → 16 → 8 (stride-2 each), then GAP → 128-dim per frame.
         self.conv = nn.Sequential(
             nn.Conv2d(n_channels, 32, kernel_size=3, stride=2, padding=1),
-            nn.ReLU(inplace=True),
+            bn2(32), nn.ReLU(inplace=True),
             nn.Conv2d(32, 64, kernel_size=3, stride=2, padding=1),
-            nn.ReLU(inplace=True),
+            bn2(64), nn.ReLU(inplace=True),
             nn.Conv2d(64, self.conv_feat_dim, kernel_size=3, stride=2, padding=1),
-            nn.ReLU(inplace=True),
+            bn2(self.conv_feat_dim), nn.ReLU(inplace=True),
             nn.AdaptiveAvgPool2d(1),
             nn.Flatten(),
         )
         feat_dim = self.conv_feat_dim * n_frames
 
-        self.h1 = nn.Sequential(nn.Linear(feat_dim, hidden_dim), nn.ReLU())
+        self.h1 = nn.Sequential(nn.Linear(feat_dim, hidden_dim), bn1(hidden_dim), nn.ReLU())
         self.d1 = nn.Dropout(dropout_rate)
-        self.h2 = nn.Sequential(nn.Linear(hidden_dim, hidden_dim), nn.ReLU())
+        self.h2 = nn.Sequential(nn.Linear(hidden_dim, hidden_dim), bn1(hidden_dim), nn.ReLU())
         self.d2 = nn.Dropout(dropout_rate)
-        self.h3 = nn.Sequential(nn.Linear(hidden_dim, hidden_dim // 2), nn.ReLU())
+        self.h3 = nn.Sequential(nn.Linear(hidden_dim, hidden_dim // 2), bn1(hidden_dim // 2), nn.ReLU())
         self.d3 = nn.Dropout(dropout_rate)
         self.out = nn.Linear(hidden_dim // 2, output_dim)
 
