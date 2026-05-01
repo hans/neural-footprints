@@ -165,6 +165,8 @@ class InverseModel:
         self.valid_dims_ = None
         self.full_physics_dim_ = None
         self.const_values_ = None
+        self.best_val_loss_ = None
+        self.stopped_epoch_ = None
 
     def fit(self, pixel_pca_two_frame, physics_labels,
             n_epochs=300, batch_size=64, lr=1e-3, val_frac=0.15, patience=50):
@@ -222,6 +224,7 @@ class InverseModel:
         best_val_loss = float('inf')
         patience_count = 0
         best_state = None
+        stopped_epoch = n_epochs
 
         for epoch in range(n_epochs):
             self.net_.train()
@@ -244,7 +247,11 @@ class InverseModel:
                 patience_count += 1
                 if patience_count >= patience:
                     print(f"    InverseModel early stop at epoch {epoch+1} (val loss={best_val_loss:.4f})")
+                    stopped_epoch = epoch + 1
                     break
+
+        self.best_val_loss_ = float(best_val_loss)
+        self.stopped_epoch_ = int(stopped_epoch)
 
         if best_state is not None:
             self.net_.load_state_dict(best_state)
@@ -448,6 +455,45 @@ def build_pp_features(scenes, pixel_pca_dim=None):
         'pixel_pca_late': pixel_pca_late,
         'pixel_pca_concat': np.concatenate(
             [pixel_pca_t0, pixel_pca_early, pixel_pca_late], axis=1
+        ),
+    }
+
+
+def build_pp_diff_features(scenes, pixel_pca_dim=None):
+    """Frame-difference variant of `build_pp_features`.
+
+    The PCA basis is fit on t=0 only and reused for the early and late frames,
+    so subtractions land in a shared coordinate system. Returns
+    ``concat(pca(t0), pca(t_early) − pca(t0), pca(t_late) − pca(t_early))`` —
+    same total width as `build_pp_features` (3 × pixel_pca_dim), but
+    velocity-like and acceleration-like signals are first-class input dims
+    instead of something the MLP has to learn to subtract out of a
+    high-variance lighting/shape basis.
+    """
+    if pixel_pca_dim is None:
+        pixel_pca_dim = _CFG_PP_PIXEL_PCA_DIM
+
+    initial_renders = scenes['initial_renders']
+    early_renders   = scenes['early_renders']
+    late_renders    = scenes['late_renders']
+
+    scaler = StandardScaler()
+    pca = PCA(n_components=pixel_pca_dim, whiten=True, random_state=42)
+    pixel_pca_t0    = pca.fit_transform(scaler.fit_transform(initial_renders))
+    pixel_pca_early = pca.transform(scaler.transform(early_renders))
+    pixel_pca_late  = pca.transform(scaler.transform(late_renders))
+
+    diff_early = pixel_pca_early - pixel_pca_t0
+    diff_late  = pixel_pca_late  - pixel_pca_early
+
+    return {
+        'pixel_pca_t0':    pixel_pca_t0,
+        'pixel_pca_early': pixel_pca_early,
+        'pixel_pca_late':  pixel_pca_late,
+        'pixel_pca_diff_early': diff_early,
+        'pixel_pca_diff_late':  diff_late,
+        'pixel_pca_concat': np.concatenate(
+            [pixel_pca_t0, diff_early, diff_late], axis=1
         ),
     }
 
