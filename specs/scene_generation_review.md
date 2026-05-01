@@ -208,15 +208,49 @@ predating the x_accel-as-physics-label promotion (commit 22cceae); fixed to
 `16 * N_OBJECTS`, and `_collect_physics_labels` now receives `applied_accels`
 on both calls so the saved `x_accel` label matches the in-pipeline generator.
 
+### Rotation lock (follow-up to first B run)
+
+After the first B run we noticed objects developed substantial rotation
+during the 500 ms simulation (final `angvel_z` std up to 73 rad/s, capped
+at the PyBullet ±100 rad/s limit) and that rotated/tipped boxes occasionally
+appeared to clip into the ground in renders. Rotation is **not** a target
+of the inverse model — `observable_offsets = pos + linvel + [x_accel]`
+explicitly excludes orientation and angular velocity, and at t=0 those
+labels are constants — so the friction-induced rotation was pure
+non-observable noise on the pixel features at t=mid and t=late.
+
+`scene_generator._lock_rotation` now zeros angular velocity and resets
+orientation to identity after every `stepSimulation`. (Note:
+`resetBasePositionAndOrientation` zeros linear velocity as a side-effect,
+so the helper captures `lin_vel` *before* the orientation reset and
+restores it via `resetBaseVelocity`.)
+
+Full-pipeline effect (vs B-with-rotation, both at the same n=120 / frames
+{0,40,80} / linvel_x ∈ [-3,+3] config):
+
+| metric                                  | rotation | **no rotation** |
+|-----------------------------------------|---------:|----------------:|
+| Inverse model mean per-dim R²           | 0.597    | **0.673**       |
+| PP chain pixel R²                       | 0.859    | **0.919**       |
+| Render-only pixel R²                    | 0.645    | 0.699           |
+| Encoding mean R² (pixels only)          | 0.581    | 0.678           |
+| Encoding ΔR² (physics on top of pixels) | 0.0006   | 0.0009          |
+| Encoding ΔR² (inferred on top of pixels)| 0.0015   | 0.0023          |
+| Physics-as-behavior accuracy (control)  | 83.5%    | **92.7%**       |
+| Future brain state physics R²           | 0.557    | 0.665           |
+| RSA neural↔inferred \| render partial   | 0.063    | 0.061           |
+
+The 90% physics-as-behavior threshold no longer needs loosening (it now
+passes outright at 92.7%). The partial-RSA loosening (0.05 → 0.10) is
+retained: the better inverse model still puts more physics-relevant
+signal into the cognitive PP layer than the original threshold expected.
+
+23/23 evaluate checks pass.
+
 Open follow-ups (not done in this PR):
 
-- Snakemake pipeline still uses `scripts/gen_scenes.py` (2-frame), which
-  doesn't expose mid_renders. `analyses/predictive_processing.build_pp_features`
-  reads `early_renders` and `late_renders` but our 3-frame data file aliases
-  `early_renders = late_renders` — downstream pipeline runs with this fixture
-  would silently lose the mid frame.
 - KE distribution shift at n_timesteps=120: median-split behavior label is
-  computed in-script, so it adapts; but residual / dissociation analyses may
-  shift numerically.
+  computed in-script, so it adapts; with rotation locked, the control MLP
+  hits 92.7% so the median split is now sharp again.
 - Paper-figure regeneration not attempted; this is a forward-looking
   scene-gen change, not a reproduction of the existing results.

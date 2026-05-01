@@ -86,15 +86,10 @@ def evaluate(encoding_results, rsa_results, dissociation_results,
         "expect > 0.30",
     )
     check(
-        # Threshold loosened from 0.90 → 0.80 when the scene-gen review
-        # tightened linvel_x to [-3,+3] and extended n_timesteps to 120:
-        # KE under those conditions is dominated by stochastic friction-driven
-        # slowdowns, so the median-split label sits near a noisier boundary.
-        # The behavioral-sufficiency check (next-frame R²) is unchanged.
         "Control: physics predicts behavior",
-        ctrl > 0.80,
+        ctrl > 0.90,
         f"accuracy = {ctrl:.1%}",
-        "expect > 80%",
+        "expect > 90%",
     )
 
     if encoding_results.get('r2_inferred') is not None:

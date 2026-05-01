@@ -142,6 +142,28 @@ def _create_scene(physics_client, rng):
     return body_ids, masses, frictions, is_occluded, shape_configs, pillar_gray
 
 
+def _lock_rotation(body_ids, physics_client):
+    """Zero angular velocity and reset orientation to identity for every body.
+
+    Called after each simulation step. Free rigid bodies tumble under
+    friction torque, but rotation is not a target of the inverse model
+    (orn / angvel are not in observable_offsets) and only adds non-
+    observable noise to the pixel features at t=mid and t=late.
+
+    Note: resetBasePositionAndOrientation zeros linear velocity as a
+    side-effect, so we capture lin_vel before the orientation reset and
+    restore it via resetBaseVelocity.
+    """
+    for bid in body_ids:
+        pos, _ = p.getBasePositionAndOrientation(bid, physicsClientId=physics_client)
+        lin_vel, _ = p.getBaseVelocity(bid, physicsClientId=physics_client)
+        p.resetBasePositionAndOrientation(bid, pos, [0.0, 0.0, 0.0, 1.0],
+                                          physicsClientId=physics_client)
+        p.resetBaseVelocity(bid, linearVelocity=lin_vel,
+                            angularVelocity=[0.0, 0.0, 0.0],
+                            physicsClientId=physics_client)
+
+
 def _get_initial_positions(body_ids, physics_client):
     """Record starting positions for behavior label computation."""
     positions = []
@@ -406,6 +428,7 @@ def resimulate_scene(shape_configs, initial_physics_row, *,
                                      [0, 0, 0], p.WORLD_FRAME,
                                      physicsClientId=pc)
         p.stepSimulation(physicsClientId=pc)
+        _lock_rotation(body_ids, pc)
 
     if return_program_state:
         rgba_bytes, depth_bytes, seg_bytes = _render_scene(pc, lighting=lighting)
@@ -511,6 +534,7 @@ def generate_scenes(n_scenes, seed, *, n_timesteps=None):
                                          [0, 0, 0], p.WORLD_FRAME,
                                          physicsClientId=pc)
             p.stepSimulation(physicsClientId=pc)
+            _lock_rotation(body_ids, pc)
             if t + 1 == _CFG_PP_EARLY_FRAME:
                 early_rgba_bytes, _, _ = _render_scene(pc, lighting=lighting)
                 early_renders[i] = np.frombuffer(early_rgba_bytes, dtype=np.uint8).astype(np.float32)
