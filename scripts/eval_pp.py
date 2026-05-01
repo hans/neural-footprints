@@ -127,6 +127,7 @@ PHYSICS_LABELS = [
     'linvel_x', 'linvel_y', 'linvel_z',
     'angvel_x', 'angvel_y', 'angvel_z',
     'mass', 'friction',
+    'x_accel',
 ]
 
 
@@ -169,10 +170,10 @@ class InverseModel:
             verbose=True):
         self.full_physics_dim_ = physics_labels.shape[1]
 
-        observable_offsets = list(range(0, 3)) + list(range(7, 10))
+        observable_offsets = list(range(0, 3)) + list(range(7, 10)) + [15]
         observable_indices = []
         for i in range(N_OBJECTS):
-            observable_indices.extend([i * 15 + j for j in observable_offsets])
+            observable_indices.extend([i * 16 + j for j in observable_offsets])
 
         std_per_dim = physics_labels.std(axis=0)
         has_variance = std_per_dim > 1e-4
