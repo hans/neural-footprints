@@ -28,7 +28,7 @@ from scene_generator import (
     _create_scene, _collect_physics_labels, _sample_lighting,
     _encode_scene_config, _encode_scene_lighting,
     _compute_total_kinetic_energy, _build_program_state,
-    _DEFAULT_LIGHTING, SCENE_CONFIG_DIM, SCENE_LIGHTING_DIM,
+    _lock_rotation, _DEFAULT_LIGHTING, SCENE_CONFIG_DIM, SCENE_LIGHTING_DIM,
 )
 from scripts.load_config import load_config
 
@@ -110,6 +110,7 @@ def generate_3frame_scenes(n_scenes, seed, n_timesteps, t_mid, t_late, fov):
                                          [0, 0, 0], p.WORLD_FRAME,
                                          physicsClientId=pc)
             p.stepSimulation(physicsClientId=pc)
+            _lock_rotation(body_ids, pc)
             if t + 1 == t_mid:
                 mid_rgba, _, _ = _render_with_fov(pc, lighting, fov)
                 mid_renders[i] = np.frombuffer(mid_rgba, dtype=np.uint8).astype(np.float32)
