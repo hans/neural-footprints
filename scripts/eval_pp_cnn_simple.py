@@ -230,7 +230,8 @@ def make_net(variant, n_frames, n_channels, image_size, output_dim, *, args):
 # ---------------------------------------------------------------------------
 
 def train_one(net, frames_f32, y, idx_tr, idx_val, *, device,
-              n_epochs, batch_size, lr, patience, log_every, label):
+              n_epochs, batch_size, lr, patience, log_every, label,
+              min_epochs=0):
     X_tr = torch.tensor(frames_f32[idx_tr], dtype=torch.float32, device=device)
     y_tr = torch.tensor(y[idx_tr], dtype=torch.float32, device=device)
     X_val = torch.tensor(frames_f32[idx_val], dtype=torch.float32, device=device)
@@ -278,7 +279,7 @@ def train_one(net, frames_f32, y, idx_tr, idx_val, *, device,
             bad_epochs = 0
         else:
             bad_epochs += 1
-            if bad_epochs >= patience:
+            if bad_epochs >= patience and (epoch + 1) >= min_epochs:
                 print(f"  [{label}] early stop @ epoch {epoch+1}  best val={best_val:.4f} @ {best_epoch}", flush=True)
                 break
 
