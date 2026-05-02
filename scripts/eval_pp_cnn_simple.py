@@ -125,29 +125,37 @@ class GridPoolCNN(nn.Module):
 
     grid_size=1 reproduces the original InverseCNNNet (without BN). grid_size>1
     preserves spatial layout at the cost of a wider head input.
+
+    batch_norm=True inserts BatchNorm2d after each Conv2d and BatchNorm1d after
+    each head Linear (matching InverseCNNNet's BN placement) so the
+    training-regime change can be isolated independently of the GAP/grid choice.
     """
     def __init__(self, n_frames, n_channels, output_dim,
-                 grid_size=4, hidden_dim=256):
+                 grid_size=4, hidden_dim=256, batch_norm=False):
         super().__init__()
         self.n_frames = n_frames
         self.conv_feat_dim = 128
         self.grid_size = grid_size
+        self.batch_norm = batch_norm
+
+        bn2 = (lambda c: nn.BatchNorm2d(c)) if batch_norm else (lambda c: nn.Identity())
+        bn1 = (lambda c: nn.BatchNorm1d(c)) if batch_norm else (lambda c: nn.Identity())
 
         self.conv = nn.Sequential(
             nn.Conv2d(n_channels, 32, kernel_size=3, stride=2, padding=1),
-            nn.ReLU(inplace=True),
+            bn2(32), nn.ReLU(inplace=True),
             nn.Conv2d(32, 64, kernel_size=3, stride=2, padding=1),
-            nn.ReLU(inplace=True),
+            bn2(64), nn.ReLU(inplace=True),
             nn.Conv2d(64, self.conv_feat_dim, kernel_size=3, stride=2, padding=1),
-            nn.ReLU(inplace=True),
+            bn2(self.conv_feat_dim), nn.ReLU(inplace=True),
             nn.AdaptiveAvgPool2d(grid_size),
             nn.Flatten(),
         )
         per_frame = self.conv_feat_dim * grid_size * grid_size
         feat_dim = per_frame * n_frames
         self.head = nn.Sequential(
-            nn.Linear(feat_dim, hidden_dim), nn.ReLU(inplace=True),
-            nn.Linear(hidden_dim, hidden_dim // 2), nn.ReLU(inplace=True),
+            nn.Linear(feat_dim, hidden_dim), bn1(hidden_dim), nn.ReLU(inplace=True),
+            nn.Linear(hidden_dim, hidden_dim // 2), bn1(hidden_dim // 2), nn.ReLU(inplace=True),
             nn.Linear(hidden_dim // 2, output_dim),
         )
 
@@ -217,7 +225,8 @@ def make_net(variant, n_frames, n_channels, image_size, output_dim, *, args):
     if variant == 'gridpool':
         return GridPoolCNN(n_frames, n_channels, output_dim,
                            grid_size=args.grid_size,
-                           hidden_dim=args.hidden_dim)
+                           hidden_dim=args.hidden_dim,
+                           batch_norm=args.bn)
     if variant == 'spatial_softmax':
         return SpatialSoftmaxCNN(n_frames, n_channels, image_size, output_dim,
                                  n_filters=args.softmax_filters,
@@ -328,6 +337,11 @@ def main():
                     help="AvgPool2d kernel for downsample_mlp")
     ap.add_argument('--softmax-filters', type=int, default=32,
                     help="number of channels at the softmax layer")
+    ap.add_argument('--bn', action='store_true',
+                    help="enable BatchNorm in gridpool conv + head (off by default)")
+    ap.add_argument('--frame-diffs', action='store_true',
+                    help="concat (t1-t0) and (t2-t1) as extra channels per frame "
+                         "(diff channels: t0=zeros, t1=t1-t0, t2=t2-t1, all in [-1,1])")
     ap.add_argument('--log-every', type=int, default=20)
     ap.add_argument('--output', default='outputs/pp_cnn_simple.json')
     args = ap.parse_args()
@@ -349,6 +363,16 @@ def main():
     frames_f32 = frames.astype(np.float32) / 255.0
     print(f"  shape={frames.shape}  ({frames.nbytes/1e6:.0f} MB uint8)", flush=True)
 
+    if args.frame_diffs:
+        d1 = frames_f32[:, 1] - frames_f32[:, 0]
+        d2 = frames_f32[:, 2] - frames_f32[:, 1]
+        zeros = np.zeros_like(frames_f32[:, 0])
+        diffs = np.stack([zeros, d1, d2], axis=1)
+        frames_f32 = np.concatenate([frames_f32, diffs], axis=2)
+        print(f"  + diff channels  shape={frames_f32.shape}  "
+              f"({frames_f32.nbytes/1e6:.0f} MB float32)", flush=True)
+    n_channels = frames_f32.shape[2]
+
     initial_physics = scenes['initial_physics_labels']
     valid_dims, full_physics_dim = compute_valid_dims(initial_physics)
     n_observable = int(valid_dims.sum())
@@ -365,7 +389,7 @@ def main():
 
     for variant in variants:
         print(f"\n=== variant: {variant} ===", flush=True)
-        net = make_net(variant, n_frames=3, n_channels=4,
+        net = make_net(variant, n_frames=3, n_channels=n_channels,
                        image_size=IMAGE_SIZE, output_dim=n_observable,
                        args=args)
         n_params = sum(p.numel() for p in net.parameters())
