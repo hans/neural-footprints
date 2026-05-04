@@ -13,6 +13,7 @@ rule all:
         "figures/pca_analysis.pdf",
         "figures/pca_variance_decoding.pdf",
         "figures/dynamics_analysis.pdf",
+        "figures/residual_analysis.pdf",
         "figures/sample_scenes.pdf",
         "paper/results_macros.tex",
 
@@ -28,6 +29,7 @@ rule figures:
         "figures/pca_analysis.pdf",
         "figures/pca_variance_decoding.pdf",
         "figures/dynamics_analysis.pdf",
+        "figures/residual_analysis.pdf",
         "figures/sample_scenes.pdf",
 
 
@@ -114,6 +116,17 @@ rule dynamics:
         "scripts/run_dynamics.py"
 
 
+rule residual:
+    input:
+        scenes="data/scenes.npz",
+        neural="data/neural.npz",
+    output:
+        results="outputs/residual_results.json",
+        plot_data="data/residual_plot_data.npz",
+    script:
+        "scripts/run_residual.py"
+
+
 # ---------------------------------------------------------------------------
 # Plotting (fast — only reads cached plot_data NPZ files)
 # ---------------------------------------------------------------------------
@@ -176,6 +189,15 @@ rule plot_dynamics:
         "scripts/plot_dynamics.py"
 
 
+rule plot_residual:
+    input:
+        plot_data="data/residual_plot_data.npz",
+    output:
+        figure="figures/residual_analysis.pdf",
+    script:
+        "scripts/plot_residual.py"
+
+
 # ---------------------------------------------------------------------------
 # Evaluation & paper macros
 # ---------------------------------------------------------------------------
@@ -199,6 +221,7 @@ rule evaluate:
         rsa="outputs/rsa_results.json",
         dissociation="outputs/dissociation_results.json",
         dynamics="outputs/dynamics_results.json",
+        residual="outputs/residual_results.json",
     output:
         "outputs/evaluation.json",
     script:

@@ -21,7 +21,7 @@ def _check(name, passed, actual_str, threshold_str):
 
 
 def evaluate(encoding_results, rsa_results, dissociation_results,
-             pp_results=None, dynamics_results=None):
+             pp_results=None, dynamics_results=None, residual_results=None):
     """Run all checks and print colored evaluation report. Returns (n_passed, n_total)."""
 
     lines = []
@@ -175,6 +175,39 @@ def evaluate(encoding_results, rsa_results, dissociation_results,
         f"{metric} = {beh_rend:.4f}",
         "expect low" if obj == "next_frame_pixels" else "expect < 0.70",
     )
+
+    # --- Residual Encoding ---
+    if residual_results is not None:
+        r2_resid_render = float(residual_results['r2_resid_render'].mean())
+        r2_raw_gt = float(residual_results['r2_raw_physics_gt'].mean())
+        r2_resid_gt = float(residual_results['r2_resid_physics_gt'].mean())
+        var_kept = float(residual_results['residual_variance_fraction'])
+
+        lines.append(f"\n{BOLD}Residual Encoding{RESET}")
+        check(
+            "Stage-1 sanity: render does not predict its own residual",
+            abs(r2_resid_render) < 0.05,
+            f"R² = {r2_resid_render:.4f}",
+            "expect |R²| < 0.05",
+        )
+        check(
+            "Stage-1 leaves substantial residual variance",
+            var_kept > 0.05,
+            f"residual var fraction = {var_kept:.4f}",
+            "expect > 0.05",
+        )
+        check(
+            "Raw neural carries GT-physics signal (pre-residualization)",
+            r2_raw_gt > 0.01,
+            f"R² = {r2_raw_gt:.4f}",
+            "expect > 0.01 — needed for the collapse to be meaningful",
+        )
+        check(
+            "Residualization removes GT-physics signal (false negative)",
+            r2_resid_gt < 0.01,
+            f"R² = {r2_resid_gt:.4f}",
+            "expect < 0.01",
+        )
 
     # --- Dynamics (future brain state) ---
     if dynamics_results is not None:
