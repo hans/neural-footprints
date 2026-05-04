@@ -16,7 +16,7 @@ from sklearn.linear_model import RidgeCV
 from sklearn.model_selection import cross_val_predict, cross_val_score
 from sklearn.neural_network import MLPClassifier
 from sklearn.preprocessing import StandardScaler
-from config import RENDER_PCA_DIM as _CFG_RENDER_PCA_DIM
+from config import PIXEL_PCA_DIM as _CFG_PIXEL_PCA_DIM
 from scene_generator import extract_brain_pixels
 
 
@@ -41,19 +41,19 @@ def ridge_r2_per_neuron(X, neural_activity, alphas=None, cv=5):
 
 
 def run_encoding_analysis(neural_activity, scenes, neural_meta,
-                          *, render_pca_dim=None):
+                          *, pixel_pca_dim=None):
     """
     Run encoding model analysis.
 
-    1. PCA-reduce 3-frame brain pixels to RENDER_PCA_DIM components
+    1. PCA-reduce 3-frame brain pixels to PIXEL_PCA_DIM components
     2. Ridge regression: neural ~ pixel_PCA -> R² per neuron
     3. Ridge regression: neural ~ pixel_PCA + physics_labels -> R²
     4. DeltaR² should be tiny
     5. Subsampling curve: vary neurons sampled, plot DeltaR² + significance
     6. Control: MLP physics_labels -> behavior_label
     """
-    if render_pca_dim is None:
-        render_pca_dim = _CFG_RENDER_PCA_DIM
+    if pixel_pca_dim is None:
+        pixel_pca_dim = _CFG_PIXEL_PCA_DIM
 
     print("\n" + "=" * 60)
     print("SIMULATION 1: Encoding Model False Negatives")
@@ -67,9 +67,9 @@ def run_encoding_analysis(neural_activity, scenes, neural_meta,
     n_scenes, n_neurons = neural_activity.shape
 
     # --- Extract and PCA-reduce 3-frame brain pixels (RGBA only) ---
-    print(f"\nExtracting brain pixels and reducing to {render_pca_dim} PCA components...")
+    print(f"\nExtracting brain pixels and reducing to {pixel_pca_dim} PCA components...")
     pixel_data = extract_brain_pixels(program_states, metadata)
-    pixel_pca, pca, pixel_scaler = pca_reduce_pixels(pixel_data, render_pca_dim)
+    pixel_pca, pca, pixel_scaler = pca_reduce_pixels(pixel_data, pixel_pca_dim)
     print(f"  PCA explained variance: {pca.explained_variance_ratio_.sum():.2%}")
 
     # --- Standardize physics labels ---
@@ -78,7 +78,7 @@ def run_encoding_analysis(neural_activity, scenes, neural_meta,
 
     # --- Encoding model: pixels only ---
     print("\nFitting encoding model: neural ~ pixel_PCA ...")
-    r2_render_only = ridge_r2_per_neuron(pixel_pca, neural_activity)
+    r2_pixel_only = ridge_r2_per_neuron(pixel_pca, neural_activity)
 
     # --- Encoding model: physics only ---
     print("Fitting encoding model: neural ~ physics_labels ...")
@@ -89,16 +89,16 @@ def run_encoding_analysis(neural_activity, scenes, neural_meta,
     combined = np.hstack([pixel_pca, physics_scaled])
     r2_combined = ridge_r2_per_neuron(combined, neural_activity)
 
-    delta_r2 = r2_combined - r2_render_only
-    mean_r2_render = r2_render_only.mean()
+    delta_r2 = r2_combined - r2_pixel_only
+    mean_r2_pixel = r2_pixel_only.mean()
     mean_r2_phys = r2_physics_only.mean()
     mean_r2_comb = r2_combined.mean()
     mean_delta = delta_r2.mean()
 
-    print(f"\n  Mean R² (render only):    {mean_r2_render:.4f}")
-    print(f"  Mean R² (physics only):   {mean_r2_phys:.4f}")
-    print(f"  Mean R² (render+physics): {mean_r2_comb:.4f}")
-    print(f"  Mean ΔR²:                 {mean_delta:.6f}")
+    print(f"\n  Mean R² (pixel only):         {mean_r2_pixel:.4f}")
+    print(f"  Mean R² (physics only):       {mean_r2_phys:.4f}")
+    print(f"  Mean R² (pixel+physics):      {mean_r2_comb:.4f}")
+    print(f"  Mean ΔR²:                     {mean_delta:.6f}")
 
     # --- Control: physics_labels -> behavior_label ---
     # MLP because KE = 0.5*m*v² is nonlinear in the physics label features.
@@ -141,7 +141,7 @@ def run_encoding_analysis(neural_activity, scenes, neural_meta,
     encoder_ridge.fit(pixel_pca, neural_activity)
 
     return {
-        'r2_render_only': r2_render_only,
+        'r2_pixel_only': r2_pixel_only,
         'r2_physics_only': r2_physics_only,
         'r2_combined': r2_combined,
         'delta_r2': delta_r2,

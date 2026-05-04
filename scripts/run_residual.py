@@ -17,17 +17,17 @@ with open(snakemake.input.encoding) as f:
 
 results = run_residual_analysis(
     neural, scenes, neural_meta,
-    render_pca_dim=cfg['render_pca_dim'],
-    r2_raw_render=np.asarray(encoding_results['r2_render_only']),
+    pixel_pca_dim=cfg['pixel_pca_dim'],
+    r2_raw_pixel=np.asarray(encoding_results['r2_pixel_only']),
     r2_raw_physics_gt=np.asarray(encoding_results['r2_physics_only']),
 )
 save_results(results, snakemake.output.results)
 
 np.savez_compressed(
     snakemake.output.plot_data,
-    r2_raw_render=results['r2_raw_render'],
+    r2_raw_pixel=results['r2_raw_pixel'],
     r2_raw_physics_gt=results['r2_raw_physics_gt'],
-    r2_resid_render=results['r2_resid_render'],
+    r2_resid_pixel=results['r2_resid_pixel'],
     r2_resid_physics_gt=results['r2_resid_physics_gt'],
     residual_variance_fraction=np.array(results['residual_variance_fraction']),
 )

@@ -17,12 +17,12 @@ LABEL_RENDER_PLUS_PHYSICS = "Full"
 
 
 def plot_encoding(plot_data, fig_dir="figures"):
-    r2_render_only = plot_data['r2_render_only']
+    r2_pixel_only = plot_data['r2_pixel_only']
     r2_combined = plot_data['r2_combined']
-    n_neurons = len(r2_render_only)
-    mean_r2_render = r2_render_only.mean()
+    n_neurons = len(r2_pixel_only)
+    mean_r2_pixel = r2_pixel_only.mean()
     mean_r2_comb = r2_combined.mean()
-    mean_delta = (r2_combined - r2_render_only).mean()
+    mean_delta = (r2_combined - r2_pixel_only).mean()
     neuron_counts = plot_data['neuron_counts']
     subsample_means = plot_data['subsample_means']
     subsample_sems = plot_data['subsample_sems']
@@ -35,21 +35,21 @@ def plot_encoding(plot_data, fig_dir="figures"):
         # Panel A: R² bar plot
         ax = axes[0]
         ax.bar([LABEL_RENDER, LABEL_RENDER_PLUS_PHYSICS],
-               [mean_r2_render, mean_r2_comb],
-               yerr=[r2_render_only.std() / np.sqrt(n_neurons),
+               [mean_r2_pixel, mean_r2_comb],
+               yerr=[r2_pixel_only.std() / np.sqrt(n_neurons),
                      r2_combined.std() / np.sqrt(n_neurons)],
-               color=[COLORS['render'], COLORS['physics']], capsize=3,
+               color=[COLORS['pixels'], COLORS['physics']], capsize=3,
                width=0.6)
         ax.set_ylabel('Mean R\u00b2')
         ax.set_title('Encoding model: R\u00b2 \u00b1 physics labels')
-        ymax = max(mean_r2_render, mean_r2_comb) * 1.12
+        ymax = max(mean_r2_pixel, mean_r2_comb) * 1.12
         ax.annotate(f'\u0394R\u00b2 = {mean_delta:.6f}', xy=(0.5, ymax),
                     ha='center', style='italic')
 
         # Panel B: Subsampling curve
         ax = axes[1]
         ax.errorbar(neuron_counts, subsample_means, yerr=subsample_sems,
-                    marker='o', color=COLORS['render'], capsize=2)
+                    marker='o', color=COLORS['pixels'], capsize=2)
         ax.axhline(0, color='gray', linestyle='--', alpha=0.5)
         ax.set_xlabel('Number of neurons sampled')
         ax.set_ylabel('Mean \u0394R\u00b2')
@@ -75,27 +75,27 @@ def plot_encoding(plot_data, fig_dir="figures"):
 
 def plot_rsa(plot_data, fig_dir="figures"):
     rdm_neural = plot_data['rdm_neural']
-    rdm_render = plot_data['rdm_render']
+    rdm_pixel = plot_data['rdm_pixel']
     rdm_physics = plot_data['rdm_physics']
     n_sub = int(plot_data['n_sub'])
-    corr_neural_render = float(plot_data['corr_neural_render'])
+    corr_neural_pixel = float(plot_data['corr_neural_pixel'])
     corr_neural_physics = float(plot_data['corr_neural_physics'])
 
     with paper_style():
-        # Reorder scenes via hierarchical clustering on render RDM
+        # Reorder scenes via hierarchical clustering on pixel RDM
         # so shared structure between Neural and Sensory is visible
-        rdm_render_full = squareform(rdm_render)
-        Z = linkage(rdm_render, method='average')
+        rdm_pixel_full = squareform(rdm_pixel)
+        Z = linkage(rdm_pixel, method='average')
         order = leaves_list(Z)
 
         n_show = min(40, n_sub)
         order = order[:n_show]
         rdm_neural_sq = squareform(rdm_neural)[np.ix_(order, order)]
-        rdm_render_sq = rdm_render_full[np.ix_(order, order)]
+        rdm_pixel_sq = rdm_pixel_full[np.ix_(order, order)]
         rdm_physics_sq = squareform(rdm_physics)[np.ix_(order, order)]
 
         # Shared color range across all RDMs
-        all_rdms = [rdm_neural_sq, rdm_render_sq, rdm_physics_sq]
+        all_rdms = [rdm_neural_sq, rdm_pixel_sq, rdm_physics_sq]
         vmin = min(r.min() for r in all_rdms)
         vmax = max(r.max() for r in all_rdms)
 
@@ -111,9 +111,9 @@ def plot_rsa(plot_data, fig_dir="figures"):
         ax_nr.set_title('Neural RDM')
         ax_nr.set_xticks([]); ax_nr.set_yticks([])
 
-        # Top-right: Render RDM
+        # Top-right: Pixel RDM
         ax_rr = fig.add_subplot(gs[0, 2])
-        ax_rr.imshow(rdm_render_sq, cmap='viridis', aspect='equal',
+        ax_rr.imshow(rdm_pixel_sq, cmap='viridis', aspect='equal',
                      vmin=vmin, vmax=vmax)
         ax_rr.set_title(f'{LABEL_RENDER} RDM')
         ax_rr.set_xticks([]); ax_rr.set_yticks([])
@@ -136,8 +136,8 @@ def plot_rsa(plot_data, fig_dir="figures"):
         # Correlation bar plot spanning bottom middle+right
         ax = fig.add_subplot(gs[1, 2])
         labels = [f'Neural\u2013\n{LABEL_RENDER}', f'Neural\u2013\n{LABEL_PHYSICS}']
-        values = [corr_neural_render, corr_neural_physics]
-        colors = [COLORS['render'], COLORS['physics']]
+        values = [corr_neural_pixel, corr_neural_physics]
+        colors = [COLORS['pixels'], COLORS['physics']]
         bars = ax.bar(labels, values, color=colors, width=0.6)
         ax.set_ylabel('Spearman r')
         ax.set_title('RSA correlations')
@@ -152,12 +152,12 @@ def plot_rsa(plot_data, fig_dir="figures"):
 
 
 def plot_dissociation(plot_data, fig_dir="figures"):
-    r2_render = plot_data['r2_render']
+    r2_pixel = plot_data['r2_pixel']
     r2_physics = plot_data['r2_physics']
-    n_neurons = len(r2_render)
-    mean_r2_render = r2_render.mean()
+    n_neurons = len(r2_pixel)
+    mean_r2_pixel = r2_pixel.mean()
     mean_r2_physics = r2_physics.mean()
-    render_score = float(plot_data['render_score'])
+    pixel_score = float(plot_data['pixel_score'])
     physics_score = float(plot_data['physics_score'])
     metric_label = str(plot_data['metric_label'])
     chance_val = float(plot_data['chance'])
@@ -167,21 +167,21 @@ def plot_dissociation(plot_data, fig_dir="figures"):
         fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(COL_WIDTH, 2.0))
 
         bar_width = 0.5
-        colors = [COLORS['render'], COLORS['physics']]
+        colors = [COLORS['pixels'], COLORS['physics']]
         labels = [LABEL_RENDER, LABEL_PHYSICS]
 
-        bars1 = ax1.bar(labels, [mean_r2_render, mean_r2_physics],
+        bars1 = ax1.bar(labels, [mean_r2_pixel, mean_r2_physics],
                         width=bar_width, color=colors,
-                        yerr=[r2_render.std() / np.sqrt(n_neurons),
+                        yerr=[r2_pixel.std() / np.sqrt(n_neurons),
                               r2_physics.std() / np.sqrt(n_neurons)],
                         capsize=3)
         ax1.set_ylabel('Neural R\u00b2')
         ax1.set_title('Encoding performance')
-        for bar, val in zip(bars1, [mean_r2_render, mean_r2_physics]):
+        for bar, val in zip(bars1, [mean_r2_pixel, mean_r2_physics]):
             ax1.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.01,
                      f'{val:.3f}', ha='center', va='bottom', fontweight='bold')
 
-        bars2 = ax2.bar(labels, [render_score, physics_score],
+        bars2 = ax2.bar(labels, [pixel_score, physics_score],
                         width=bar_width, color=colors, capsize=3)
         if chance is not None:
             ax2.axhline(chance, color='gray', linestyle='--', alpha=0.5, label='Chance')
@@ -189,7 +189,7 @@ def plot_dissociation(plot_data, fig_dir="figures"):
             ax2.legend()
         ax2.set_ylabel(metric_label)
         ax2.set_title('Computational sufficiency')
-        for bar, val in zip(bars2, [render_score, physics_score]):
+        for bar, val in zip(bars2, [pixel_score, physics_score]):
             ax2.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.01,
                      f'{val:.3f}', ha='center', va='bottom', fontweight='bold')
 
@@ -200,18 +200,18 @@ def plot_dissociation(plot_data, fig_dir="figures"):
 
 
 def plot_dissociation_combined(plot_data, fig_dir="figures"):
-    """Dissociation figure comparing render vs. render+physics models.
+    """Dissociation figure comparing pixel vs. pixel+physics models.
 
     The two encoding bars are nearly identical height, showing that adding
-    physics to the render model barely changes neural R² — even though
+    physics to the pixel model barely changes neural R² — even though
     physics dramatically improves behavioral prediction.
     """
-    r2_render = plot_data['r2_render']
+    r2_pixel = plot_data['r2_pixel']
     r2_combined = plot_data['r2_combined']
-    n_neurons = len(r2_render)
-    mean_r2_render = r2_render.mean()
+    n_neurons = len(r2_pixel)
+    mean_r2_pixel = r2_pixel.mean()
     mean_r2_combined = r2_combined.mean()
-    render_score = float(plot_data['render_score'])
+    pixel_score = float(plot_data['pixel_score'])
     combined_score = float(plot_data['combined_score'])
     metric_label = str(plot_data['metric_label'])
     chance_val = float(plot_data['chance'])
@@ -221,21 +221,21 @@ def plot_dissociation_combined(plot_data, fig_dir="figures"):
         fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(COL_WIDTH, 2.0))
 
         bar_width = 0.5
-        colors = [COLORS['render'], COLORS['combined']]
+        colors = [COLORS['pixels'], COLORS['combined']]
         labels = [LABEL_RENDER, LABEL_RENDER_PLUS_PHYSICS]
 
-        bars1 = ax1.bar(labels, [mean_r2_render, mean_r2_combined],
+        bars1 = ax1.bar(labels, [mean_r2_pixel, mean_r2_combined],
                         width=bar_width, color=colors,
-                        yerr=[r2_render.std() / np.sqrt(n_neurons),
+                        yerr=[r2_pixel.std() / np.sqrt(n_neurons),
                               r2_combined.std() / np.sqrt(n_neurons)],
                         capsize=3)
         ax1.set_ylabel('Neural R\u00b2')
         ax1.set_title('Encoding performance')
-        for bar, val in zip(bars1, [mean_r2_render, mean_r2_combined]):
+        for bar, val in zip(bars1, [mean_r2_pixel, mean_r2_combined]):
             ax1.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.01,
                      f'{val:.3f}', ha='center', va='bottom', fontweight='bold')
 
-        bars2 = ax2.bar(labels, [render_score, combined_score],
+        bars2 = ax2.bar(labels, [pixel_score, combined_score],
                         width=bar_width, color=colors, capsize=3)
         if chance is not None:
             ax2.axhline(chance, color='gray', linestyle='--', alpha=0.5, label='Chance')
@@ -243,7 +243,7 @@ def plot_dissociation_combined(plot_data, fig_dir="figures"):
             ax2.legend()
         ax2.set_ylabel(metric_label)
         ax2.set_title('Computational sufficiency')
-        for bar, val in zip(bars2, [render_score, combined_score]):
+        for bar, val in zip(bars2, [pixel_score, combined_score]):
             ax2.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.01,
                      f'{val:.3f}', ha='center', va='bottom', fontweight='bold')
 
@@ -256,14 +256,14 @@ def plot_dissociation_combined(plot_data, fig_dir="figures"):
 def plot_predicted_frames(plot_data, fig_dir="figures"):
     """Predicted frames grid — uses figure* (full width) for legibility."""
     init_imgs = plot_data['predicted_init_imgs']
-    render_imgs = plot_data['predicted_render_imgs']
+    pixel_imgs = plot_data['predicted_pixel_imgs']
     physics_imgs = plot_data['predicted_physics_imgs']
     final_imgs = plot_data['predicted_final_imgs']
     n = len(init_imgs)
 
-    col_titles = ['t=0 (input)', 'Render model\nprediction',
+    col_titles = ['t=0 (input)', f'{LABEL_RENDER} model\nprediction',
                   'Physics model\nprediction', 't=N (actual)']
-    cols = [init_imgs, render_imgs, physics_imgs, final_imgs]
+    cols = [init_imgs, pixel_imgs, physics_imgs, final_imgs]
 
     with paper_style():
         fig, axes = plt.subplots(n, 4, figsize=(FULL_WIDTH, 1.6 * n))
@@ -285,13 +285,13 @@ def plot_predicted_frames(plot_data, fig_dir="figures"):
 def plot_predicted_frames_compact(plot_data, fig_dir="figures", scene_idx=1):
     """Predicted frames as a 2x2 grid for a single-column figure."""
     init_imgs = plot_data['predicted_init_imgs']
-    render_imgs = plot_data['predicted_render_imgs']
+    pixel_imgs = plot_data['predicted_pixel_imgs']
     physics_imgs = plot_data['predicted_physics_imgs']
     final_imgs = plot_data['predicted_final_imgs']
 
     titles = ['t=0 (input)', 'Sensory model\nprediction',
               'Physics model\nprediction', 't=N (actual)']
-    imgs = [init_imgs[scene_idx], render_imgs[scene_idx],
+    imgs = [init_imgs[scene_idx], pixel_imgs[scene_idx],
             physics_imgs[scene_idx], final_imgs[scene_idx]]
 
     with paper_style():
@@ -474,19 +474,19 @@ def plot_sample_scenes(initial_renders, target_renders, rgba_bytes,
 
 
 def plot_residual(plot_data, fig_dir="figures"):
-    r2_raw_render = plot_data['r2_raw_render']
+    r2_raw_pixel = plot_data['r2_raw_pixel']
     r2_raw_physics_gt = plot_data['r2_raw_physics_gt']
-    r2_resid_render = plot_data['r2_resid_render']
+    r2_resid_pixel = plot_data['r2_resid_pixel']
     r2_resid_physics_gt = plot_data['r2_resid_physics_gt']
     var_kept = float(plot_data['residual_variance_fraction'])
 
     n = len(r2_raw_physics_gt)
 
-    raw_means = np.array([r2_raw_render.mean(), r2_raw_physics_gt.mean()])
-    resid_means = np.array([r2_resid_render.mean(), r2_resid_physics_gt.mean()])
-    raw_sems = np.array([r2_raw_render.std() / np.sqrt(n),
+    raw_means = np.array([r2_raw_pixel.mean(), r2_raw_physics_gt.mean()])
+    resid_means = np.array([r2_resid_pixel.mean(), r2_resid_physics_gt.mean()])
+    raw_sems = np.array([r2_raw_pixel.std() / np.sqrt(n),
                          r2_raw_physics_gt.std() / np.sqrt(n)])
-    resid_sems = np.array([r2_resid_render.std() / np.sqrt(n),
+    resid_sems = np.array([r2_resid_pixel.std() / np.sqrt(n),
                            r2_resid_physics_gt.std() / np.sqrt(n)])
 
     with paper_style():
@@ -507,7 +507,7 @@ def plot_residual(plot_data, fig_dir="figures"):
         ax.set_ylim(lo - pad, hi + pad)
         ax.set_xlabel('R² (raw neural ~ GT physics)')
         ax.set_ylabel('R² (residualized neural ~ GT physics)')
-        ax.set_title('Per-neuron collapse after render-residualization')
+        ax.set_title('Per-neuron collapse after pixel-residualization')
         ax.legend(loc='upper left')
 
         # Panel B: grouped bars — raw vs residualized for each predictor set
@@ -520,7 +520,7 @@ def plot_residual(plot_data, fig_dir="figures"):
                color=COLORS['physics'], capsize=3, label='Residualized neural')
         ax.axhline(0, color='gray', linestyle='--', linewidth=0.6)
         ax.set_xticks(x)
-        ax.set_xticklabels(['Render', 'GT Physics'])
+        ax.set_xticklabels(['Pixel', 'GT Physics'])
         ax.set_ylabel('Mean R²')
         ax.set_title(f'Encoding R² (residual var fraction = {var_kept:.2f})')
         ax.legend()

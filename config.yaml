@@ -13,7 +13,7 @@ random_seed: 42
 # x_accel inference.
 linvel_x_max: 3.0
 rsa_subsample: 500
-render_pca_dim: 500
+pixel_pca_dim: 500
 behavioral_pca_dim: 50
 behavioral_objective: "next_frame_pixels"
 

@@ -12,7 +12,7 @@ from scipy.spatial.distance import pdist, squareform
 from scipy.stats import spearmanr
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
-from config import RSA_SUBSAMPLE as _CFG_RSA_SUBSAMPLE, RENDER_PCA_DIM as _CFG_RENDER_PCA_DIM
+from config import RSA_SUBSAMPLE as _CFG_RSA_SUBSAMPLE, PIXEL_PCA_DIM as _CFG_PIXEL_PCA_DIM
 from scene_generator import extract_brain_pixels
 
 
@@ -48,18 +48,18 @@ def _partial_spearman(x, y, z):
 
 
 def run_rsa_analysis(neural_activity, scenes, neural_meta,
-                     *, rsa_subsample=None, render_pca_dim=None):
+                     *, rsa_subsample=None, pixel_pca_dim=None):
     """
     Run RSA analysis on a subsample of scenes.
 
-    1. Compute RDMs for neural, render, and physics spaces
-    2. Spearman correlations: neural<->render (high), neural<->physics (low)
-    3. Partial correlation: neural<->physics | render -> near zero
+    1. Compute RDMs for neural, pixel, and physics spaces
+    2. Spearman correlations: neural<->pixel (high), neural<->physics (low)
+    3. Partial correlation: neural<->physics | pixel -> near zero
     """
     if rsa_subsample is None:
         rsa_subsample = _CFG_RSA_SUBSAMPLE
-    if render_pca_dim is None:
-        render_pca_dim = _CFG_RENDER_PCA_DIM
+    if pixel_pca_dim is None:
+        pixel_pca_dim = _CFG_PIXEL_PCA_DIM
 
     print("\n" + "=" * 60)
     print("SIMULATION 2: RSA Dominated by Pixel Structure")
@@ -83,11 +83,11 @@ def run_rsa_analysis(neural_activity, scenes, neural_meta,
 
     # PCA-reduce pixel data for tractability
     print(f"\nSubsampled {n_sub} scenes for RSA.")
-    print(f"PCA-reducing pixel data to {render_pca_dim} components...")
+    print(f"PCA-reducing pixel data to {pixel_pca_dim} components...")
     scaler = StandardScaler()
     pixel_scaled = scaler.fit_transform(pixel_sub)
-    pca = PCA(n_components=min(render_pca_dim, pixel_scaled.shape[0] - 1), random_state=42)
-    render_pca = pca.fit_transform(pixel_scaled)
+    pca = PCA(n_components=min(pixel_pca_dim, pixel_scaled.shape[0] - 1), random_state=42)
+    pixel_pca = pca.fit_transform(pixel_scaled)
 
     # Standardize physics
     scaler_phys = StandardScaler()
@@ -96,33 +96,33 @@ def run_rsa_analysis(neural_activity, scenes, neural_meta,
     # Compute RDMs
     print("Computing RDMs...")
     rdm_neural = _compute_rdm(neural_sub)
-    rdm_render = _compute_rdm(render_pca)
+    rdm_pixel = _compute_rdm(pixel_pca)
     rdm_physics = _compute_rdm(physics_scaled)
 
     # Handle NaN in RDMs (constant rows produce NaN in correlation distance)
-    for rdm in [rdm_neural, rdm_render, rdm_physics]:
+    for rdm in [rdm_neural, rdm_pixel, rdm_physics]:
         rdm[np.isnan(rdm)] = 0.0
 
     # Spearman correlations
-    corr_neural_render, p_nr = spearmanr(rdm_neural, rdm_render)
+    corr_neural_pixel, p_nr = spearmanr(rdm_neural, rdm_pixel)
     corr_neural_physics, p_np = spearmanr(rdm_neural, rdm_physics)
-    corr_render_physics, p_rp = spearmanr(rdm_render, rdm_physics)
+    corr_pixel_physics, p_rp = spearmanr(rdm_pixel, rdm_physics)
 
-    print(f"\n  Spearman neural<->render:  r={corr_neural_render:.4f}  (p={p_nr:.2e})")
+    print(f"\n  Spearman neural<->pixel:   r={corr_neural_pixel:.4f}  (p={p_nr:.2e})")
     print(f"  Spearman neural<->physics: r={corr_neural_physics:.4f}  (p={p_np:.2e})")
-    print(f"  Spearman render<->physics: r={corr_render_physics:.4f}  (p={p_rp:.2e})")
+    print(f"  Spearman pixel<->physics:  r={corr_pixel_physics:.4f}  (p={p_rp:.2e})")
 
-    # Partial correlation: neural<->physics | render
-    partial_corr, partial_p = _partial_spearman(rdm_neural, rdm_physics, rdm_render)
-    print(f"  Partial neural<->physics | render: r={partial_corr:.4f}  (p={partial_p:.2e})")
+    # Partial correlation: neural<->physics | pixel
+    partial_corr, partial_p = _partial_spearman(rdm_neural, rdm_physics, rdm_pixel)
+    print(f"  Partial neural<->physics | pixel: r={partial_corr:.4f}  (p={partial_p:.2e})")
 
     return {
-        'corr_neural_render': corr_neural_render,
+        'corr_neural_pixel': corr_neural_pixel,
         'corr_neural_physics': corr_neural_physics,
-        'corr_render_physics': corr_render_physics,
+        'corr_pixel_physics': corr_pixel_physics,
         'partial_neural_physics': partial_corr,
         'rdm_neural': rdm_neural,
-        'rdm_render': rdm_render,
+        'rdm_pixel': rdm_pixel,
         'rdm_physics': rdm_physics,
         'n_sub': n_sub,
     }
