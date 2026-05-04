@@ -494,6 +494,7 @@ def generate_scenes(n_scenes, seed, *, n_timesteps=None):
     initial_physics_labels = np.zeros((n_scenes, physics_dim), dtype=np.float32)
     initial_renders = np.zeros((n_scenes, rgba_bytes_count), dtype=np.float32)
     early_renders = np.zeros((n_scenes, rgba_bytes_count), dtype=np.float32)
+    late_renders = np.zeros((n_scenes, rgba_bytes_count), dtype=np.float32)
     kinetic_energies = np.zeros(n_scenes, dtype=np.float32)
     all_scene_configs = []
     all_pillar_grays = []
@@ -524,7 +525,9 @@ def generate_scenes(n_scenes, seed, *, n_timesteps=None):
         initial_renders[i] = np.frombuffer(init_rgba_bytes, dtype=np.uint8).astype(np.float32)
 
         # Step physics (with per-scene random x-acceleration as external force).
-        # Capture early frame at t=PP_EARLY_FRAME for two-frame velocity inference.
+        # Capture frames at t=PP_EARLY_FRAME and t=PP_LATE_FRAME so the inverse
+        # model has three evenly-spaced views and can disentangle initial
+        # velocity from the per-scene x_accel injection.
         for t in range(n_timesteps):
             for obj_idx, bid in enumerate(body_ids):
                 x_accel = shape_configs[obj_idx].get('x_accel', 0.0)
@@ -538,6 +541,9 @@ def generate_scenes(n_scenes, seed, *, n_timesteps=None):
             if t + 1 == _CFG_PP_EARLY_FRAME:
                 early_rgba_bytes, _, _ = _render_scene(pc, lighting=lighting)
                 early_renders[i] = np.frombuffer(early_rgba_bytes, dtype=np.uint8).astype(np.float32)
+            if t + 1 == _CFG_PP_LATE_FRAME:
+                late_rgba_bytes, _, _ = _render_scene(pc, lighting=lighting)
+                late_renders[i] = np.frombuffer(late_rgba_bytes, dtype=np.uint8).astype(np.float32)
 
         # Collect final-state analysis labels (NOT used in neural generation)
         physics_labels[i] = _collect_physics_labels(
@@ -586,6 +592,7 @@ def generate_scenes(n_scenes, seed, *, n_timesteps=None):
         'initial_physics_labels': initial_physics_labels,
         'initial_renders': initial_renders,
         'early_renders': early_renders,
+        'late_renders': late_renders,
         'behavior_labels': behavior_labels,
         'kinetic_energies': kinetic_energies,
         'scene_configs': all_scene_configs,
