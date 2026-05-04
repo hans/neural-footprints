@@ -72,6 +72,11 @@ def run_dynamics_analysis(neural_activity, scenes, neural_meta,
     lightings = scenes['lightings']
     pixel_indices = scenes['metadata']['pixel_indices']
     render_indices = scenes['metadata']['render_indices']
+    # initial_renders now stores full RGBA+depth+seg per frame; slice the
+    # leading RGBA bytes for the pixel forward model (RGBA→RGBA mapping).
+    rgba_bytes = scenes['metadata']['target_pixel_indices'].stop \
+                 - scenes['metadata']['target_pixel_indices'].start
+    initial_rgba = initial_renders[:, :rgba_bytes]
 
     enc_scaler = encoder['scaler']
     enc_pca = encoder['pca']
@@ -127,7 +132,7 @@ def run_dynamics_analysis(neural_activity, scenes, neural_meta,
     final_pixel_pca = pca_final.fit_transform(final_scaled)
 
     scaler_init = StandardScaler()
-    init_scaled = scaler_init.fit_transform(initial_renders)
+    init_scaled = scaler_init.fit_transform(initial_rgba)
     pca_init = PCA(n_components=behavioral_pca_dim, whiten=True, random_state=42)
     init_pixel_pca = pca_init.fit_transform(init_scaled)
 

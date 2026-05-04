@@ -154,7 +154,7 @@ even though physics is linearly present and causally determines scene dynamics.
 
 Three panels:
 
-1. **R² bar plot.** Two bars: "Pixels only" vs. "Pixels + Physics".
+1. **R² bar plot.** Two bars: "Sensory" (render-only) vs. "Full" (render + physics).
    Near-identical height, annotated with ΔR².
    Message: adding physics to the encoding model does essentially nothing.
 
@@ -201,7 +201,7 @@ Two "models" are compared:
 
 | Model | What it uses | Neural R² | Behavior prediction |
 |---|---|---|---|
-| Render model | pixel PCA | HIGH | LOW (near chance) |
+| Render model | render PCA (RGBA + depth + seg) | HIGH | LOW (near chance) |
 | Physics model | API physics labels | LOW | HIGH |
 
 The render model accounts for most of the neural variance but is useless for

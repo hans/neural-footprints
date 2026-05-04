@@ -12,7 +12,7 @@ neural, neural_meta = load_neural(snakemake.input.neural)
 encoder = load_encoder(snakemake.input.encoder)
 
 encoding_results = {
-    'r2_pixels_only': encoder.pop('r2_pixels_only'),
+    'r2_render_only': encoder.pop('r2_render_only'),
     'r2_physics_only': encoder.pop('r2_physics_only'),
     'r2_combined': encoder.pop('r2_combined'),
 }

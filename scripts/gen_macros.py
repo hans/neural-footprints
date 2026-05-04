@@ -46,7 +46,8 @@ add("rsaSubsample", str(config["rsa_subsample"]))
 # --- dimensions (computed from config) ---
 image_size = config["image_size"]
 n_objects = config["n_objects"]
-d_render = image_size * image_size * 12  # RGBA(4) + depth(4) + seg(4) raw bytes, each cast to float32
+n_brain_frames = 3  # initial / early / late, all full RGBA+depth+seg
+d_render = n_brain_frames * image_size * image_size * 12  # 3 frames × (RGBA(4) + depth(4) + seg(4)) raw bytes, each cast to float32
 d_physics_per_obj = 16  # pos(3) + orn(4) + lin_vel(3) + ang_vel(3) + mass(1) + friction(1) + x_accel(1)
 d_config_per_obj = 9    # shape_is_box(1) + radius(1) + half_extents(3) + color(4)
 d_physics = d_physics_per_obj * n_objects
@@ -62,11 +63,11 @@ add("dPhysicsPerObject", str(d_physics_per_obj))
 add("dConfigPerObject", str(d_config_per_obj))
 
 # --- encoding ---
-r2_pixels = np.array(encoding["r2_pixels_only"])
+r2_render = np.array(encoding["r2_render_only"])
 r2_combined = np.array(encoding["r2_combined"])
 delta_r2 = np.array(encoding["delta_r2"])
 
-add("encodingRsqPixels", fmt(np.mean(r2_pixels), 4))
+add("encodingRsqRender", fmt(np.mean(r2_render), 4))
 add("encodingRsqCombined", fmt(np.mean(r2_combined), 4))
 add("encodingDeltaRsq", fmt(np.mean(delta_r2), 4))
 add("controlAccuracy", pct(encoding["control_accuracy"]))

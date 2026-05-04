@@ -4,22 +4,37 @@ import json
 import numpy as np
 
 
+_SCENE_ARRAY_KEYS = [
+    'program_states', 'physics_labels', 'initial_physics_labels',
+    'initial_renders', 'early_renders', 'late_renders', 'target_renders',
+    'behavior_labels', 'kinetic_energies',
+]
+
+
+def _slice_to_pair(s):
+    return [s.start, s.stop]
+
+
+def _pair_to_slice(p):
+    return slice(p[0], p[1])
+
+
 def save_scenes(scenes, path):
     """Save scenes dict to compressed .npz. Handles metadata and scene_configs as JSON."""
-    arrays = {}
-    for key in ['program_states', 'physics_labels', 'initial_physics_labels',
-                'initial_renders', 'early_renders', 'behavior_labels', 'kinetic_energies']:
-        arrays[key] = scenes[key]
+    arrays = {key: scenes[key] for key in _SCENE_ARRAY_KEYS}
 
     arrays['pillar_grays'] = np.array(scenes['pillar_grays'])
 
-    # Serialize non-array fields as JSON strings
+    # Serialize non-array fields as JSON strings.
+    # slice objects aren't JSON-serializable — convert to [start, stop] pairs.
     meta = dict(scenes['metadata'])
-    # slice objects aren't JSON-serializable
-    pi = meta['pixel_indices']
-    meta['pixel_indices'] = [pi.start, pi.stop]
-    ri = meta['render_indices']
-    meta['render_indices'] = [ri.start, ri.stop]
+    meta['pixel_indices'] = _slice_to_pair(meta['pixel_indices'])
+    meta['render_indices'] = _slice_to_pair(meta['render_indices'])
+    meta['target_pixel_indices'] = _slice_to_pair(meta['target_pixel_indices'])
+    meta['frame_render_indices'] = {
+        name: _slice_to_pair(s)
+        for name, s in meta['frame_render_indices'].items()
+    }
     arrays['metadata_json'] = np.array(json.dumps(meta))
     arrays['scene_configs_json'] = np.array(json.dumps(scenes['scene_configs']))
     arrays['lightings_json'] = np.array(json.dumps(scenes['lightings']))
@@ -30,16 +45,16 @@ def save_scenes(scenes, path):
 def load_scenes(path):
     """Load scenes dict from .npz."""
     data = np.load(path, allow_pickle=False)
-    scenes = {}
-    for key in ['program_states', 'physics_labels', 'initial_physics_labels',
-                'initial_renders', 'early_renders', 'behavior_labels', 'kinetic_energies']:
-        scenes[key] = data[key]
+    scenes = {key: data[key] for key in _SCENE_ARRAY_KEYS}
 
     meta = json.loads(str(data['metadata_json']))
-    pi = meta['pixel_indices']
-    meta['pixel_indices'] = slice(pi[0], pi[1])
-    ri = meta['render_indices']
-    meta['render_indices'] = slice(ri[0], ri[1])
+    meta['pixel_indices'] = _pair_to_slice(meta['pixel_indices'])
+    meta['render_indices'] = _pair_to_slice(meta['render_indices'])
+    meta['target_pixel_indices'] = _pair_to_slice(meta['target_pixel_indices'])
+    meta['frame_render_indices'] = {
+        name: _pair_to_slice(p)
+        for name, p in meta['frame_render_indices'].items()
+    }
     scenes['metadata'] = meta
 
     scenes['scene_configs'] = json.loads(str(data['scene_configs_json']))

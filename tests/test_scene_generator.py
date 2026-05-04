@@ -95,26 +95,33 @@ def test_encode_scene_lighting(tiny_lighting):
 
 
 def test_build_program_state_length_and_dtype():
-    rgba_bytes = bytes(range(256)) * 4    # 1024 uint8 bytes
+    rgba_bytes = bytes(range(256)) * 4    # 1024 uint8 bytes per frame
     depth_bytes = (np.arange(16, dtype=np.float32)).tobytes()  # 64 bytes
     seg_bytes = (np.arange(8, dtype=np.int32)).tobytes()       # 32 bytes
     physics = np.array([1.0, 2.0, 3.0], dtype=np.float32)
     config = np.array([0.5, 0.6], dtype=np.float32)
     lighting = np.array([0.1, 0.2, 0.3], dtype=np.float32)
 
-    ps = _build_program_state(rgba_bytes, depth_bytes, seg_bytes,
-                              physics, config, lighting)
+    # Three brain-input frames concatenated into the render block.
+    frames = [(rgba_bytes, depth_bytes, seg_bytes)] * 3
+    ps = _build_program_state(frames, physics, config, lighting)
 
+    per_frame_render = len(rgba_bytes) + len(depth_bytes) + len(seg_bytes)
     expected_len = (
-        len(rgba_bytes) + len(depth_bytes) + len(seg_bytes)
-        + len(physics) + len(config) + len(lighting)
+        3 * per_frame_render + len(physics) + len(config) + len(lighting)
     )
     assert ps.dtype == np.float32
     assert ps.shape == (expected_len,)
-    # Render bytes should appear at the start, cast from uint8 to float32.
-    np.testing.assert_array_equal(ps[:256], np.arange(256, dtype=np.float32))
-    # Physics labels should appear right after the render block.
-    render_total = len(rgba_bytes) + len(depth_bytes) + len(seg_bytes)
+    # Each frame's leading RGBA bytes appear at the start of its slice,
+    # cast from uint8 to float32.
+    for i in range(3):
+        offset = i * per_frame_render
+        np.testing.assert_array_equal(
+            ps[offset:offset + 256],
+            np.arange(256, dtype=np.float32),
+        )
+    # Physics labels appear right after the 3-frame render block.
+    render_total = 3 * per_frame_render
     np.testing.assert_array_equal(ps[render_total:render_total + 3], physics)
 
 
@@ -184,7 +191,7 @@ def test_generate_scenes_smoke():
 
     expected_keys = {
         "program_states", "physics_labels", "initial_physics_labels",
-        "initial_renders", "early_renders", "late_renders",
+        "initial_renders", "early_renders", "late_renders", "target_renders",
         "behavior_labels", "kinetic_energies", "scene_configs",
         "pillar_grays", "lightings", "metadata",
     }
@@ -204,6 +211,28 @@ def test_generate_scenes_smoke():
     assert len(out["scene_configs"]) == 3
     assert len(out["pillar_grays"]) == 3
     assert len(out["lightings"]) == 3
+
+    # Render layout: three brain-input frames + a held-out behavioral target.
+    per_frame = meta["D_render_per_frame"]
+    assert meta["D_render_bytes"] == 3 * per_frame
+    for key in ("initial_renders", "early_renders", "late_renders",
+                "target_renders"):
+        assert out[key].shape == (3, per_frame)
+
+    # frame_render_indices must partition render_indices exactly.
+    fri = meta["frame_render_indices"]
+    assert fri["initial"] == slice(0, per_frame)
+    assert fri["early"] == slice(per_frame, 2 * per_frame)
+    assert fri["late"] == slice(2 * per_frame, 3 * per_frame)
+    assert meta["render_indices"] == slice(0, 3 * per_frame)
+
+    # pixel_indices points at the LATE frame's RGBA inside program_state.
+    rgba_bytes = (meta["target_pixel_indices"].stop
+                  - meta["target_pixel_indices"].start)
+    assert meta["pixel_indices"].start == fri["late"].start
+    assert meta["pixel_indices"].stop == fri["late"].start + rgba_bytes
+    # target_pixel_indices must lie within the target_renders width.
+    assert meta["target_pixel_indices"].stop <= per_frame
 
 
 @pytest.mark.slow
