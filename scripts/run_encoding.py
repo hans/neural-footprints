@@ -12,10 +12,10 @@ neural, neural_meta = load_neural(snakemake.input.neural)
 
 results = run_encoding_analysis(
     neural, scenes, neural_meta,
-    render_pca_dim=cfg['render_pca_dim'],
+    pixel_pca_dim=cfg['pixel_pca_dim'],
 )
 encoder = results.pop('encoder')
-encoder['r2_render_only'] = results['r2_render_only']
+encoder['r2_pixel_only'] = results['r2_pixel_only']
 encoder['r2_physics_only'] = results['r2_physics_only']
 encoder['r2_combined'] = results['r2_combined']
 save_results(results, snakemake.output.results)
@@ -23,7 +23,7 @@ save_encoder(encoder, snakemake.output.encoder)
 
 # Save plot data
 np.savez_compressed(snakemake.output.plot_data,
-    r2_render_only=results['r2_render_only'],
+    r2_pixel_only=results['r2_pixel_only'],
     r2_physics_only=results['r2_physics_only'],
     r2_combined=results['r2_combined'],
     subsample_means=np.array(results['subsample_means']),

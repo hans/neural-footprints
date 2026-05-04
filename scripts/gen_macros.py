@@ -63,21 +63,21 @@ add("dPhysicsPerObject", str(d_physics_per_obj))
 add("dConfigPerObject", str(d_config_per_obj))
 
 # --- encoding ---
-r2_render = np.array(encoding["r2_render_only"])
+r2_pixel = np.array(encoding["r2_pixel_only"])
 r2_combined = np.array(encoding["r2_combined"])
 delta_r2 = np.array(encoding["delta_r2"])
 
-add("encodingRsqRender", fmt(np.mean(r2_render), 4))
+add("encodingRsqPixel", fmt(np.mean(r2_pixel), 4))
 add("encodingRsqCombined", fmt(np.mean(r2_combined), 4))
 add("encodingDeltaRsq", fmt(np.mean(delta_r2), 4))
 add("controlAccuracy", pct(encoding["control_accuracy"]))
 
 # --- RSA ---
-add("rsaCorrNeuralRender", fmt(rsa["corr_neural_render"], 4))
+add("rsaCorrNeuralPixel", fmt(rsa["corr_neural_pixel"], 4))
 add("rsaCorrNeuralPhysics", fmt(rsa["corr_neural_physics"], 4))
-add("rsaCorrRenderPhysics", fmt(rsa["corr_render_physics"], 4))
+add("rsaCorrPixelPhysics", fmt(rsa["corr_pixel_physics"], 4))
 add("rsaPartialNeuralPhysics", fmt(rsa["partial_neural_physics"], 4))
-add("rsaRatio", fmt(rsa["corr_neural_render"] / max(rsa["corr_neural_physics"], 1e-9), 1))
+add("rsaRatio", fmt(rsa["corr_neural_pixel"] / max(rsa["corr_neural_physics"], 1e-9), 1))
 
 # --- dynamics ---
 r2_phys_fwd = np.array(dynamics["r2_physics_forward"])

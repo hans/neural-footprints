@@ -13,12 +13,12 @@ neural, neural_meta = load_neural(snakemake.input.neural)
 results = run_rsa_analysis(
     neural, scenes, neural_meta,
     rsa_subsample=cfg['rsa_subsample'],
-    render_pca_dim=cfg['render_pca_dim'],
+    pixel_pca_dim=cfg['pixel_pca_dim'],
 )
 
 # Separate large arrays from JSON results
 rdm_neural = results.pop('rdm_neural')
-rdm_render = results.pop('rdm_render')
+rdm_pixel = results.pop('rdm_pixel')
 rdm_physics = results.pop('rdm_physics')
 n_sub = results.pop('n_sub')
 
@@ -27,10 +27,10 @@ save_results(results, snakemake.output.results)
 # Save plot data
 np.savez_compressed(snakemake.output.plot_data,
     rdm_neural=rdm_neural,
-    rdm_render=rdm_render,
+    rdm_pixel=rdm_pixel,
     rdm_physics=rdm_physics,
     n_sub=np.array(n_sub),
-    corr_neural_render=np.array(results['corr_neural_render']),
+    corr_neural_pixel=np.array(results['corr_neural_pixel']),
     corr_neural_physics=np.array(results['corr_neural_physics']),
     partial_corr=np.array(results['partial_neural_physics']),
 )
