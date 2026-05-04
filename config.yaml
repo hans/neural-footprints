@@ -4,7 +4,7 @@ image_size: 64
 n_neurons: 500
 n_timesteps: 120
 noise_level: 0.3
-random_seed: 42
+random_seed: 43
 
 # Generative scene parameters
 # linvel_x is sampled uniformly from [-linvel_x_max, +linvel_x_max].
@@ -33,4 +33,34 @@ pp_pixel_pca_dim: 50
 pp_early_frame: 40
 pp_late_frame: 80
 pp_dropout_rate: 0.05
+
+# Neural generation source: cognitive PP model
+# neural_input = [render_bytes | InverseModel.<pp_neural_layer> | inferred_physics]
+# pp_neural_layer: which hidden layer to tap (h1, h2, h3)
 pp_neural_layer: "h2"
+
+# Inverse-model backbone selector:
+#   'mlp'         — pixel-PCA → MLP (legacy default; uses pp_pixel_pca_dim/pp_hidden_dim)
+#   'softmax_cnn' — raw 3-frame stack → SpatialSoftmaxV2 (uses pp_softmax: block)
+# Code defaults to 'mlp' if the key is missing (back-compat for older branches).
+pp_inverse_backbone: "softmax_cnn"
+
+# SpatialSoftmaxV2 knobs — consulted only when pp_inverse_backbone == 'softmax_cnn'.
+# These reproduce the v2_128_temp_mlp config from the sweep
+# (mean valid-dim R² 0.828, ~21% of gridpool's params).
+pp_softmax:
+  n_filters: 128
+  learned_temp: true
+  temp_per_channel: true
+  include_variance: false
+  hidden_dim: 256
+  head_depth: 3
+  # Dropout in the head's hidden Linears. 0.0 reproduces the validated sweep
+  # (mean valid-dim R² ≈ 0.83); 0.05 enables MC-dropout uncertainty in
+  # predict_stochastic but costs ~0.2 R² on this dataset.
+  dropout_rate: 0.0
+  n_epochs: 200
+  patience: 30
+  min_epochs: 60
+  lr: 1.0e-3
+  batch_size: 64

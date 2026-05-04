@@ -38,94 +38,13 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import numpy as np
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
-from sklearn.metrics import r2_score
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 
 from config import IMAGE_SIZE
+from models import SpatialSoftmaxV2, build_frame_stack
 from scripts.eval_pp import PHYSICS_LABELS, load_scenes_any
-from scripts.eval_pp_cnn_simple import build_frame_stack, compute_valid_dims, train_one
-
-
-# ---------------------------------------------------------------------------
-# Improved spatial-softmax
-# ---------------------------------------------------------------------------
-
-class SpatialSoftmaxV2(nn.Module):
-    """Per-frame softmax-keypoint encoder with learnable temperature.
-
-    Output features per channel: E[x], E[y], and optionally E[x²], E[y²]
-    (the latter pair captures keypoint spread/scale — useful when an object
-    grows or rotates in-plane and the activation map widens).
-    """
-
-    def __init__(self, n_frames, n_channels, image_size, output_dim, *,
-                 n_filters=64, learned_temp=True, temp_per_channel=True,
-                 include_variance=False, hidden_dim=128, head_depth=2):
-        super().__init__()
-        self.n_filters = n_filters
-        self.include_variance = include_variance
-
-        mid = max(32, n_filters // 2)
-        self.conv = nn.Sequential(
-            nn.Conv2d(n_channels, 32, kernel_size=5, stride=2, padding=2),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(32, mid, kernel_size=3, stride=2, padding=1),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(mid, n_filters, kernel_size=3, padding=1),
-        )
-
-        sm_size = image_size // 4
-        ys = torch.linspace(-1.0, 1.0, sm_size)
-        xs = torch.linspace(-1.0, 1.0, sm_size)
-        gy, gx = torch.meshgrid(ys, xs, indexing='ij')
-        self.register_buffer('grid_x', gx.reshape(-1), persistent=False)
-        self.register_buffer('grid_y', gy.reshape(-1), persistent=False)
-
-        # Inverse temperature β so β=1 reproduces the v1 softmax.
-        # Parameterise as log_β so β stays positive without a clamp.
-        if learned_temp:
-            shape = (n_filters,) if temp_per_channel else (1,)
-            self.log_beta = nn.Parameter(torch.zeros(shape))
-        else:
-            self.register_buffer('log_beta', torch.zeros(1), persistent=False)
-
-        per_channel_feats = 4 if include_variance else 2
-        feat_dim = n_frames * n_filters * per_channel_feats
-
-        layers = []
-        d = feat_dim
-        for _ in range(max(0, head_depth - 1)):
-            layers += [nn.Linear(d, hidden_dim), nn.ReLU(inplace=True)]
-            d = hidden_dim
-        layers += [nn.Linear(d, output_dim)]
-        self.head = nn.Sequential(*layers)
-
-    def forward(self, x):
-        B, F_, C, H, W = x.shape
-        feats = self.conv(x.reshape(B * F_, C, H, W))      # (B*F, K, H', W')
-        K, Hs, Ws = feats.shape[1], feats.shape[2], feats.shape[3]
-        flat = feats.reshape(B * F_, K, Hs * Ws)
-
-        beta = self.log_beta.exp()
-        if beta.numel() == 1:
-            scaled = flat * beta
-        else:
-            scaled = flat * beta.reshape(1, K, 1)
-        attn = F.softmax(scaled, dim=-1)                   # (B*F, K, H'*W')
-
-        ex = (attn * self.grid_x).sum(dim=-1)              # (B*F, K)
-        ey = (attn * self.grid_y).sum(dim=-1)
-        if self.include_variance:
-            ex2 = (attn * self.grid_x.pow(2)).sum(dim=-1)
-            ey2 = (attn * self.grid_y.pow(2)).sum(dim=-1)
-            coords = torch.stack([ex, ey, ex2, ey2], dim=-1)
-        else:
-            coords = torch.stack([ex, ey], dim=-1)
-        coords = coords.reshape(B, -1)
-        return self.head(coords)
+from scripts.eval_pp_cnn_simple import compute_valid_dims, train_one
 
 
 # ---------------------------------------------------------------------------
