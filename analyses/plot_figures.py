@@ -471,3 +471,61 @@ def plot_sample_scenes(initial_renders, target_renders, rgba_bytes,
         fig_path = f"{fig_dir}/sample_scenes.pdf"
         plt.savefig(fig_path)
         plt.close()
+
+
+def plot_residual(plot_data, fig_dir="figures"):
+    r2_raw_render = plot_data['r2_raw_render']
+    r2_raw_physics_gt = plot_data['r2_raw_physics_gt']
+    r2_resid_render = plot_data['r2_resid_render']
+    r2_resid_physics_gt = plot_data['r2_resid_physics_gt']
+    var_kept = float(plot_data['residual_variance_fraction'])
+
+    n = len(r2_raw_physics_gt)
+
+    raw_means = np.array([r2_raw_render.mean(), r2_raw_physics_gt.mean()])
+    resid_means = np.array([r2_resid_render.mean(), r2_resid_physics_gt.mean()])
+    raw_sems = np.array([r2_raw_render.std() / np.sqrt(n),
+                         r2_raw_physics_gt.std() / np.sqrt(n)])
+    resid_sems = np.array([r2_resid_render.std() / np.sqrt(n),
+                           r2_resid_physics_gt.std() / np.sqrt(n)])
+
+    with paper_style():
+        fig, axes = plt.subplots(1, 2, figsize=(FULL_WIDTH, 2.4))
+
+        # Panel A: per-neuron scatter, raw vs residualized GT physics R²
+        ax = axes[0]
+        ax.scatter(r2_raw_physics_gt, r2_resid_physics_gt,
+                   s=6, alpha=0.5, color=COLORS['physics'],
+                   edgecolors='none')
+        lo = float(min(r2_raw_physics_gt.min(), r2_resid_physics_gt.min()))
+        hi = float(max(r2_raw_physics_gt.max(), r2_resid_physics_gt.max()))
+        pad = 0.05 * (hi - lo if hi > lo else 1.0)
+        ax.plot([lo - pad, hi + pad], [lo - pad, hi + pad],
+                color='gray', linestyle='--', linewidth=0.8, label='y = x')
+        ax.axhline(0, color='gray', linestyle=':', linewidth=0.6)
+        ax.set_xlim(lo - pad, hi + pad)
+        ax.set_ylim(lo - pad, hi + pad)
+        ax.set_xlabel('R² (raw neural ~ GT physics)')
+        ax.set_ylabel('R² (residualized neural ~ GT physics)')
+        ax.set_title('Per-neuron collapse after render-residualization')
+        ax.legend(loc='upper left')
+
+        # Panel B: grouped bars — raw vs residualized for each predictor set
+        ax = axes[1]
+        x = np.arange(2)
+        width = 0.35
+        ax.bar(x - width / 2, raw_means, width, yerr=raw_sems,
+               color=COLORS['pixels'], capsize=3, label='Raw neural')
+        ax.bar(x + width / 2, resid_means, width, yerr=resid_sems,
+               color=COLORS['physics'], capsize=3, label='Residualized neural')
+        ax.axhline(0, color='gray', linestyle='--', linewidth=0.6)
+        ax.set_xticks(x)
+        ax.set_xticklabels(['Render', 'GT Physics'])
+        ax.set_ylabel('Mean R²')
+        ax.set_title(f'Encoding R² (residual var fraction = {var_kept:.2f})')
+        ax.legend()
+
+        plt.tight_layout()
+        fig_path = f"{fig_dir}/residual_analysis.pdf"
+        plt.savefig(fig_path)
+        plt.close()
