@@ -1,11 +1,17 @@
 """Generate block-structured neural activity for the subtractive pipeline.
 
 Sensory Block reads render-PCA features (whitened PCA of program_state's
-render slice). Abstract Block reads [h2 activations | inferred_N] from the
-trained CardinalityModel. The two blocks are projected with different weight
-variances and assigned contiguous regions on a 2-D grid.
+render slice). The Abstract Block has two modes:
 
-Output: data/neural_subtractive_{regime}.npz
+  * mode="ground_truth": abstract input is just the scene's true N as a
+    1-D scalar. Cleaner upper-bound variant; oracle val_r2 = 1.0.
+  * mode="inferred":     abstract input is [h2 | inferred_N] from a trained
+    CardinalityModel that learned numerosity from the same pixels.
+
+The two blocks are projected with different weight variances and assigned
+contiguous regions on a 2-D grid.
+
+Output: data/neural_subtractive_{regime}_{mode}.npz
 """
 
 import sys, os
@@ -27,12 +33,12 @@ from analyses.block_projection import (
 cfg = load_config()
 sub_cfg = cfg['subtractive']
 regime = snakemake.wildcards.regime  # noqa: F821
+mode   = snakemake.wildcards.mode    # noqa: F821
 
-print(f"\nGenerating block-structured neural activity (regime={regime})")
+print(f"\nGenerating block-structured neural activity (regime={regime}, mode={mode})")
 print("=" * 60)
 
 scenes = load_numerosity_scenes(snakemake.input.scenes)  # noqa: F821
-acts = np.load(snakemake.input.cardinality_acts)  # noqa: F821
 
 render = scenes['program_states']  # already render-only
 print(f"  render shape: {render.shape}")
@@ -44,10 +50,26 @@ render_pca = PCA(n_components=sub_cfg['render_pca_dim_for_projection'],
 render_features = render_pca.fit_transform(render_scaler.fit_transform(render))
 print(f"  render PCA features (sensory): {render_features.shape}")
 
-hidden_acts = acts['hidden_acts']
-inferred_N = acts['inferred_N'].reshape(-1, 1)
-abstract_input = np.concatenate([hidden_acts, inferred_N], axis=1).astype(np.float32)
-print(f"  abstract input [h2 | inferred_N]: {abstract_input.shape}")
+if mode == "ground_truth":
+    # Oracle: drive the abstract block from true N. Block-projection z-scores
+    # the input across scenes, so binary N → ±1 endpoints. abstract_weight_std
+    # was tuned for the 257-D inferential input; with D_b=1 it controls the
+    # full per-neuron condition shift (see plan §2). Don't retune yet.
+    inferred_N = scenes['N'].astype(np.float32)
+    abstract_input = inferred_N.reshape(-1, 1)
+    cardinality_val_r2 = 1.0
+    print(f"  abstract input [ground-truth N]: {abstract_input.shape}")
+elif mode == "inferred":
+    acts = np.load(snakemake.input.cardinality_acts)  # noqa: F821
+    hidden_acts = acts['hidden_acts']
+    inferred_N = acts['inferred_N']
+    abstract_input = np.concatenate(
+        [hidden_acts, inferred_N.reshape(-1, 1)], axis=1
+    ).astype(np.float32)
+    cardinality_val_r2 = float(acts['val_r2'])
+    print(f"  abstract input [h2 | inferred_N]: {abstract_input.shape}")
+else:
+    raise ValueError(f"Unknown subtractive mode: {mode!r}")
 
 sensory_region  = tuple(tuple(x) for x in sub_cfg['sensory_grid_region'])
 abstract_region = tuple(tuple(x) for x in sub_cfg['abstract_grid_region'])
@@ -94,7 +116,8 @@ np.savez_compressed(
     condition=scenes['condition'],
     N=scenes['N'],
     inferred_N=inferred_N.astype(np.float32).ravel(),
-    cardinality_val_r2=acts['val_r2'],
+    cardinality_val_r2=np.array(cardinality_val_r2, dtype=np.float32),
     regime=np.array(regime),
+    mode=np.array(mode),
 )
 print(f"  Saved -> {snakemake.output.neural}")  # noqa: F821

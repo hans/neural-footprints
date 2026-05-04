@@ -1,9 +1,10 @@
 """Plotting for the subtractive-analysis pipeline.
 
-Inputs (Snakemake): list of data/subtractive_{regime}_plot_data.npz files.
+Inputs (Snakemake): list of data/subtractive_{regime}_{mode}_plot_data.npz
+files (one per regime; all sharing the same mode).
 Outputs:
-    figures/subtractive_{regime}.pdf      (per-regime 2x3 figure)
-    figures/subtractive_headline.pdf      (cross-regime comparison)
+    figures/subtractive_{regime}_{mode}.pdf      (per-regime 2x3 figure)
+    figures/subtractive_headline_{mode}.pdf      (cross-regime comparison)
 """
 
 import sys, os
@@ -23,9 +24,17 @@ REGIMES_ORDER = ['confounded', 'area_controlled']
 def _load(path):
     d = dict(np.load(path, allow_pickle=False))
     d['regime'] = str(d['regime'])
+    d['mode'] = str(d['mode']) if 'mode' in d else 'inferred'
     d['block_names'] = [str(s) for s in d['block_names']]
     d['grid_shape'] = tuple(int(x) for x in d['grid_shape'])
     return d
+
+
+def _mode_label(mode):
+    return {
+        'ground_truth': 'ground-truth N',
+        'inferred':     'inferential $\\hat N$',
+    }.get(mode, mode)
 
 
 def _block_color(name):
@@ -74,6 +83,7 @@ def _per_regime_figure(data, *, out_path):
     inf_low  = float(data['inferred_N_low_mean'])
     inf_high = float(data['inferred_N_high_mean'])
     regime = data['regime']
+    mode = data['mode']
 
     # Layout grid as a heatmap; build masks for FDR / Bonferroni significance
     n_neurons = t_stats.size
@@ -170,17 +180,22 @@ def _per_regime_figure(data, *, out_path):
         ax.legend(frameon=False)
         ax.set_ylim(0, 1.0)
 
+        if mode == 'ground_truth':
+            subtitle = f"abstract input: ground-truth N (oracle)"
+        else:
+            subtitle = (
+                f"cognitive model val $R^2$ = {val_r2:.2f}  |  "
+                f"$\\hat N$ low = {inf_low:.1f}, high = {inf_high:.1f}"
+            )
         fig.suptitle(
-            f"Subtractive analysis ({regime})  "
-            f"--  cognitive model val $R^2$ = {val_r2:.2f}  |  "
-            f"$\\hat N$ low = {inf_low:.1f}, high = {inf_high:.1f}",
+            f"Subtractive analysis ({regime}, {_mode_label(mode)})  --  {subtitle}",
             fontsize=8, y=1.02,
         )
         fig.savefig(out_path)
         plt.close(fig)
 
 
-def _headline_figure(per_regime, *, out_path):
+def _headline_figure(per_regime, *, mode, out_path):
     """Cross-regime comparison: FDR-thresholded brain blob side by side."""
     n = len(per_regime)
     with paper_style():
@@ -224,7 +239,7 @@ def _headline_figure(per_regime, *, out_path):
                 ax.set_ylabel('grid row')
 
         fig.suptitle(
-            'No threshold rescues the abstract block',
+            f'No threshold rescues the abstract block  ({_mode_label(mode)})',
             fontsize=9, y=1.04,
         )
         fig.savefig(out_path)
@@ -236,18 +251,32 @@ def _headline_figure(per_regime, *, out_path):
 inputs = list(snakemake.input)  # noqa: F821
 figure_outputs = list(snakemake.output.figures)  # noqa: F821
 headline_output = snakemake.output.headline  # noqa: F821
+mode_wc = snakemake.wildcards.mode  # noqa: F821
 
 # Map each input plot_data to its regime-specific output by matching the
 # regime substring; this avoids relying on Snakemake's input/output ordering.
-per_regime = {_load(p)['regime']: _load(p) for p in inputs}
+loaded = [_load(p) for p in inputs]
+per_regime = {d['regime']: d for d in loaded}
+
+modes_seen = {d['mode'] for d in loaded}
+assert modes_seen == {mode_wc}, (
+    f"plot_subtractive expects all inputs to share mode={mode_wc!r}, "
+    f"got {modes_seen}"
+)
+
 for fig_path in figure_outputs:
-    # Filename pattern: figures/subtractive_<regime>.pdf
-    base = os.path.basename(fig_path).removeprefix('subtractive_').removesuffix('.pdf')
+    # Filename pattern: figures/subtractive_<regime>_<mode>.pdf
+    base = (
+        os.path.basename(fig_path)
+        .removeprefix('subtractive_')
+        .removesuffix('.pdf')
+        .removesuffix(f'_{mode_wc}')
+    )
     d = per_regime[base]
-    print(f"Plotting per-regime figure ({base}) -> {fig_path}")
+    print(f"Plotting per-regime figure ({base}, {mode_wc}) -> {fig_path}")
     _per_regime_figure(d, out_path=fig_path)
 
-print(f"Plotting headline cross-regime figure -> {headline_output}")
-_headline_figure(per_regime, out_path=headline_output)
+print(f"Plotting headline cross-regime figure ({mode_wc}) -> {headline_output}")
+_headline_figure(per_regime, mode=mode_wc, out_path=headline_output)
 
 print("Done.")

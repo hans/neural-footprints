@@ -1,8 +1,8 @@
 """Run the subtractive analysis on block-structured neural activity.
 
 Outputs:
-  outputs/subtractive_{regime}_results.json
-  data/subtractive_{regime}_plot_data.npz
+  outputs/subtractive_{regime}_{mode}_results.json
+  data/subtractive_{regime}_{mode}_plot_data.npz
 """
 
 import sys, os
@@ -18,8 +18,9 @@ from analyses.subtractive import run_subtractive_analysis
 cfg = load_config()
 sub_cfg = cfg['subtractive']
 regime = snakemake.wildcards.regime  # noqa: F821
+mode   = snakemake.wildcards.mode    # noqa: F821
 
-print(f"\nRunning subtractive analysis (regime={regime})")
+print(f"\nRunning subtractive analysis (regime={regime}, mode={mode})")
 print("=" * 60)
 
 data = np.load(snakemake.input.neural)  # noqa: F821
@@ -44,6 +45,7 @@ results = run_subtractive_analysis(
     thresholds_uncorrected=tuple(sub_cfg['thresholds_uncorrected']),
 )
 results['regime'] = regime
+results['mode'] = mode
 results['cardinality_val_r2'] = cardinality_val_r2
 results['inferred_N_low_mean']  = float(inferred_N[condition == 0].mean())
 results['inferred_N_high_mean'] = float(inferred_N[condition == 1].mean())
@@ -66,6 +68,7 @@ plot_data['cardinality_val_r2'] = np.array(cardinality_val_r2)
 plot_data['inferred_N_low_mean']  = np.array(results['inferred_N_low_mean'])
 plot_data['inferred_N_high_mean'] = np.array(results['inferred_N_high_mean'])
 plot_data['regime'] = np.array(regime)
+plot_data['mode'] = np.array(mode)
 
 save_results(results, snakemake.output.results)  # noqa: F821
 np.savez_compressed(snakemake.output.plot_data, **plot_data)  # noqa: F821

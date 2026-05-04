@@ -2,6 +2,13 @@ configfile: "config.yaml"
 
 
 SUBTRACTIVE_REGIMES = ["confounded", "area_controlled"]
+SUBTRACTIVE_MODES = ["ground_truth", "inferred"]
+DEFAULT_SUBTRACTIVE_MODE = "ground_truth"
+
+
+wildcard_constraints:
+    regime = "confounded|area_controlled",
+    mode   = "ground_truth|inferred",
 
 
 rule all:
@@ -233,37 +240,65 @@ rule train_cardinality:
 rule generate_neural_subtractive:
     input:
         scenes="data/numerosity_scenes_{regime}.npz",
-        cardinality_acts="data/cardinality_activations_{regime}.npz",
+        cardinality_acts=lambda w: (
+            f"data/cardinality_activations_{w.regime}.npz"
+            if w.mode == "inferred" else []
+        ),
     output:
-        neural="data/neural_subtractive_{regime}.npz",
+        neural="data/neural_subtractive_{regime}_{mode}.npz",
     script:
         "scripts/gen_neural_subtractive.py"
 
 
 rule subtractive:
     input:
-        neural="data/neural_subtractive_{regime}.npz",
+        neural="data/neural_subtractive_{regime}_{mode}.npz",
     output:
-        results="outputs/subtractive_{regime}_results.json",
-        plot_data="data/subtractive_{regime}_plot_data.npz",
+        results="outputs/subtractive_{regime}_{mode}_results.json",
+        plot_data="data/subtractive_{regime}_{mode}_plot_data.npz",
     script:
         "scripts/run_subtractive.py"
 
 
 rule plot_subtractive:
     input:
-        expand("data/subtractive_{regime}_plot_data.npz",
+        expand("data/subtractive_{regime}_{{mode}}_plot_data.npz",
                regime=SUBTRACTIVE_REGIMES),
     output:
-        figures=expand("figures/subtractive_{regime}.pdf",
+        figures=expand("figures/subtractive_{regime}_{{mode}}.pdf",
                        regime=SUBTRACTIVE_REGIMES),
-        headline="figures/subtractive_headline.pdf",
+        headline="figures/subtractive_headline_{mode}.pdf",
     script:
         "scripts/plot_subtractive.py"
 
 
+rule evaluate_subtractive:
+    input:
+        results=expand(
+            "outputs/subtractive_{regime}_{{mode}}_results.json",
+            regime=SUBTRACTIVE_REGIMES,
+        ),
+    output:
+        "outputs/evaluation_subtractive_{mode}.json",
+    script:
+        "scripts/run_evaluate_subtractive.py"
+
+
 rule subtractive_all:
     input:
-        expand("figures/subtractive_{regime}.pdf",
-               regime=SUBTRACTIVE_REGIMES),
-        "figures/subtractive_headline.pdf",
+        expand("figures/subtractive_{regime}_{mode}.pdf",
+               regime=SUBTRACTIVE_REGIMES,
+               mode=[DEFAULT_SUBTRACTIVE_MODE]),
+        f"figures/subtractive_headline_{DEFAULT_SUBTRACTIVE_MODE}.pdf",
+        f"outputs/evaluation_subtractive_{DEFAULT_SUBTRACTIVE_MODE}.json",
+
+
+rule subtractive_all_modes:
+    input:
+        expand("figures/subtractive_{regime}_{mode}.pdf",
+               regime=SUBTRACTIVE_REGIMES,
+               mode=SUBTRACTIVE_MODES),
+        expand("figures/subtractive_headline_{mode}.pdf",
+               mode=SUBTRACTIVE_MODES),
+        expand("outputs/evaluation_subtractive_{mode}.json",
+               mode=SUBTRACTIVE_MODES),
