@@ -17,6 +17,9 @@ render_pca_dim: 500
 behavioral_pca_dim: 50
 behavioral_objective: "next_frame_pixels"
 
+# Camera — wider FOV keeps the moving object on-screen for more frames
+camera_fov: 90
+
 # Predictive processing
 pp_hidden_dim: 256
 pp_pixel_pca_dim: 50
