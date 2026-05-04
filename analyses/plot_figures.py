@@ -76,10 +76,17 @@ def plot_encoding(plot_data, fig_dir="figures"):
 def plot_rsa(plot_data, fig_dir="figures"):
     rdm_neural = plot_data['rdm_neural']
     rdm_pixel = plot_data['rdm_pixel']
-    rdm_physics = plot_data['rdm_physics']
+    rdm_physics_gt = plot_data['rdm_physics']
     n_sub = int(plot_data['n_sub'])
     corr_neural_pixel = float(plot_data['corr_neural_pixel'])
-    corr_neural_physics = float(plot_data['corr_neural_physics'])
+    corr_neural_physics_gt = float(plot_data['corr_neural_physics'])
+
+    keys = plot_data.files if hasattr(plot_data, 'files') else plot_data
+    has_inferred = 'rdm_inferred' in keys
+    rdm_physics_inf = plot_data['rdm_inferred'] if has_inferred else None
+    corr_neural_physics_inf = (
+        float(plot_data['corr_neural_inferred']) if has_inferred else None
+    )
 
     with paper_style():
         # Reorder scenes via hierarchical clustering on pixel RDM
@@ -92,33 +99,37 @@ def plot_rsa(plot_data, fig_dir="figures"):
         order = order[:n_show]
         rdm_neural_sq = squareform(rdm_neural)[np.ix_(order, order)]
         rdm_pixel_sq = rdm_pixel_full[np.ix_(order, order)]
-        rdm_physics_sq = squareform(rdm_physics)[np.ix_(order, order)]
+        rdm_physics_gt_sq = squareform(rdm_physics_gt)[np.ix_(order, order)]
+        rdm_physics_inf_sq = (
+            squareform(rdm_physics_inf)[np.ix_(order, order)]
+            if has_inferred else None
+        )
 
-        # Shared color range across all RDMs
-        all_rdms = [rdm_neural_sq, rdm_pixel_sq, rdm_physics_sq]
+        all_rdms = [rdm_neural_sq, rdm_pixel_sq, rdm_physics_gt_sq]
+        if has_inferred:
+            all_rdms.append(rdm_physics_inf_sq)
         vmin = min(r.min() for r in all_rdms)
         vmax = max(r.max() for r in all_rdms)
 
-        # Top row: RDM | colorbar | RDM; bottom row: RDM | bar chart
-        fig = plt.figure(figsize=(COL_WIDTH, COL_WIDTH * 0.9))
-        gs = fig.add_gridspec(2, 3, width_ratios=[1, 0.05, 1],
-                              hspace=0.45, wspace=0.15)
+        # 3 rows: top = Neural | cbar | Sensory; mid = GT Phys | _ | Inferred Phys;
+        # bottom = bar chart spanning all columns
+        fig = plt.figure(figsize=(COL_WIDTH, COL_WIDTH * 1.35))
+        gs = fig.add_gridspec(3, 3, width_ratios=[1, 0.05, 1],
+                              height_ratios=[1, 1, 0.8],
+                              hspace=0.5, wspace=0.15)
 
-        # Top-left: Neural RDM
         ax_nr = fig.add_subplot(gs[0, 0])
         im = ax_nr.imshow(rdm_neural_sq, cmap='viridis', aspect='equal',
                           vmin=vmin, vmax=vmax)
         ax_nr.set_title('Neural RDM')
         ax_nr.set_xticks([]); ax_nr.set_yticks([])
 
-        # Top-right: Pixel RDM
         ax_rr = fig.add_subplot(gs[0, 2])
         ax_rr.imshow(rdm_pixel_sq, cmap='viridis', aspect='equal',
                      vmin=vmin, vmax=vmax)
         ax_rr.set_title(f'{LABEL_SENSORY} RDM')
         ax_rr.set_xticks([]); ax_rr.set_yticks([])
 
-        # Vertical colorbar between top two RDMs
         cax = fig.add_subplot(gs[0, 1])
         cb = fig.colorbar(im, cax=cax, orientation='vertical')
         cb.ax.tick_params(labelsize=4, length=1.5, pad=1)
@@ -126,18 +137,30 @@ def plot_rsa(plot_data, fig_dir="figures"):
         cb.set_ticklabels([f'{vmin:.1f}', f'{(vmin+vmax)/2:.1f}',
                            f'{vmax:.1f}'])
 
-        # Bottom-left: Physics RDM
-        ax_pr = fig.add_subplot(gs[1, 0])
-        ax_pr.imshow(rdm_physics_sq, cmap='viridis', aspect='equal',
+        ax_pg = fig.add_subplot(gs[1, 0])
+        ax_pg.imshow(rdm_physics_gt_sq, cmap='viridis', aspect='equal',
                      vmin=vmin, vmax=vmax)
-        ax_pr.set_title(f'{LABEL_PHYSICS} RDM')
-        ax_pr.set_xticks([]); ax_pr.set_yticks([])
+        ax_pg.set_title(f'{LABEL_PHYSICS} RDM (GT)')
+        ax_pg.set_xticks([]); ax_pg.set_yticks([])
 
-        # Correlation bar plot spanning bottom middle+right
-        ax = fig.add_subplot(gs[1, 2])
-        labels = [f'Neural\u2013\n{LABEL_SENSORY}', f'Neural\u2013\n{LABEL_PHYSICS}']
-        values = [corr_neural_pixel, corr_neural_physics]
+        if has_inferred:
+            ax_pi = fig.add_subplot(gs[1, 2])
+            ax_pi.imshow(rdm_physics_inf_sq, cmap='viridis', aspect='equal',
+                         vmin=vmin, vmax=vmax)
+            ax_pi.set_title(f'{LABEL_PHYSICS} RDM (inferred)')
+            ax_pi.set_xticks([]); ax_pi.set_yticks([])
+
+        ax = fig.add_subplot(gs[2, :])
+        labels = [
+            f'Neural\u2013\n{LABEL_SENSORY}',
+            f'Neural\u2013\n{LABEL_PHYSICS}\n(GT)',
+        ]
+        values = [corr_neural_pixel, corr_neural_physics_gt]
         colors = [COLORS['sensory'], COLORS['physics']]
+        if has_inferred:
+            labels.append(f'Neural\u2013\n{LABEL_PHYSICS}\n(inferred)')
+            values.append(corr_neural_physics_inf)
+            colors.append(COLORS['control'])
         bars = ax.bar(labels, values, color=colors, width=0.6)
         ax.set_ylabel('Spearman r')
         ax.set_title('RSA correlations')
@@ -311,25 +334,34 @@ def plot_predicted_frames_compact(plot_data, fig_dir="figures", scene_idx=1):
 def plot_dynamics(plot_data, fig_dir="figures"):
     r2_physics_forward = plot_data['r2_physics_forward']
     r2_pixel_forward = plot_data['r2_pixel_forward']
+    r2_inferred_forward = plot_data['r2_inferred_forward'] if 'r2_inferred_forward' in plot_data else None
     n_neurons = len(r2_physics_forward)
     mean_r2_physics = r2_physics_forward.mean()
     mean_r2_pixel = r2_pixel_forward.mean()
 
+    sem = lambda x: x.std() / np.sqrt(n_neurons)
+
     with paper_style():
-        fig, ax1 = plt.subplots(1, 1, figsize=(COL_WIDTH * 0.6, 2.2))
+        fig, ax1 = plt.subplots(1, 1, figsize=(COL_WIDTH * 0.7, 2.2))
 
         bar_width = 0.5
-        colors = [COLORS['sensory'], COLORS['physics']]
-        labels = [LABEL_SENSORY, LABEL_PHYSICS]
+        if r2_inferred_forward is not None:
+            mean_r2_inferred = r2_inferred_forward.mean()
+            colors = [COLORS['sensory'], COLORS['control'], COLORS['physics']]
+            labels = [LABEL_SENSORY, 'Inferred\nphysics', f'{LABEL_PHYSICS}\n(GT)']
+            heights = [mean_r2_pixel, mean_r2_inferred, mean_r2_physics]
+            errs = [sem(r2_pixel_forward), sem(r2_inferred_forward), sem(r2_physics_forward)]
+        else:
+            colors = [COLORS['sensory'], COLORS['physics']]
+            labels = [LABEL_SENSORY, LABEL_PHYSICS]
+            heights = [mean_r2_pixel, mean_r2_physics]
+            errs = [sem(r2_pixel_forward), sem(r2_physics_forward)]
 
-        bars1 = ax1.bar(labels, [mean_r2_pixel, mean_r2_physics],
-                        width=bar_width, color=colors,
-                        yerr=[r2_pixel_forward.std() / np.sqrt(n_neurons),
-                              r2_physics_forward.std() / np.sqrt(n_neurons)],
-                        capsize=3)
+        bars1 = ax1.bar(labels, heights, width=bar_width, color=colors,
+                        yerr=errs, capsize=3)
         ax1.set_ylabel('Future neural R\u00b2')
         ax1.set_title('Future brain state prediction')
-        for bar, val in zip(bars1, [mean_r2_pixel, mean_r2_physics]):
+        for bar, val in zip(bars1, heights):
             ax1.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.01,
                      f'{val:.3f}', ha='center', va='bottom', fontweight='bold')
 
