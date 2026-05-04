@@ -26,11 +26,11 @@ Synthetic "brain data" produced by random linear projection of program state plu
 **Behavior label.**
 Binary label derived from final kinetic energy (median split). Recoverable from physics labels (which include velocity and mass) but not from pixels (which carry no velocity signal).
 
-**Render model** / **Physics model.**
-The two competing analysis-side models. The render model uses PCA-reduced render state as regressors; the physics model uses the low-dimensional physics labels. The core result is a double dissociation: the render model explains neural variance but not behavior; the physics model explains behavior but not neural variance.
+**Pixel model** / **Physics model.**
+The two competing analysis-side models. The pixel model uses PCA-reduced 3-frame brain pixels (RGBA only — what a camera would capture) as regressors; the physics model uses the low-dimensional physics labels. The core result is a double dissociation: the pixel model explains neural variance but not behavior; the physics model explains behavior but not neural variance. Pixels (not full render state) are used everywhere on the analysis side because that's what a real scientist would have access to — depth and segmentation buffers leak into neural activity through the random projection but are deliberately excluded from prediction analyses.
 
 **Information asymmetry.**
-The structural reason variance-based methods fail. Render dimensions vastly outnumber physics dimensions in the program state, so encoding models, RSA, and PCA are dominated by render structure and systematically miss the physics signal — even though physics is linearly present and causally determines scene dynamics.
+The structural reason variance-based methods fail. Render dimensions vastly outnumber physics dimensions in the program state, so encoding models, RSA, and PCA — fit to neural activity dominated by render structure — systematically miss the physics signal, even though physics is linearly present and causally determines scene dynamics. Restricting the analysis side to pixels (omitting depth/seg) does not change this story: pixel structure alone is still hundreds of times higher-dimensional than the physics labels.
 
 ---
 
@@ -135,13 +135,20 @@ from external measurements rather than from the neural code itself.
 |---|---|---|
 | `neural_activity` | W @ program_state + noise | YES — this is the output |
 | `program_states` | render + physics + config + lighting concat | YES — this is the input to W |
-| `render_indices` | render portion of program_state | YES (as part of program_state) |
+| 3-frame brain pixels | `extract_brain_pixels(program_states, metadata)` — RGBA only across the three brain-input frames | YES (as a subset of program_state) |
 | `physics_labels` | PyBullet API calls | YES — concatenated into program_state |
 | `behavior_labels` | KE median split from physics | NO — computed separately |
 
-The critical asymmetry: render dimensions vastly outnumber physics dimensions
+Encoding, RSA, residualization, dynamics, and dissociation **all** consume
+the same 3-frame brain pixel matrix as their sensory regressor — produced by
+`extract_brain_pixels`. Depth and segmentation buffers exist in the program
+state and so leak into neural activity through W, but are deliberately
+withheld from the analysis side: that's what a scientist with only camera
+output would face.
+
+The critical asymmetry: pixel dimensions vastly outnumber physics dimensions
 in the program state (hundreds-to-one ratio). Encoding models, RSA, and PCA
-are dominated by render structure and systematically miss the physics signal —
+are dominated by pixel structure and systematically miss the physics signal —
 even though physics is linearly present and causally determines scene dynamics.
 
 ---
@@ -154,7 +161,7 @@ even though physics is linearly present and causally determines scene dynamics.
 
 Three panels:
 
-1. **R² bar plot.** Two bars: "Sensory" (render-only) vs. "Full" (render + physics).
+1. **R² bar plot.** Two bars: "Sensory" (pixels-only) vs. "Full" (pixels + physics).
    Near-identical height, annotated with ΔR².
    Message: adding physics to the encoding model does essentially nothing.
 
@@ -168,22 +175,22 @@ Three panels:
    Establishes that the physics labels are genuinely informative — the failure
    to detect them is a methodological failure, not a sign they're unimportant.
 
-### Figure 2: RSA Dominated by Render Structure
+### Figure 2: RSA Dominated by Pixel Structure
 **File:** `figures/rsa_analysis.png`
 **Source:** `analyses/rsa.py`
 
 Four panels:
 
 1. **Neural RDM** heatmap (100×100 subsample)
-2. **Render RDM** heatmap
+2. **Pixel RDM** heatmap (3-frame brain pixels)
 3. **Physics RDM** heatmap
 4. **Correlation bar plot.** Three bars:
-   - Neural ↔ Render (dominant)
+   - Neural ↔ Pixel (dominant)
    - Neural ↔ Physics (small)
-   - Neural ↔ Physics | Render (near zero after partialing)
+   - Neural ↔ Physics | Pixel (near zero after partialing)
 
-   Message: neural similarity structure tracks render structure, not physics.
-   What little physics signal exists is explained away by shared render variance.
+   Message: neural similarity structure tracks pixel structure, not physics.
+   What little physics signal exists is explained away by shared pixel variance.
 
 ### Figure 3: R² vs. Behavioral Sufficiency Dissociation — NEW
 **File:** `figures/dissociation.png`
@@ -201,21 +208,21 @@ Two "models" are compared:
 
 | Model | What it uses | Neural R² | Behavior prediction |
 |---|---|---|---|
-| Render model | render PCA (RGBA + depth + seg) | HIGH | LOW (near chance) |
+| Pixel model | pixel PCA (3-frame RGBA) | HIGH | LOW (near chance) |
 | Physics model | API physics labels | LOW | HIGH |
 
-The render model accounts for most of the neural variance but is useless for
+The pixel model accounts for most of the neural variance but is useless for
 predicting what happens in the scene. The physics model is sufficient for
 explaining environment dynamics but adds basically nothing to the encoding model.
 
 **Panel layout — 2 panels side by side:**
 
 1. **Left panel: Neural R² contribution.**
-   Two bars: Render model R² (tall) vs. Physics model unique R² (short).
+   Two bars: Pixel model R² (tall) vs. Physics model unique R² (short).
    Y-axis: "Neural variance explained (R²)"
 
 2. **Right panel: Behavioral prediction accuracy.**
-   Two bars: Render model → behavior (near chance) vs. Physics model → behavior (high).
+   Two bars: Pixel model → behavior (near chance) vs. Physics model → behavior (high).
    Y-axis: "Behavior prediction accuracy"
    Dashed line at 50% (chance).
 
@@ -245,8 +252,10 @@ All pipeline parameters live in `config.yaml`. Key settings:
 2. **False positive simulation not built.** The Canada vs. Mexico pixel
    decoding demonstration is a separate experiment.
 
-3. **Pixel/render slice consistency across analyses.** Previously, encoding
-   used all render buffers while RSA and dissociation used RGBA only. This was
-   fixed to use the full render slice everywhere. **Before finalizing results,
-   verify all analyses use the same render slice** — this kind of silent
-   mismatch can change numerical outcomes without any obvious error.
+3. **Pixel/render slice consistency across analyses.** Resolved: every
+   prediction analysis (encoding, RSA, residual, dynamics, dissociation) now
+   consumes 3-frame brain pixels via `extract_brain_pixels` in
+   `scene_generator.py`. Depth and segmentation buffers are excluded from the
+   analysis side — they exist in `program_state` and so leak into neural
+   activity through the random projection, but the analyst can't see them,
+   matching what a real scientist with camera output would face.

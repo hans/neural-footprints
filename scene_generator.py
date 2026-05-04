@@ -471,6 +471,33 @@ def _frame_render_vec(rgba_bytes, depth_bytes, seg_bytes):
                          dtype=np.uint8).astype(np.float32)
 
 
+def extract_brain_pixels(states, metadata):
+    """RGBA bytes from all three brain-input frames, concatenated.
+
+    `states` is any 2D array laid out like `program_states` (or `resim_*`
+    program states): the leading block is three per-frame chunks of
+    [RGBA | depth | seg]. This pulls just the RGBA portion of each frame.
+
+    The result is what every prediction analysis (encoding, RSA, residual,
+    dynamics, dissociation) consumes — it's the input a real scientist
+    would have, given only camera output.
+    """
+    fri = metadata['frame_render_indices']
+    rgba_bytes = (metadata['target_pixel_indices'].stop
+                  - metadata['target_pixel_indices'].start)
+    return np.concatenate(
+        [states[:, s.start:s.start + rgba_bytes]
+         for s in (fri['initial'], fri['early'], fri['late'])],
+        axis=1,
+    )
+
+
+def extract_frame_pixels(frame_data, metadata):
+    """RGBA bytes from a single-frame render array (initial/early/late/target_renders)."""
+    s = metadata['target_pixel_indices']
+    return frame_data[:, s]
+
+
 def _build_program_state(frame_renders, physics_labels,
                          scene_config_vec, lighting_vec):
     """

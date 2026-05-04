@@ -3,12 +3,14 @@ Residual encoding analysis.
 
 Tests the canonical two-step residualization procedure used in neuroscience:
 regress sensory predictors out of neural activity, then ask whether the
-residual variance is still predicted by abstract features.
+residual variance is still predicted by abstract features. Sensory
+predictors are the 3-frame brain pixels (RGBA only) — same input the
+encoding/RSA/dynamics analyses consume.
 
 Procedure (single-pass, matching published practice):
 
-  1. y_resid = y - cross_val_predict(RidgeCV, X_render_pca, y, cv=5)
-  2. For each predictor set X (render, gt physics):
+  1. y_resid = y - cross_val_predict(RidgeCV, X_pixel_pca, y, cv=5)
+  2. For each predictor set X (pixels, gt physics):
         ŷ = cross_val_predict(RidgeCV, X, y_resid, cv=5)
         R² per neuron between y_resid and ŷ.
 
@@ -25,7 +27,8 @@ from sklearn.linear_model import RidgeCV
 from sklearn.model_selection import KFold, cross_val_predict
 from sklearn.preprocessing import StandardScaler
 
-from analyses.encoding import pca_reduce_render
+from analyses.encoding import pca_reduce_pixels
+from scene_generator import extract_brain_pixels
 
 
 def _r2_per_neuron(y_true, y_pred):
@@ -52,12 +55,12 @@ def run_residual_analysis(neural_activity, scenes, neural_meta,
     report identical numbers.
     """
     print("\n" + "=" * 60)
-    print("RESIDUAL ANALYSIS: encoding on render-residualized neural")
+    print("RESIDUAL ANALYSIS: encoding on pixel-residualized neural")
     print("=" * 60)
 
     program_states = scenes['program_states']
     physics_labels = scenes['physics_labels']
-    render_indices = scenes['metadata']['render_indices']
+    metadata = scenes['metadata']
 
     n_scenes, n_neurons = neural_activity.shape
     print(f"  n_scenes={n_scenes}, n_neurons={n_neurons}")
@@ -66,16 +69,16 @@ def run_residual_analysis(neural_activity, scenes, neural_meta,
     alphas = np.logspace(-2, 6, 20)
 
     # --- Predictor matrices ---
-    print(f"\nReducing render slice to {render_pca_dim} PCA components...")
-    render_data = program_states[:, render_indices]
-    render_pca, pca, _ = pca_reduce_render(render_data, render_pca_dim,
-                                           random_state=random_state)
+    print(f"\nReducing brain pixels to {render_pca_dim} PCA components...")
+    pixel_data = extract_brain_pixels(program_states, metadata)
+    pixel_pca, pca, _ = pca_reduce_pixels(pixel_data, render_pca_dim,
+                                          random_state=random_state)
     print(f"  PCA explained variance: {pca.explained_variance_ratio_.sum():.2%}")
 
     physics_scaled = StandardScaler().fit_transform(physics_labels)
 
     predictor_sets = {
-        'render': render_pca,
+        'render': pixel_pca,
         'physics_gt': physics_scaled,
     }
 
@@ -88,9 +91,9 @@ def run_residual_analysis(neural_activity, scenes, neural_meta,
     for name, arr in r2_raw.items():
         print(f"  R² (raw, {name:>10}): mean={arr.mean():.4f}")
 
-    # --- Stage 1: out-of-fold render residuals ---
-    print("\nStage 1: cross-validated render residuals...")
-    y_pred_render = _ridge_cv_predict(render_pca, neural_activity, cv=cv,
+    # --- Stage 1: out-of-fold pixel residuals ---
+    print("\nStage 1: cross-validated pixel residuals...")
+    y_pred_render = _ridge_cv_predict(pixel_pca, neural_activity, cv=cv,
                                       alphas=alphas)
     y_resid = neural_activity - y_pred_render
     var_kept = y_resid.var(axis=0).mean() / neural_activity.var(axis=0).mean()
@@ -104,10 +107,10 @@ def run_residual_analysis(neural_activity, scenes, neural_meta,
         r2_resid[name] = _r2_per_neuron(y_resid, y_hat)
         print(f"  R² (resid, {name:>10}): mean={r2_resid[name].mean():.4f}")
 
-    # Sanity: render-on-residual should be ~0
+    # Sanity: pixel-on-residual should be ~0
     if r2_resid['render'].mean() > 0.05:
         print(f"  WARNING: r2_render_resid mean is {r2_resid['render'].mean():.4f}, "
-              "expected ~0 — stage-1 ridge may be underfitting render.")
+              "expected ~0 — stage-1 ridge may be underfitting pixels.")
 
     return {
         'r2_raw_render': r2_raw['render'],

@@ -1,8 +1,10 @@
 """
-Simulation 2: RSA dominated by render structure.
+Simulation 2: RSA dominated by pixel structure.
 
-Shows that neural RDM tracks the render RDM (high correlation)
+Shows that neural RDM tracks the pixel RDM (high correlation)
 but not the physics RDM, and partial correlation removes any residual physics signal.
+The sensory RDM is built from 3-frame brain pixels — the same data the
+encoding/residual/dynamics analyses see.
 """
 
 import numpy as np
@@ -11,6 +13,7 @@ from scipy.stats import spearmanr
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
 from config import RSA_SUBSAMPLE as _CFG_RSA_SUBSAMPLE, RENDER_PCA_DIM as _CFG_RENDER_PCA_DIM
+from scene_generator import extract_brain_pixels
 
 
 def _compute_rdm(data):
@@ -59,12 +62,12 @@ def run_rsa_analysis(neural_activity, scenes, neural_meta,
         render_pca_dim = _CFG_RENDER_PCA_DIM
 
     print("\n" + "=" * 60)
-    print("SIMULATION 2: RSA Dominated by Render Structure")
+    print("SIMULATION 2: RSA Dominated by Pixel Structure")
     print("=" * 60)
 
     program_states = scenes['program_states']
     physics_labels = scenes['physics_labels']
-    render_indices = scenes['metadata']['render_indices']
+    metadata = scenes['metadata']
 
     n_scenes = program_states.shape[0]
     n_sub = min(rsa_subsample, n_scenes)
@@ -75,16 +78,16 @@ def run_rsa_analysis(neural_activity, scenes, neural_meta,
     sub_idx.sort()
 
     neural_sub = neural_activity[sub_idx]
-    render_sub = program_states[sub_idx][:, render_indices]
+    pixel_sub = extract_brain_pixels(program_states[sub_idx], metadata)
     physics_sub = physics_labels[sub_idx]
 
-    # PCA-reduce render data for tractability
+    # PCA-reduce pixel data for tractability
     print(f"\nSubsampled {n_sub} scenes for RSA.")
-    print(f"PCA-reducing render data to {render_pca_dim} components...")
+    print(f"PCA-reducing pixel data to {render_pca_dim} components...")
     scaler = StandardScaler()
-    render_scaled = scaler.fit_transform(render_sub)
-    pca = PCA(n_components=min(render_pca_dim, render_scaled.shape[0] - 1), random_state=42)
-    render_pca = pca.fit_transform(render_scaled)
+    pixel_scaled = scaler.fit_transform(pixel_sub)
+    pca = PCA(n_components=min(render_pca_dim, pixel_scaled.shape[0] - 1), random_state=42)
+    render_pca = pca.fit_transform(pixel_scaled)
 
     # Standardize physics
     scaler_phys = StandardScaler()

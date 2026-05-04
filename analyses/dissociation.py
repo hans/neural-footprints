@@ -2,16 +2,16 @@
 Simulation 3: R² vs. Behavioral Sufficiency Dissociation.
 
 Directly visualizes the disconnect: the feature set that explains most neural
-variance (render) is useless for predicting behavior, while the feature set
+variance (pixels) is useless for predicting behavior, while the feature set
 that predicts behavior (physics) adds essentially nothing to the encoding model.
 
 Two behavioral sufficiency objectives are supported (set in config.py):
   "next_frame_pixels": Ridge R² predicting final-frame pixels from t=0 features.
-      Physics wins (has velocities + occluded state); render fails (no velocity,
+      Physics wins (has velocities + occluded state); pixels fail (no velocity,
       blind to occluded objects).
   "kinetic_energy":    Logistic accuracy on KE binary label.
       Physics wins (~100%, KE is deterministic from mass+velocity);
-      render at chance (~50%, pixels carry no velocity signal).
+      pixels at chance (~50%, RGBA carries no velocity signal).
 """
 
 import numpy as np
@@ -24,6 +24,7 @@ from sklearn.preprocessing import StandardScaler
 
 from config import BEHAVIORAL_PCA_DIM as _CFG_BEHAVIORAL_PCA_DIM
 from config import BEHAVIORAL_OBJECTIVE as _CFG_BEHAVIORAL_OBJECTIVE
+from scene_generator import extract_brain_pixels
 
 
 # ---------------------------------------------------------------------------
@@ -197,8 +198,8 @@ def run_dissociation_analysis(neural_activity, scenes, neural_meta,
     initial_renders = scenes['initial_renders']
     target_renders = scenes['target_renders']
     behavior_labels = scenes['behavior_labels']
-    render_indices = scenes['metadata']['render_indices']
-    target_pixel_indices = scenes['metadata']['target_pixel_indices']
+    metadata = scenes['metadata']
+    target_pixel_indices = metadata['target_pixel_indices']
     scene_configs = scenes['scene_configs']
     pillar_grays = scenes['pillar_grays']
     lightings = scenes['lightings']
@@ -216,23 +217,23 @@ def run_dissociation_analysis(neural_activity, scenes, neural_meta,
     mean_r2_physics = r2_physics.mean()
     mean_r2_combined = r2_combined.mean()
 
-    print(f"  Render model mean R²:          {mean_r2_render:.4f}")
-    print(f"  Physics model mean R²:         {mean_r2_physics:.4f}")
-    print(f"  Render+physics model mean R²:  {mean_r2_combined:.4f}")
+    print(f"  Pixel model mean R²:          {mean_r2_render:.4f}")
+    print(f"  Physics model mean R²:        {mean_r2_physics:.4f}")
+    print(f"  Pixel+physics model mean R²:  {mean_r2_combined:.4f}")
 
     # --- Prepare features for behavioral sufficiency scoring ---
-    render_data = program_states[:, render_indices]
-    render_pca = encoder['pca'].transform(encoder['scaler'].transform(render_data))
+    pixel_data = extract_brain_pixels(program_states, metadata)
+    pixel_pca = encoder['pca'].transform(encoder['scaler'].transform(pixel_data))
     physics_scaled = encoder['scaler_phys'].transform(physics_labels)
 
-    # 3-frame render input for the behavioral render model. Uses a
-    # behavioral-sized PCA (whitened) so render and physics models are
+    # 3-frame pixel input for the behavioral pixel model. Uses a
+    # behavioral-sized PCA (whitened) so pixel and physics models are
     # scored at comparable input dimensionality, separate from the high-dim
     # encoder PCA used for neural R².
-    scaler_render_3f = StandardScaler()
-    render_3f_scaled = scaler_render_3f.fit_transform(render_data)
-    pca_render_3f = PCA(n_components=behavioral_pca_dim, whiten=True, random_state=42)
-    render_input_pca = pca_render_3f.fit_transform(render_3f_scaled)
+    scaler_pixel_3f = StandardScaler()
+    pixel_3f_scaled = scaler_pixel_3f.fit_transform(pixel_data)
+    pca_pixel_3f = PCA(n_components=behavioral_pca_dim, whiten=True, random_state=42)
+    render_input_pca = pca_pixel_3f.fit_transform(pixel_3f_scaled)
 
     # Behavioral target: RGBA at t=N_TIMESTEPS — strictly outside the brain's
     # three observed frames (the brain cannot trivially memorize this).
@@ -258,9 +259,9 @@ def run_dissociation_analysis(neural_activity, scenes, neural_meta,
 
     elif objective == "kinetic_energy":
         render_score, physics_score, metric_label, chance = _score_kinetic_energy(
-            render_pca, physics_scaled, behavior_labels
+            pixel_pca, physics_scaled, behavior_labels
         )
-        combined_features = np.hstack([render_pca, physics_scaled])
+        combined_features = np.hstack([pixel_pca, physics_scaled])
         log_reg = LogisticRegressionCV(cv=5, max_iter=1000, random_state=42)
         combined_score = cross_val_score(
             log_reg, combined_features, behavior_labels,
@@ -279,14 +280,14 @@ def run_dissociation_analysis(neural_activity, scenes, neural_meta,
         pillar_grays=pillar_grays, lightings=lightings,
     )
 
-    print(f"  Render          → {metric_label}: {render_score:.4f}")
-    print(f"  Physics         → {metric_label}: {physics_score:.4f}")
-    print(f"  Render+physics  → {metric_label}: {combined_score:.4f}")
+    print(f"  Pixel          → {metric_label}: {render_score:.4f}")
+    print(f"  Physics        → {metric_label}: {physics_score:.4f}")
+    print(f"  Pixel+physics  → {metric_label}: {combined_score:.4f}")
 
     print("\n  DISSOCIATION:")
-    print(f"    Render model:          R² = {mean_r2_render:.4f}  |  {metric_label} = {render_score:.4f}")
-    print(f"    Physics model:         R² = {mean_r2_physics:.4f}  |  {metric_label} = {physics_score:.4f}")
-    print(f"    Render+physics model:  R² = {mean_r2_combined:.4f}  |  {metric_label} = {combined_score:.4f}")
+    print(f"    Pixel model:          R² = {mean_r2_render:.4f}  |  {metric_label} = {render_score:.4f}")
+    print(f"    Physics model:        R² = {mean_r2_physics:.4f}  |  {metric_label} = {physics_score:.4f}")
+    print(f"    Pixel+physics model:  R² = {mean_r2_combined:.4f}  |  {metric_label} = {combined_score:.4f}")
 
     return {
         'mean_r2_render': mean_r2_render,
