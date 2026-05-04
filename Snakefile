@@ -141,6 +141,7 @@ rule dynamics:
         neural="data/neural.npz",
         encoding="outputs/encoding_results.json",
         encoder="data/encoder.joblib",
+        inferred="data/inferred_physics.npz",
     output:
         results="outputs/dynamics_results.json",
         plot_data="data/dynamics_plot_data.npz",
