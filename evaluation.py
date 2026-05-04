@@ -175,6 +175,16 @@ def evaluate(encoding_results, rsa_results, dissociation_results,
         f"{metric} = {beh_rend:.4f}",
         "expect low" if obj == "next_frame_pixels" else "expect < 0.70",
     )
+    if obj == "next_frame_pixels":
+        # Oracle resimulates the held-out t=N_TIMESTEPS RGBA target
+        # deterministically; with the 3-frame brain block, this should
+        # remain essentially perfect.
+        check(
+            "Physics oracle behavioral score is near-perfect",
+            beh_phys > 0.90,
+            f"{metric} = {beh_phys:.4f}",
+            "expect > 0.90 (oracle re-renders the held-out target)",
+        )
 
     # --- Dynamics (future brain state) ---
     if dynamics_results is not None:
@@ -200,6 +210,16 @@ def evaluate(encoding_results, rsa_results, dissociation_results,
             fwd_gap > 0.10,
             f"gap = {fwd_gap:.4f}",
             "expect > 0.10",
+        )
+        # With the 3-frame brain block, the pixel forward model can fill
+        # at most one frame's RGBA from initial pixels — the other two
+        # frames stay at training mean, so prediction should be clearly
+        # poor in absolute terms, not just relatively.
+        check(
+            "Pixel forward model is poor in absolute terms",
+            r2_pix_fwd < 0.20,
+            f"R² = {r2_pix_fwd:.4f}",
+            "expect < 0.20",
         )
 
     # --- Summary ---

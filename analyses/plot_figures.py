@@ -445,7 +445,7 @@ def plot_pca(plot_data, fig_dir="figures"):
         plt.close()
 
 
-def plot_sample_scenes(initial_renders, program_states, pixel_indices,
+def plot_sample_scenes(initial_renders, target_renders, rgba_bytes,
                        image_size, n_timesteps, fig_dir="figures",
                        n_samples=6):
     n = min(n_samples, len(initial_renders))
@@ -455,16 +455,16 @@ def plot_sample_scenes(initial_renders, program_states, pixel_indices,
             axes = axes[np.newaxis, :]
 
         axes[0, 0].set_title('t = 0 (initial)')
-        axes[0, 1].set_title(f't = {n_timesteps} (final)')
+        axes[0, 1].set_title(f't = {n_timesteps} (target)')
 
         for i in range(n):
-            init_rgba = initial_renders[i].astype(np.uint8).reshape(
+            init_rgba = initial_renders[i, :rgba_bytes].astype(np.uint8).reshape(
                 image_size, image_size, 4)
-            final_rgba = program_states[i, pixel_indices].astype(np.uint8).reshape(
+            target_rgba = target_renders[i, :rgba_bytes].astype(np.uint8).reshape(
                 image_size, image_size, 4)
             axes[i, 0].imshow(init_rgba)
             axes[i, 0].axis('off')
-            axes[i, 1].imshow(final_rgba)
+            axes[i, 1].imshow(target_rgba)
             axes[i, 1].axis('off')
 
         plt.tight_layout(pad=0.3)

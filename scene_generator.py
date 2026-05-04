@@ -335,19 +335,22 @@ def resimulate_scene(shape_configs, initial_physics_row, *,
 
     Used for oracle physics-model prediction: given the full initial state
     (position, velocity, mass, friction, shape, color), the simulation is
-    deterministic and produces a pixel-perfect final frame.
+    deterministic.
 
     Args:
         shape_configs:       list of dicts (one per object) with keys
                              'shape' ('sphere'|'box'), 'params', 'color'
-        initial_physics_row: 1-D array of length 15*N_OBJECTS:
-                             per object: pos(3), orn(4), lin_vel(3), ang_vel(3), mass(1), friction(1)
+        initial_physics_row: 1-D array of length 16*N_OBJECTS:
+                             per object: pos(3), orn(4), lin_vel(3), ang_vel(3), mass(1), friction(1), x_accel(1)
         return_program_state: if True, return full program_state float32 vector
-                             (render buffers + physics labels + scene config).
+                             (3-frame render buffers + physics labels + scene config + lighting).
 
     Returns:
         If return_program_state=False: RGBA uint8 [IMAGE_SIZE, IMAGE_SIZE, 4]
-        If return_program_state=True:  float32 [D] program_state vector
+            of the BEHAVIORAL TARGET frame (rendered at t=n_timesteps).
+        If return_program_state=True: float32 [D] program_state vector with
+            three brain-input frames concatenated (t=0, t=PP_EARLY_FRAME,
+            t=PP_LATE_FRAME).
     """
     if n_timesteps is None:
         n_timesteps = _CFG_N_TIMESTEPS
@@ -419,7 +422,14 @@ def resimulate_scene(shape_configs, initial_physics_row, *,
         masses_list.append(mass)
         frictions_list.append(friction)
 
-    for _ in range(n_timesteps):
+    # Render the brain-input frames (t=0, t=PP_EARLY_FRAME, t=PP_LATE_FRAME)
+    # only when building a full program_state. For RGBA-target callers we
+    # only need the behavioral target at t=n_timesteps.
+    initial_frame = _render_scene(pc, lighting=lighting) if return_program_state else None
+    early_frame = None
+    late_frame = None
+
+    for t in range(n_timesteps):
         for i, (bid, cfg) in enumerate(zip(body_ids, shape_configs)):
             x_accel = cfg.get('x_accel', 0.0)
             if x_accel != 0.0:
@@ -429,9 +439,12 @@ def resimulate_scene(shape_configs, initial_physics_row, *,
                                      physicsClientId=pc)
         p.stepSimulation(physicsClientId=pc)
         _lock_rotation(body_ids, pc)
+        if return_program_state and t + 1 == _CFG_PP_EARLY_FRAME:
+            early_frame = _render_scene(pc, lighting=lighting)
+        if return_program_state and t + 1 == _CFG_PP_LATE_FRAME:
+            late_frame = _render_scene(pc, lighting=lighting)
 
     if return_program_state:
-        rgba_bytes, depth_bytes, seg_bytes = _render_scene(pc, lighting=lighting)
         applied_accels = [cfg.get('x_accel', 0.0) for cfg in shape_configs]
         final_physics = _collect_physics_labels(
             body_ids, masses_list, frictions_list, pc,
@@ -440,38 +453,62 @@ def resimulate_scene(shape_configs, initial_physics_row, *,
         scene_config_vec = _encode_scene_config(shape_configs)
         lighting_vec = _encode_scene_lighting(pillar_gray, lighting or _DEFAULT_LIGHTING)
         p.disconnect(pc)
-        return _build_program_state(rgba_bytes, depth_bytes, seg_bytes,
-                                    final_physics, scene_config_vec, lighting_vec)
+        return _build_program_state(
+            [initial_frame, early_frame, late_frame],
+            final_physics, scene_config_vec, lighting_vec,
+        )
     else:
+        # Behavioral target frame at t=n_timesteps.
         rgba_bytes, _, _ = _render_scene(pc, lighting=lighting)
         p.disconnect(pc)
         return np.frombuffer(rgba_bytes, dtype=np.uint8).reshape(
             IMAGE_SIZE, IMAGE_SIZE, 4)
 
 
-def _build_program_state(rgba_bytes, depth_bytes, seg_bytes, physics_labels,
+def _frame_render_vec(rgba_bytes, depth_bytes, seg_bytes):
+    """One frame's RGBA+depth+seg bytes cast to float32 vector."""
+    return np.frombuffer(rgba_bytes + depth_bytes + seg_bytes,
+                         dtype=np.uint8).astype(np.float32)
+
+
+def _build_program_state(frame_renders, physics_labels,
                          scene_config_vec, lighting_vec):
     """
-    Concatenate render bytes (uint8->float32) with physics labels, scene config,
-    and lighting parameters (native float32).
+    Concatenate three frames of render bytes (uint8->float32) with physics
+    labels, scene config, and lighting parameters (native float32).
+
+    Args:
+        frame_renders: list of (rgba_bytes, depth_bytes, seg_bytes) tuples,
+                       one per brain-input frame (initial / early / late).
+        physics_labels, scene_config_vec, lighting_vec: per-scene 1-D arrays.
 
     The z-scoring in neural_model.py handles the scale difference between
     render bytes (0-255) and native float32 values.
     """
-    all_render_bytes = rgba_bytes + depth_bytes + seg_bytes
-    render_vec = np.frombuffer(all_render_bytes, dtype=np.uint8).astype(np.float32)
-    return np.concatenate([render_vec, physics_labels, scene_config_vec, lighting_vec])
+    render_vecs = [_frame_render_vec(*frame) for frame in frame_renders]
+    return np.concatenate(render_vecs + [physics_labels, scene_config_vec,
+                                          lighting_vec])
 
 
 def generate_scenes(n_scenes, seed, *, n_timesteps=None):
     """
     Generate n_scenes PyBullet scenes, returning program states and analysis labels.
 
+    Brain-input frames (full RGBA+depth+seg, concatenated into program_state):
+      t=0 (initial), t=PP_EARLY_FRAME (early), t=PP_LATE_FRAME (late).
+
+    The render captured at t=N_TIMESTEPS is held out as the behavioral
+    prediction target (`target_renders`) and is *not* part of program_state,
+    so it cannot leak into brain data.
+
     Returns dict with:
-      'program_states':         ndarray [n_scenes x D]   — render + physics_labels + scene_config + scene_lighting
+      'program_states':         ndarray [n_scenes x D]   — 3-frame render + physics_labels + scene_config + scene_lighting
       'physics_labels':         ndarray [n_scenes x 16*N_OBJECTS]  — final-state API labels (incl. x_accel)
       'initial_physics_labels': ndarray [n_scenes x 16*N_OBJECTS]  — t=0 API labels (incl. x_accel)
-      'initial_renders':        ndarray [n_scenes x IMAGE_SIZE**2*4]  — t=0 RGBA bytes
+      'initial_renders':        ndarray [n_scenes x render_bytes_per_frame]  — t=0 full render
+      'early_renders':          ndarray [n_scenes x render_bytes_per_frame]  — t=PP_EARLY_FRAME full render
+      'late_renders':           ndarray [n_scenes x render_bytes_per_frame]  — t=PP_LATE_FRAME full render
+      'target_renders':         ndarray [n_scenes x render_bytes_per_frame]  — t=N_TIMESTEPS full render (behavioral target only)
       'behavior_labels':        ndarray [n_scenes]       — binary, KE median split
       'kinetic_energies':       ndarray [n_scenes]       — continuous final KE
       'metadata': dict with dimension info
@@ -484,7 +521,9 @@ def generate_scenes(n_scenes, seed, *, n_timesteps=None):
     rgba_bytes_count = IMAGE_SIZE * IMAGE_SIZE * 4  # uint8
     depth_bytes_count = IMAGE_SIZE * IMAGE_SIZE * 4  # float32 bytes
     seg_bytes_count = IMAGE_SIZE * IMAGE_SIZE * 4    # int32 bytes
-    render_bytes_total = rgba_bytes_count + depth_bytes_count + seg_bytes_count
+    render_bytes_per_frame = rgba_bytes_count + depth_bytes_count + seg_bytes_count
+    n_brain_frames = 3
+    render_bytes_total = n_brain_frames * render_bytes_per_frame
 
     physics_dim = 16 * N_OBJECTS
     config_dim = SCENE_CONFIG_DIM * N_OBJECTS
@@ -492,9 +531,10 @@ def generate_scenes(n_scenes, seed, *, n_timesteps=None):
     program_states = np.zeros((n_scenes, D), dtype=np.float32)
     physics_labels = np.zeros((n_scenes, physics_dim), dtype=np.float32)
     initial_physics_labels = np.zeros((n_scenes, physics_dim), dtype=np.float32)
-    initial_renders = np.zeros((n_scenes, rgba_bytes_count), dtype=np.float32)
-    early_renders = np.zeros((n_scenes, rgba_bytes_count), dtype=np.float32)
-    late_renders = np.zeros((n_scenes, rgba_bytes_count), dtype=np.float32)
+    initial_renders = np.zeros((n_scenes, render_bytes_per_frame), dtype=np.float32)
+    early_renders = np.zeros((n_scenes, render_bytes_per_frame), dtype=np.float32)
+    late_renders = np.zeros((n_scenes, render_bytes_per_frame), dtype=np.float32)
+    target_renders = np.zeros((n_scenes, render_bytes_per_frame), dtype=np.float32)
     kinetic_energies = np.zeros(n_scenes, dtype=np.float32)
     all_scene_configs = []
     all_pillar_grays = []
@@ -512,7 +552,7 @@ def generate_scenes(n_scenes, seed, *, n_timesteps=None):
         all_scene_configs.append(shape_configs)
         all_pillar_grays.append(pillar_gray)
 
-        # Sample lighting once per scene (consistent across initial + final frames)
+        # Sample lighting once per scene (consistent across all frames)
         lighting = _sample_lighting(scene_rng)
         all_lightings.append(lighting)
 
@@ -521,13 +561,16 @@ def generate_scenes(n_scenes, seed, *, n_timesteps=None):
         initial_physics_labels[i] = _collect_physics_labels(
             body_ids, masses, frictions, pc, applied_accels=applied_accels,
         )
-        init_rgba_bytes, _, _ = _render_scene(pc, lighting=lighting)
-        initial_renders[i] = np.frombuffer(init_rgba_bytes, dtype=np.uint8).astype(np.float32)
+        init_frame = _render_scene(pc, lighting=lighting)
+        initial_renders[i] = _frame_render_vec(*init_frame)
 
         # Step physics (with per-scene random x-acceleration as external force).
-        # Capture frames at t=PP_EARLY_FRAME and t=PP_LATE_FRAME so the inverse
-        # model has three evenly-spaced views and can disentangle initial
-        # velocity from the per-scene x_accel injection.
+        # Capture full RGBA+depth+seg frames at t=PP_EARLY_FRAME and
+        # t=PP_LATE_FRAME (the brain's later observations) and at
+        # t=n_timesteps (the behavioral prediction target, not in brain data).
+        early_frame = None
+        late_frame = None
+        target_frame = None
         for t in range(n_timesteps):
             for obj_idx, bid in enumerate(body_ids):
                 x_accel = shape_configs[obj_idx].get('x_accel', 0.0)
@@ -539,11 +582,11 @@ def generate_scenes(n_scenes, seed, *, n_timesteps=None):
             p.stepSimulation(physicsClientId=pc)
             _lock_rotation(body_ids, pc)
             if t + 1 == _CFG_PP_EARLY_FRAME:
-                early_rgba_bytes, _, _ = _render_scene(pc, lighting=lighting)
-                early_renders[i] = np.frombuffer(early_rgba_bytes, dtype=np.uint8).astype(np.float32)
+                early_frame = _render_scene(pc, lighting=lighting)
+                early_renders[i] = _frame_render_vec(*early_frame)
             if t + 1 == _CFG_PP_LATE_FRAME:
-                late_rgba_bytes, _, _ = _render_scene(pc, lighting=lighting)
-                late_renders[i] = np.frombuffer(late_rgba_bytes, dtype=np.uint8).astype(np.float32)
+                late_frame = _render_scene(pc, lighting=lighting)
+                late_renders[i] = _frame_render_vec(*late_frame)
 
         # Collect final-state analysis labels (NOT used in neural generation)
         physics_labels[i] = _collect_physics_labels(
@@ -551,15 +594,16 @@ def generate_scenes(n_scenes, seed, *, n_timesteps=None):
         )
         kinetic_energies[i] = _compute_total_kinetic_energy(body_ids, masses, pc)
 
-        # Render final frame
-        rgba_bytes, depth_bytes, seg_bytes = _render_scene(pc, lighting=lighting)
+        # Render behavioral target frame at t=n_timesteps (held out from brain)
+        target_frame = _render_scene(pc, lighting=lighting)
+        target_renders[i] = _frame_render_vec(*target_frame)
 
-        # Build program state: render + physics labels + scene config + lighting
+        # Build program state from the three brain-input frames.
         scene_config_vec = _encode_scene_config(shape_configs)
         lighting_vec = _encode_scene_lighting(pillar_gray, lighting)
         program_states[i] = _build_program_state(
-            rgba_bytes, depth_bytes, seg_bytes, physics_labels[i],
-            scene_config_vec, lighting_vec
+            [init_frame, early_frame, late_frame],
+            physics_labels[i], scene_config_vec, lighting_vec,
         )
 
         p.disconnect(pc)
@@ -570,15 +614,31 @@ def generate_scenes(n_scenes, seed, *, n_timesteps=None):
     median_ke = np.median(kinetic_energies)
     behavior_labels = (kinetic_energies > median_ke).astype(np.int32)
 
-    # Metadata
+    # Per-frame slices into program_state's render block.
+    initial_slice = slice(0, render_bytes_per_frame)
+    early_slice = slice(render_bytes_per_frame, 2 * render_bytes_per_frame)
+    late_slice = slice(2 * render_bytes_per_frame, 3 * render_bytes_per_frame)
+    # `pixel_indices` retains its old meaning (a single frame's RGBA inside
+    # program_state) but now points at the LATE frame's RGBA — the latest
+    # observation the brain has.
+    late_rgba_start = late_slice.start
+    pixel_indices = slice(late_rgba_start, late_rgba_start + rgba_bytes_count)
+
     metadata = {
         'D_render_bytes': render_bytes_total,
+        'D_render_per_frame': render_bytes_per_frame,
         'D_physics_labels': physics_dim,
         'D_scene_config': config_dim,
         'D_scene_lighting': SCENE_LIGHTING_DIM,
         'D_total': D,
-        'pixel_indices': slice(0, rgba_bytes_count),       # RGBA only (for visualization / pixel prediction)
-        'render_indices': slice(0, render_bytes_total),    # RGBA + depth + seg (for encoding models)
+        'pixel_indices': pixel_indices,                  # RGBA of the LATE frame (inside program_state)
+        'render_indices': slice(0, render_bytes_total),  # 3-frame full render block
+        'frame_render_indices': {
+            'initial': initial_slice,
+            'early': early_slice,
+            'late': late_slice,
+        },
+        'target_pixel_indices': slice(0, rgba_bytes_count),  # RGBA inside target_renders
     }
 
     behavior_rate = behavior_labels.mean()
@@ -593,6 +653,7 @@ def generate_scenes(n_scenes, seed, *, n_timesteps=None):
         'initial_renders': initial_renders,
         'early_renders': early_renders,
         'late_renders': late_renders,
+        'target_renders': target_renders,
         'behavior_labels': behavior_labels,
         'kinetic_energies': kinetic_energies,
         'scene_configs': all_scene_configs,

@@ -11,9 +11,10 @@ scenes = load_scenes(snakemake.input.scenes)
 fig_dir = os.path.dirname(snakemake.output.figure)
 os.makedirs(fig_dir, exist_ok=True)
 
+target_pi = scenes['metadata']['target_pixel_indices']
 plot_sample_scenes(
-    scenes['initial_renders'], scenes['program_states'],
-    scenes['metadata']['pixel_indices'],
+    scenes['initial_renders'], scenes['target_renders'],
+    rgba_bytes=target_pi.stop - target_pi.start,
     image_size=cfg['image_size'],
     n_timesteps=cfg['n_timesteps'],
     fig_dir=fig_dir,
