@@ -1,8 +1,10 @@
 """
 Simulation 1: Encoding model false negatives.
 
-Demonstrates that adding physics labels to a pixel-based encoding model
+Demonstrates that adding physics labels to a render-based encoding model
 produces negligible improvement in R², despite physics being causally operative.
+The render slice (RGBA + depth + segmentation) is the high-dimensional
+sensory regressor; "pixel" in the glossary is reserved for RGBA alone.
 """
 
 import numpy as np
@@ -72,7 +74,7 @@ def run_encoding_analysis(neural_activity, scenes, neural_meta,
 
     # --- Encoding model: render only ---
     print("\nFitting encoding model: neural ~ render_PCA ...")
-    r2_pixels_only = ridge_r2_per_neuron(render_pca, neural_activity)
+    r2_render_only = ridge_r2_per_neuron(render_pca, neural_activity)
 
     # --- Encoding model: physics only ---
     print("Fitting encoding model: neural ~ physics_labels ...")
@@ -83,15 +85,15 @@ def run_encoding_analysis(neural_activity, scenes, neural_meta,
     combined = np.hstack([render_pca, physics_scaled])
     r2_combined = ridge_r2_per_neuron(combined, neural_activity)
 
-    delta_r2 = r2_combined - r2_pixels_only
-    mean_r2_pix = r2_pixels_only.mean()
+    delta_r2 = r2_combined - r2_render_only
+    mean_r2_render = r2_render_only.mean()
     mean_r2_phys = r2_physics_only.mean()
     mean_r2_comb = r2_combined.mean()
     mean_delta = delta_r2.mean()
 
-    print(f"\n  Mean R² (pixels only):    {mean_r2_pix:.4f}")
+    print(f"\n  Mean R² (render only):    {mean_r2_render:.4f}")
     print(f"  Mean R² (physics only):   {mean_r2_phys:.4f}")
-    print(f"  Mean R² (pixels+physics): {mean_r2_comb:.4f}")
+    print(f"  Mean R² (render+physics): {mean_r2_comb:.4f}")
     print(f"  Mean ΔR²:                 {mean_delta:.6f}")
 
     # --- Control: physics_labels -> behavior_label ---
@@ -135,7 +137,7 @@ def run_encoding_analysis(neural_activity, scenes, neural_meta,
     encoder_ridge.fit(render_pca, neural_activity)
 
     return {
-        'r2_pixels_only': r2_pixels_only,
+        'r2_render_only': r2_render_only,
         'r2_physics_only': r2_physics_only,
         'r2_combined': r2_combined,
         'delta_r2': delta_r2,

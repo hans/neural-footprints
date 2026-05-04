@@ -70,7 +70,7 @@ def evaluate(encoding_results, rsa_results, dissociation_results,
     # --- Encoding Model ---
     dr2 = encoding_results['delta_r2'].mean()
     ctrl = encoding_results['control_accuracy']
-    r2_pixels = encoding_results['r2_pixels_only'].mean()
+    r2_render = encoding_results['r2_render_only'].mean()
 
     lines.append(f"\n{BOLD}Encoding Model{RESET}")
     check(
@@ -80,9 +80,9 @@ def evaluate(encoding_results, rsa_results, dissociation_results,
         "expect < 0.03",
     )
     check(
-        "Pixel-only model explains neural activity",
-        r2_pixels > 0.30,
-        f"R² = {r2_pixels:.4f}",
+        "Render-only model explains neural activity",
+        r2_render > 0.30,
+        f"R² = {r2_render:.4f}",
         "expect > 0.30",
     )
     check(

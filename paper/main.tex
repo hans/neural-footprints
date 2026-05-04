@@ -122,7 +122,8 @@ principle.
 
 We compare two candidate models of the neural population
 (Figure~\ref{fig:abstract}). A \textbf{sensory model} uses only
-pixel-derived features---${\sim}49{,}000$ floats from the render buffers.
+render-derived features (RGBA, depth, and segmentation
+buffers)---${\sim}49{,}000$ floats per scene.
 A \textbf{full model} additionally includes physical variables that govern
 scene dynamics---position, velocity, mass, and friction per object, 75
 variables in total. The physics component is low-dimensional by nature:
@@ -146,7 +147,7 @@ regardless of how those variables are represented.
 \end{figure}
 
 \textbf{Encoding models.}\quad
-A pixel-only model achieves $R^2 = \encodingRsqPixels$; adding all 75
+A render-only model (RGBA + depth + segmentation buffers) achieves $R^2 = \encodingRsqRender$; adding all 75
 physics variables yields a barely distinguishable $R^2 = \encodingRsqCombined$ (figure~\ref{fig:dissociation}).
 While we know by construction that physical features are necessary and sufficient for forming expectations about the visual world, this encoding anlaysis would lead us to conclude that these quantities are not represented in the brain.
 

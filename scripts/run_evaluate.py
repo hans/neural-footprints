@@ -11,7 +11,7 @@ dissociation = load_results(snakemake.input.dissociation)
 dynamics = load_results(snakemake.input.dynamics)
 
 # Convert lists back to arrays where evaluate() expects them
-for key in ['r2_pixels_only', 'r2_physics_only', 'r2_combined', 'delta_r2']:
+for key in ['r2_render_only', 'r2_physics_only', 'r2_combined', 'delta_r2']:
     if key in encoding:
         encoding[key] = np.array(encoding[key])
 

@@ -193,7 +193,7 @@ def run_dissociation_analysis(neural_activity, scenes, neural_meta,
 
     # --- Reuse neural R² from encoding analysis ---
     print("\nReusing neural R² from encoding analysis...")
-    r2_render = encoding_results['r2_pixels_only']
+    r2_render = encoding_results['r2_render_only']
     r2_physics = encoding_results['r2_physics_only']
     r2_combined = encoding_results['r2_combined']
 

@@ -62,11 +62,11 @@ add("dPhysicsPerObject", str(d_physics_per_obj))
 add("dConfigPerObject", str(d_config_per_obj))
 
 # --- encoding ---
-r2_pixels = np.array(encoding["r2_pixels_only"])
+r2_render = np.array(encoding["r2_render_only"])
 r2_combined = np.array(encoding["r2_combined"])
 delta_r2 = np.array(encoding["delta_r2"])
 
-add("encodingRsqPixels", fmt(np.mean(r2_pixels), 4))
+add("encodingRsqRender", fmt(np.mean(r2_render), 4))
 add("encodingRsqCombined", fmt(np.mean(r2_combined), 4))
 add("encodingDeltaRsq", fmt(np.mean(delta_r2), 4))
 add("controlAccuracy", pct(encoding["control_accuracy"]))

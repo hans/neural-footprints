@@ -17,12 +17,12 @@ LABEL_RENDER_PLUS_PHYSICS = "Full"
 
 
 def plot_encoding(plot_data, fig_dir="figures"):
-    r2_pixels_only = plot_data['r2_pixels_only']
+    r2_render_only = plot_data['r2_render_only']
     r2_combined = plot_data['r2_combined']
-    n_neurons = len(r2_pixels_only)
-    mean_r2_pix = r2_pixels_only.mean()
+    n_neurons = len(r2_render_only)
+    mean_r2_render = r2_render_only.mean()
     mean_r2_comb = r2_combined.mean()
-    mean_delta = (r2_combined - r2_pixels_only).mean()
+    mean_delta = (r2_combined - r2_render_only).mean()
     neuron_counts = plot_data['neuron_counts']
     subsample_means = plot_data['subsample_means']
     subsample_sems = plot_data['subsample_sems']
@@ -34,22 +34,22 @@ def plot_encoding(plot_data, fig_dir="figures"):
 
         # Panel A: R² bar plot
         ax = axes[0]
-        ax.bar(['Pixels only', 'Pixels +\nPhysics'],
-               [mean_r2_pix, mean_r2_comb],
-               yerr=[r2_pixels_only.std() / np.sqrt(n_neurons),
+        ax.bar([LABEL_RENDER, LABEL_RENDER_PLUS_PHYSICS],
+               [mean_r2_render, mean_r2_comb],
+               yerr=[r2_render_only.std() / np.sqrt(n_neurons),
                      r2_combined.std() / np.sqrt(n_neurons)],
-               color=[COLORS['pixels'], COLORS['physics']], capsize=3,
+               color=[COLORS['render'], COLORS['physics']], capsize=3,
                width=0.6)
         ax.set_ylabel('Mean R\u00b2')
         ax.set_title('Encoding model: R\u00b2 \u00b1 physics labels')
-        ymax = max(mean_r2_pix, mean_r2_comb) * 1.12
+        ymax = max(mean_r2_render, mean_r2_comb) * 1.12
         ax.annotate(f'\u0394R\u00b2 = {mean_delta:.6f}', xy=(0.5, ymax),
                     ha='center', style='italic')
 
         # Panel B: Subsampling curve
         ax = axes[1]
         ax.errorbar(neuron_counts, subsample_means, yerr=subsample_sems,
-                    marker='o', color=COLORS['pixels'], capsize=2)
+                    marker='o', color=COLORS['render'], capsize=2)
         ax.axhline(0, color='gray', linestyle='--', alpha=0.5)
         ax.set_xlabel('Number of neurons sampled')
         ax.set_ylabel('Mean \u0394R\u00b2')
@@ -137,7 +137,7 @@ def plot_rsa(plot_data, fig_dir="figures"):
         ax = fig.add_subplot(gs[1, 2])
         labels = [f'Neural\u2013\n{LABEL_RENDER}', f'Neural\u2013\n{LABEL_PHYSICS}']
         values = [corr_neural_render, corr_neural_physics]
-        colors = [COLORS['pixels'], COLORS['physics']]
+        colors = [COLORS['render'], COLORS['physics']]
         bars = ax.bar(labels, values, color=colors, width=0.6)
         ax.set_ylabel('Spearman r')
         ax.set_title('RSA correlations')
@@ -167,7 +167,7 @@ def plot_dissociation(plot_data, fig_dir="figures"):
         fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(COL_WIDTH, 2.0))
 
         bar_width = 0.5
-        colors = [COLORS['pixels'], COLORS['physics']]
+        colors = [COLORS['render'], COLORS['physics']]
         labels = [LABEL_RENDER, LABEL_PHYSICS]
 
         bars1 = ax1.bar(labels, [mean_r2_render, mean_r2_physics],
@@ -221,7 +221,7 @@ def plot_dissociation_combined(plot_data, fig_dir="figures"):
         fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(COL_WIDTH, 2.0))
 
         bar_width = 0.5
-        colors = [COLORS['pixels'], COLORS['combined']]
+        colors = [COLORS['render'], COLORS['combined']]
         labels = [LABEL_RENDER, LABEL_RENDER_PLUS_PHYSICS]
 
         bars1 = ax1.bar(labels, [mean_r2_render, mean_r2_combined],
@@ -319,8 +319,10 @@ def plot_dynamics(plot_data, fig_dir="figures"):
         fig, ax1 = plt.subplots(1, 1, figsize=(COL_WIDTH * 0.6, 2.2))
 
         bar_width = 0.5
+        # Bar 1 is the pixel forward model (RGBA-only prediction per glossary),
+        # not the full render slice — label accordingly.
         colors = [COLORS['pixels'], COLORS['physics']]
-        labels = ['Render', 'Physics']
+        labels = ['Pixel', LABEL_PHYSICS]
 
         bars1 = ax1.bar(labels, [mean_r2_pixel, mean_r2_physics],
                         width=bar_width, color=colors,
