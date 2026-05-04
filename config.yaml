@@ -23,3 +23,51 @@ pp_pixel_pca_dim: 50
 pp_early_frame: 40
 pp_late_frame: 80
 pp_dropout_rate: 0.05
+
+
+# ---------------------------------------------------------------------------
+# Subtractive analysis (numerosity paradigm)
+#
+# Parallel pipeline: numerosity scenes -> CardinalityMLP (cognitive model) ->
+# block-structured neural projection -> Welch's t subtraction. See
+# specs/subtractive_analysis.md.
+# ---------------------------------------------------------------------------
+
+numerosity:
+  n_scenes_per_condition: 600        # 600 low + 600 high per regime
+  n_low: 3
+  n_high: 12
+  base_radius: 0.18                  # used by 'confounded' regime (constant)
+  area_controlled_total_area: 0.5    # target sum_i pi*r_i^2; r = sqrt(target/(N*pi))
+  scene_xy_extent: [-1.2, 1.2]       # uniform sampling box for sphere centers (x and y)
+  z_height: 0.4                      # spheres rest on a plane; constant z
+  placement_max_attempts: 200        # rejection sampling cap for non-overlap
+  base_color: [0.7, 0.7, 0.7, 1.0]   # constant gray; isolates N as the only stimulus variable
+  ground_color: [0.5, 0.5, 0.5, 1.0]
+  random_seed: 1234
+
+subtractive:
+  n_neurons: 1000
+  grid_shape: [40, 25]               # 40 rows * 25 cols = 1000 neurons
+  sensory_n_neurons: 800
+  abstract_n_neurons: 200
+  sensory_weight_std: 1.0            # high variance
+  # The abstract input ([h2 | inferred_N]) is highly condition-aligned by
+  # construction (the cognitive model extracts cardinality from pixels), so
+  # its mean shift between conditions per dim is much larger than the
+  # render-PCA's. Compensating: abstract weights are sized so per-neuron
+  # condition mean-shift is ~half the sensory population's, i.e. the
+  # abstract block is "compact and quiet" — exactly what the spec calls a
+  # smaller, lower-variance population.
+  abstract_weight_std: 0.025
+  sensory_grid_region: [[0, 40], [0, 20]]    # rows 0-39, cols 0-19  (800 cells)
+  abstract_grid_region: [[0, 40], [20, 25]]  # rows 0-39, cols 20-24 (200 cells)
+  noise_level: 0.3
+  render_pca_dim_for_projection: 200
+  cardinality_pixel_pca_dim: 100
+  cardinality_hidden_dim: 256
+  cardinality_dropout_rate: 0.05
+  cardinality_neural_layer: "h2"
+  thresholds_uncorrected: [0.05, 0.01, 0.001]
+  fdr_alpha: 0.05
+  random_seed: 5678
