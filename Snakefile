@@ -120,6 +120,7 @@ rule residual:
     input:
         scenes="data/scenes.npz",
         neural="data/neural.npz",
+        encoding="outputs/encoding_results.json",
     output:
         results="outputs/residual_results.json",
         plot_data="data/residual_plot_data.npz",

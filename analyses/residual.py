@@ -25,7 +25,7 @@ from sklearn.linear_model import RidgeCV
 from sklearn.model_selection import KFold, cross_val_predict
 from sklearn.preprocessing import StandardScaler
 
-from analyses.encoding import pca_reduce_render, ridge_r2_per_neuron
+from analyses.encoding import pca_reduce_render
 
 
 def _r2_per_neuron(y_true, y_pred):
@@ -41,13 +41,15 @@ def _ridge_cv_predict(X, y, cv, alphas):
 
 def run_residual_analysis(neural_activity, scenes, neural_meta,
                           *, render_pca_dim,
+                          r2_raw_render, r2_raw_physics_gt,
                           n_splits=5, random_state=42):
     """
     Run residual encoding analysis.
 
     Returns dict with per-neuron R² arrays for raw and residualized neural,
-    across {render, gt physics} predictor sets, plus the matched raw-neural
-    baselines for paired comparison.
+    across {render, gt physics} predictor sets. Raw-neural baselines are
+    passed in (from the encoding analysis) so this stage and dissociation
+    report identical numbers.
     """
     print("\n" + "=" * 60)
     print("RESIDUAL ANALYSIS: encoding on render-residualized neural")
@@ -77,12 +79,14 @@ def run_residual_analysis(neural_activity, scenes, neural_meta,
         'physics_gt': physics_scaled,
     }
 
-    # --- Raw-neural baselines (matches encoding.py's reporting) ---
-    print("\nRaw-neural R² baselines:")
-    r2_raw = {}
-    for name, X in predictor_sets.items():
-        r2_raw[name] = ridge_r2_per_neuron(X, neural_activity, alphas=alphas, cv=cv)
-        print(f"  R² (raw, {name:>10}): mean={r2_raw[name].mean():.4f}")
+    # --- Raw-neural baselines (reused from encoding analysis) ---
+    r2_raw = {
+        'render': np.asarray(r2_raw_render),
+        'physics_gt': np.asarray(r2_raw_physics_gt),
+    }
+    print("\nRaw-neural R² baselines (from encoding analysis):")
+    for name, arr in r2_raw.items():
+        print(f"  R² (raw, {name:>10}): mean={arr.mean():.4f}")
 
     # --- Stage 1: out-of-fold render residuals ---
     print("\nStage 1: cross-validated render residuals...")
