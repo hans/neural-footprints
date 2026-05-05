@@ -241,18 +241,20 @@ SCENE_CONFIG_DIM = 9  # per object
 
 def _encode_scene_lighting(pillar_gray, lighting):
     """
-    Encode per-scene lighting parameters into a fixed-length float32 vector.
+    Encode per-scene lighting + camera parameters into a fixed-length float32 vector.
 
-    pillar_gray(1), lightDirection(3), lightColor(3), lightDistance(1) = 8 floats.
+    pillar_gray(1), lightDirection(3), lightColor(3), lightDistance(1),
+    camJitter(3) = 11 floats.
     """
     vec = [pillar_gray]
     vec.extend(lighting['lightDirection'])
     vec.extend(lighting['lightColor'])
     vec.append(lighting['lightDistance'])
+    vec.extend(lighting.get('camJitter', [0.0, 0.0, 0.0]))
     return np.array(vec, dtype=np.float32)
 
 
-SCENE_LIGHTING_DIM = 8
+SCENE_LIGHTING_DIM = 11
 
 
 def _compute_total_kinetic_energy(body_ids, masses, physics_client):
@@ -273,13 +275,14 @@ def _compute_total_kinetic_energy(body_ids, masses, physics_client):
 
 
 def _sample_lighting(rng):
-    """Sample random lighting parameters for a scene."""
+    """Sample random lighting and camera parameters for a scene."""
     return {
         'lightDirection': [float(rng.uniform(-2, 2)),
                            float(rng.uniform(-2, 0)),
                            float(rng.uniform(1, 3))],
         'lightColor': [float(c) for c in rng.uniform(0.6, 1.0, size=3)],
         'lightDistance': float(rng.uniform(3.0, 8.0)),
+        'camJitter': [float(v) for v in rng.uniform(-0.2, 0.2, size=3)],
     }
 
 
@@ -287,6 +290,7 @@ _DEFAULT_LIGHTING = {
     'lightDirection': [1, -1, 2],
     'lightColor': [1.0, 1.0, 1.0],
     'lightDistance': 5.0,
+    'camJitter': [0.0, 0.0, 0.0],
 }
 
 
@@ -294,8 +298,9 @@ def _render_scene(physics_client, lighting=None):
     """Render 64x64 image, return RGBA, depth, segmentation as raw bytes."""
     if lighting is None:
         lighting = _DEFAULT_LIGHTING
+    jitter = lighting.get('camJitter', [0.0, 0.0, 0.0])
     view_matrix = p.computeViewMatrix(
-        cameraEyePosition=[0, -3, 2],
+        cameraEyePosition=[0 + jitter[0], -3 + jitter[1], 2 + jitter[2]],
         cameraTargetPosition=[0, 0, 0.3],
         cameraUpVector=[0, 0, 1],
         physicsClientId=physics_client,

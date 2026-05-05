@@ -26,7 +26,7 @@ from scene_generator import (
 def test_dim_constants():
     # Documented constants must match what the encoders actually emit.
     assert SCENE_CONFIG_DIM == 9
-    assert SCENE_LIGHTING_DIM == 8
+    assert SCENE_LIGHTING_DIM == 11
 
 
 # --- _encode_scene_config -----------------------------------------------
@@ -84,11 +84,12 @@ def test_encode_scene_lighting(tiny_lighting):
     vec = _encode_scene_lighting(0.55, tiny_lighting)
     assert vec.dtype == np.float32
     assert vec.shape == (SCENE_LIGHTING_DIM,)
-    # Layout: [pillar_gray, *lightDirection(3), *lightColor(3), lightDistance]
+    # Layout: [pillar_gray, *lightDirection(3), *lightColor(3), lightDistance, *camJitter(3)]
     assert vec[0] == pytest.approx(0.55)
     np.testing.assert_allclose(vec[1:4], tiny_lighting["lightDirection"])
     np.testing.assert_allclose(vec[4:7], tiny_lighting["lightColor"])
     assert vec[7] == pytest.approx(tiny_lighting["lightDistance"])
+    np.testing.assert_allclose(vec[8:11], tiny_lighting["camJitter"])
 
 
 # --- _build_program_state ------------------------------------------------
@@ -168,15 +169,23 @@ def test_property_encode_scene_config(is_box, radius, half_extents, color):
     direction=st.lists(finite_floats, min_size=3, max_size=3),
     color=st.lists(unit_floats, min_size=3, max_size=3),
     distance=st.floats(min_value=0.5, max_value=20.0, allow_nan=False, width=32),
+    cam_jitter=st.lists(finite_floats, min_size=3, max_size=3),
 )
-def test_property_encode_scene_lighting(pillar_gray, direction, color, distance):
-    lighting = {"lightDirection": direction, "lightColor": color, "lightDistance": distance}
+def test_property_encode_scene_lighting(pillar_gray, direction, color, distance,
+                                        cam_jitter):
+    lighting = {
+        "lightDirection": direction,
+        "lightColor": color,
+        "lightDistance": distance,
+        "camJitter": cam_jitter,
+    }
     vec = _encode_scene_lighting(pillar_gray, lighting)
     assert vec.shape == (SCENE_LIGHTING_DIM,)
     assert vec[0] == pytest.approx(pillar_gray)
     np.testing.assert_allclose(vec[1:4], direction)
     np.testing.assert_allclose(vec[4:7], color)
     assert vec[7] == pytest.approx(distance)
+    np.testing.assert_allclose(vec[8:11], cam_jitter)
 
 
 # --- Slow integration tests --------------------------------------------
