@@ -101,11 +101,12 @@ def _score_next_frame_pixels(pixel_input_pca, target_pixel_pca,
     across scenes identifies the dynamic region, and R² is measured only there.
 
     If initial_raw is also provided ([n_scenes, n_pixels] float), additionally
-    computes delta-frame R²: R² on (next_frame − current_frame) in raw pixel
-    space. Static background pixels become zero in the delta, removing their
-    inflation of R²; the only residual signal is the object-displacement
-    pattern (dark ghost + bright arrival blob), which a blurry prediction
-    cannot match precisely.
+    computes delta-frame R²: R² on (fourth_frame − first_frame) in raw pixel
+    space, i.e. the difference between the behavioral target (t=N_TIMESTEPS)
+    and the t=0 render. Static background pixels are zero in the delta,
+    removing their inflation of R²; the only residual signal is the
+    object-displacement pattern, which a blurry prediction cannot match
+    precisely.
 
     Returns (pixel_score, physics_score, metric_label, chance_line,
              fg_pixel_score, fg_physics_score, delta_pixel_score, delta_physics_score).

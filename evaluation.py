@@ -207,7 +207,7 @@ def evaluate(encoding_results, rsa_results, dissociation_results,
                 "Delta-frame: physics oracle near-perfect in delta space",
                 delta_phys > 0.90,
                 f"delta R² = {delta_phys:.4f}",
-                "expect > 0.90 — static bg cancels, oracle re-renders object shift exactly",
+                "expect > 0.90 — static bg cancels in frame4−frame1 delta, oracle is exact",
             )
             check(
                 "Delta-frame: pixel model poor in delta space",
