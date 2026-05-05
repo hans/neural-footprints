@@ -27,6 +27,7 @@ from config import (
     PP_LATE_FRAME as _CFG_PP_LATE_FRAME,
     CAMERA_FOV as _CFG_CAMERA_FOV,
     LINVEL_X_MAX as _CFG_LINVEL_X_MAX,
+    X_ACCEL_MAX as _CFG_X_ACCEL_MAX,
 )
 
 
@@ -136,7 +137,7 @@ def _create_scene(physics_client, rng):
                         physicsClientId=physics_client)
 
     # Random x-acceleration (invisible in initial frame, breaks pixel predictability)
-    x_accel = float(rng.uniform(-15.0, 15.0))
+    x_accel = float(rng.uniform(-_CFG_X_ACCEL_MAX, _CFG_X_ACCEL_MAX))
     shape_configs[0]['x_accel'] = x_accel
 
     return body_ids, masses, frictions, is_occluded, shape_configs, pillar_gray
