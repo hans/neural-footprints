@@ -10,6 +10,7 @@ cfg = load_config()
 scenes = generate_scenes(
     cfg['n_scenes'], cfg['random_seed'],
     n_timesteps=cfg['n_timesteps'],
+    use_gui=True,
 )
 
 save_scenes(scenes, snakemake.output.scenes)

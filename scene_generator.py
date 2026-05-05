@@ -47,6 +47,7 @@ def _create_ground(physics_client, ground_color):
                       basePosition=[0, 0, 0], physicsClientId=physics_client)
     ground_vis = p.createVisualShape(p.GEOM_BOX, halfExtents=[20, 20, 0.001],
                                      rgbaColor=ground_color + [1.0],
+                                     specularColor=[0, 0, 0],
                                      physicsClientId=physics_client)
     p.createMultiBody(baseMass=0, baseCollisionShapeIndex=-1,
                       baseVisualShapeIndex=ground_vis,
@@ -563,7 +564,7 @@ def _build_program_state(frame_renders, physics_labels,
                                           lighting_vec])
 
 
-def generate_scenes(n_scenes, seed, *, n_timesteps=None):
+def generate_scenes(n_scenes, seed, *, n_timesteps=None, use_gui=False):
     """
     Generate n_scenes PyBullet scenes, returning program states and analysis labels.
 
@@ -613,72 +614,81 @@ def generate_scenes(n_scenes, seed, *, n_timesteps=None):
     all_pillar_grays = []
     all_lightings = []
 
-    for i in range(n_scenes):
-        if (i + 1) % 100 == 0 or i == 0:
-            print(f"  Generating scene {i+1}/{n_scenes}...")
+    # Reuse one connection for all scenes (resetSimulation between scenes).
+    # GUI mode enables OpenGL shadow rendering; DIRECT is faster but shadowless.
+    pc = p.connect(p.GUI if use_gui else p.DIRECT)
+    if use_gui:
+        p.configureDebugVisualizer(p.COV_ENABLE_GUI, 0, physicsClientId=pc)
+        p.configureDebugVisualizer(p.COV_ENABLE_SHADOWS, 1, physicsClientId=pc)
 
-        pc = p.connect(p.DIRECT)
-        scene_seed = rng.integers(0, 2**31)
-        scene_rng = np.random.default_rng(scene_seed)
+    try:
+        for i in range(n_scenes):
+            if (i + 1) % 100 == 0 or i == 0:
+                print(f"  Generating scene {i+1}/{n_scenes}...")
 
-        body_ids, masses, frictions, is_occluded, shape_configs, pillar_gray = _create_scene(pc, scene_rng)
-        all_scene_configs.append(shape_configs)
-        all_pillar_grays.append(pillar_gray)
+            p.resetSimulation(physicsClientId=pc)
+            scene_seed = rng.integers(0, 2**31)
+            scene_rng = np.random.default_rng(scene_seed)
 
-        # Sample lighting once per scene (consistent across all frames)
-        lighting = _sample_lighting(scene_rng)
-        all_lightings.append(lighting)
+            body_ids, masses, frictions, is_occluded, shape_configs, pillar_gray = _create_scene(pc, scene_rng)
+            all_scene_configs.append(shape_configs)
+            all_pillar_grays.append(pillar_gray)
 
-        # Capture initial state (t=0) before stepping
-        applied_accels = [cfg.get('x_accel', 0.0) for cfg in shape_configs]
-        initial_physics_labels[i] = _collect_physics_labels(
-            body_ids, masses, frictions, pc, applied_accels=applied_accels,
-        )
-        init_frame = _render_scene(pc, lighting=lighting)
-        initial_renders[i] = _frame_render_vec(*init_frame)
+            # Sample lighting once per scene (consistent across all frames)
+            lighting = _sample_lighting(scene_rng)
+            all_lightings.append(lighting)
 
-        # Step physics (with per-scene random x-acceleration as external force).
-        # Capture full RGBA+depth+seg frames at t=PP_EARLY_FRAME and
-        # t=PP_LATE_FRAME (the brain's later observations) and at
-        # t=n_timesteps (the behavioral prediction target, not in brain data).
-        early_frame = None
-        late_frame = None
-        target_frame = None
-        for t in range(n_timesteps):
-            for obj_idx, bid in enumerate(body_ids):
-                x_accel = shape_configs[obj_idx].get('x_accel', 0.0)
-                if x_accel != 0.0:
-                    p.applyExternalForce(bid, -1,
-                                         [x_accel * masses[obj_idx], 0, 0],
-                                         [0, 0, 0], p.WORLD_FRAME,
-                                         physicsClientId=pc)
-            p.stepSimulation(physicsClientId=pc)
-            _lock_rotation(body_ids, pc)
-            if t + 1 == _CFG_PP_EARLY_FRAME:
-                early_frame = _render_scene(pc, lighting=lighting)
-                early_renders[i] = _frame_render_vec(*early_frame)
-            if t + 1 == _CFG_PP_LATE_FRAME:
-                late_frame = _render_scene(pc, lighting=lighting)
-                late_renders[i] = _frame_render_vec(*late_frame)
+            _rnd = lambda: _render_scene(pc, lighting=lighting, use_opengl=use_gui)
 
-        # Collect final-state analysis labels (NOT used in neural generation)
-        physics_labels[i] = _collect_physics_labels(
-            body_ids, masses, frictions, pc, applied_accels=applied_accels,
-        )
-        kinetic_energies[i] = _compute_total_kinetic_energy(body_ids, masses, pc)
+            # Capture initial state (t=0) before stepping
+            applied_accels = [cfg.get('x_accel', 0.0) for cfg in shape_configs]
+            initial_physics_labels[i] = _collect_physics_labels(
+                body_ids, masses, frictions, pc, applied_accels=applied_accels,
+            )
+            init_frame = _rnd()
+            initial_renders[i] = _frame_render_vec(*init_frame)
 
-        # Render behavioral target frame at t=n_timesteps (held out from brain)
-        target_frame = _render_scene(pc, lighting=lighting)
-        target_renders[i] = _frame_render_vec(*target_frame)
+            # Step physics (with per-scene random x-acceleration as external force).
+            # Capture full RGBA+depth+seg frames at t=PP_EARLY_FRAME and
+            # t=PP_LATE_FRAME (the brain's later observations) and at
+            # t=n_timesteps (the behavioral prediction target, not in brain data).
+            early_frame = None
+            late_frame = None
+            for t in range(n_timesteps):
+                for obj_idx, bid in enumerate(body_ids):
+                    x_accel = shape_configs[obj_idx].get('x_accel', 0.0)
+                    if x_accel != 0.0:
+                        p.applyExternalForce(bid, -1,
+                                             [x_accel * masses[obj_idx], 0, 0],
+                                             [0, 0, 0], p.WORLD_FRAME,
+                                             physicsClientId=pc)
+                p.stepSimulation(physicsClientId=pc)
+                _lock_rotation(body_ids, pc)
+                if t + 1 == _CFG_PP_EARLY_FRAME:
+                    early_frame = _rnd()
+                    early_renders[i] = _frame_render_vec(*early_frame)
+                if t + 1 == _CFG_PP_LATE_FRAME:
+                    late_frame = _rnd()
+                    late_renders[i] = _frame_render_vec(*late_frame)
 
-        # Build program state from the three brain-input frames.
-        scene_config_vec = _encode_scene_config(shape_configs)
-        lighting_vec = _encode_scene_lighting(pillar_gray, lighting)
-        program_states[i] = _build_program_state(
-            [init_frame, early_frame, late_frame],
-            physics_labels[i], scene_config_vec, lighting_vec,
-        )
+            # Collect final-state analysis labels (NOT used in neural generation)
+            physics_labels[i] = _collect_physics_labels(
+                body_ids, masses, frictions, pc, applied_accels=applied_accels,
+            )
+            kinetic_energies[i] = _compute_total_kinetic_energy(body_ids, masses, pc)
 
+            # Render behavioral target frame at t=n_timesteps (held out from brain)
+            target_frame = _rnd()
+            target_renders[i] = _frame_render_vec(*target_frame)
+
+            # Build program state from the three brain-input frames.
+            scene_config_vec = _encode_scene_config(shape_configs)
+            lighting_vec = _encode_scene_lighting(pillar_gray, lighting)
+            program_states[i] = _build_program_state(
+                [init_frame, early_frame, late_frame],
+                physics_labels[i], scene_config_vec, lighting_vec,
+            )
+    finally:
         p.disconnect(pc)
 
     # Behavior label: median split on total final kinetic energy.
