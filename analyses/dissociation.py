@@ -17,7 +17,7 @@ Two behavioral sufficiency objectives are supported (set in config.py):
 import numpy as np
 from sklearn.decomposition import PCA
 from sklearn.linear_model import LogisticRegressionCV
-from sklearn.model_selection import cross_val_score
+from sklearn.model_selection import cross_val_predict, cross_val_score
 from sklearn.neural_network import MLPRegressor
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
@@ -25,6 +25,33 @@ from sklearn.preprocessing import StandardScaler
 from config import BEHAVIORAL_PCA_DIM as _CFG_BEHAVIORAL_PCA_DIM
 from config import BEHAVIORAL_OBJECTIVE as _CFG_BEHAVIORAL_OBJECTIVE
 from scene_generator import extract_brain_pixels
+
+
+# ---------------------------------------------------------------------------
+# Foreground-masked R² utilities
+# ---------------------------------------------------------------------------
+
+def _foreground_pixel_mask(pixel_array, threshold_quantile=0.75):
+    """
+    Boolean mask of pixels with above-threshold variance across scenes.
+    High-variance pixels are in the dynamic region where the object moves.
+    pixel_array: [n_scenes, n_pixels] float
+    """
+    variances = pixel_array.var(axis=0)
+    threshold = np.quantile(variances, threshold_quantile)
+    return variances > threshold
+
+
+def _masked_pixel_r2(y_true, y_pred, mask):
+    """
+    R² over foreground pixels only.
+    y_true, y_pred: [n_scenes, n_pixels]; mask: [n_pixels] boolean.
+    """
+    y_t = y_true[:, mask]
+    y_p = y_pred[:, mask]
+    ss_res = np.sum((y_t - y_p) ** 2)
+    ss_tot = np.sum((y_t - y_t.mean(axis=0, keepdims=True)) ** 2)
+    return float(1.0 - ss_res / ss_tot) if ss_tot > 0 else 1.0
 
 
 # ---------------------------------------------------------------------------
@@ -51,7 +78,8 @@ def _pixel_prediction_r2(predicted_raw, actual_pca, scaler, pca):
 def _score_next_frame_pixels(pixel_input_pca, target_pixel_pca,
                               scene_configs, initial_physics_labels,
                               scaler_target, pca_target, pillar_grays=None,
-                              lightings=None, n_oracle=200):
+                              lightings=None, n_oracle=200, target_raw=None,
+                              initial_raw=None):
     """
     Behavioral sufficiency for next-frame pixel prediction.
 
@@ -68,12 +96,30 @@ def _score_next_frame_pixels(pixel_input_pca, target_pixel_pca,
                          physics state, render at t=N_TIMESTEPS, project into
                          the target PCA. Deterministic → ~1.0.
 
-    Returns (pixel_score, physics_score, metric_label, chance_line).
+    If target_raw is provided ([n_scenes, n_pixels] float in original pixel
+    space), also computes foreground-masked R² in raw pixel space: variance
+    across scenes identifies the dynamic region, and R² is measured only there.
+
+    If initial_raw is also provided ([n_scenes, n_pixels] float), additionally
+    computes delta-frame R²: R² on (fourth_frame − first_frame) in raw pixel
+    space, i.e. the difference between the behavioral target (t=N_TIMESTEPS)
+    and the t=0 render. Static background pixels are zero in the delta,
+    removing their inflation of R²; the only residual signal is the
+    object-displacement pattern, which a blurry prediction cannot match
+    precisely.
+
+    Returns (pixel_score, physics_score, metric_label, chance_line,
+             fg_pixel_score, fg_physics_score, delta_pixel_score, delta_physics_score).
+    fg_* and delta_* are None when the corresponding raw arrays are not provided.
     """
     from scene_generator import resimulate_scene
 
-    pixel_r2 = cross_val_score(_make_mlp(), pixel_input_pca, target_pixel_pca,
-                                cv=5, scoring='r2').mean()
+    # Use cross_val_predict so OOF predictions can be inverted to pixel space
+    # for the foreground-masked metric (also avoids fitting twice).
+    pixel_pred_pca = cross_val_predict(_make_mlp(), pixel_input_pca, target_pixel_pca, cv=5)
+    ss_res = np.sum((target_pixel_pca - pixel_pred_pca) ** 2)
+    ss_tot = np.sum((target_pixel_pca - target_pixel_pca.mean(axis=0, keepdims=True)) ** 2)
+    pixel_r2 = float(1.0 - ss_res / ss_tot) if ss_tot > 0 else 1.0
 
     n = min(n_oracle, len(scene_configs))
     oracle_raw = np.stack([
@@ -86,7 +132,32 @@ def _score_next_frame_pixels(pixel_input_pca, target_pixel_pca,
     physics_r2 = _pixel_prediction_r2(oracle_raw, target_pixel_pca[:n],
                                        scaler_target, pca_target)
 
-    return pixel_r2, physics_r2, "Next-frame pred. R²", None
+    fg_pixel_r2 = None
+    fg_physics_r2 = None
+    pixel_pred_raw = None
+    if target_raw is not None:
+        mask = _foreground_pixel_mask(target_raw.astype(float))
+        pixel_pred_raw = scaler_target.inverse_transform(
+            pca_target.inverse_transform(pixel_pred_pca))
+        fg_pixel_r2 = _masked_pixel_r2(target_raw.astype(float), pixel_pred_raw, mask)
+        fg_physics_r2 = _masked_pixel_r2(
+            target_raw[:n].astype(float), oracle_raw.astype(float), mask)
+
+    delta_pixel_r2 = None
+    delta_physics_r2 = None
+    if target_raw is not None and initial_raw is not None:
+        init_f = initial_raw.astype(float)
+        delta_target = target_raw.astype(float) - init_f
+        delta_pred = pixel_pred_raw - init_f
+        delta_oracle = oracle_raw.astype(float) - init_f[:n]
+        ss_res = np.sum((delta_target - delta_pred) ** 2)
+        ss_tot = np.sum((delta_target - delta_target.mean(axis=0, keepdims=True)) ** 2)
+        delta_pixel_r2 = float(1.0 - ss_res / ss_tot) if ss_tot > 0 else 1.0
+        ss_res_o = np.sum((delta_target[:n] - delta_oracle) ** 2)
+        ss_tot_o = np.sum((delta_target[:n] - delta_target[:n].mean(axis=0, keepdims=True)) ** 2)
+        delta_physics_r2 = float(1.0 - ss_res_o / ss_tot_o) if ss_tot_o > 0 else 1.0
+
+    return pixel_r2, physics_r2, "Next-frame pred. R²", None, fg_pixel_r2, fg_physics_r2, delta_pixel_r2, delta_physics_r2
 
 
 def _compute_predicted_frames(
@@ -233,6 +304,7 @@ def run_dissociation_analysis(neural_activity, scenes, neural_meta,
     # high-frequency components where blur is visible while avoiding
     # static-background inflation from near-zero-variance pixels.
     target_rgba = target_renders[:, target_pixel_indices]
+    initial_rgba = initial_renders[:, target_pixel_indices]
     scaler_target = StandardScaler()
     target_scaled = scaler_target.fit_transform(target_rgba)
     pca_target = PCA(n_components=behavioral_pca_dim, whiten=True, random_state=42)
@@ -242,12 +314,16 @@ def run_dissociation_analysis(neural_activity, scenes, neural_meta,
     print(f"Computing behavioral sufficiency ({objective})...")
 
     if objective == "next_frame_pixels":
-        pixel_score, physics_score, metric_label, chance = _score_next_frame_pixels(
-            pixel_input_pca, target_pixel_pca,
-            scene_configs, initial_physics_labels,
-            scaler_target, pca_target, pillar_grays=pillar_grays,
-            lightings=lightings,
-        )
+        pixel_score, physics_score, metric_label, chance, fg_pixel_score, fg_physics_score, \
+            delta_pixel_score, delta_physics_score = \
+            _score_next_frame_pixels(
+                pixel_input_pca, target_pixel_pca,
+                scene_configs, initial_physics_labels,
+                scaler_target, pca_target, pillar_grays=pillar_grays,
+                lightings=lightings,
+                target_raw=target_rgba,
+                initial_raw=initial_rgba,
+            )
         # Combined model: same oracle as physics-only — if you have the
         # physics state you can re-simulate deterministically.
         combined_score = physics_score
@@ -256,6 +332,10 @@ def run_dissociation_analysis(neural_activity, scenes, neural_meta,
         pixel_score, physics_score, metric_label, chance = _score_kinetic_energy(
             pixel_pca, physics_scaled, behavior_labels
         )
+        fg_pixel_score = None
+        fg_physics_score = None
+        delta_pixel_score = None
+        delta_physics_score = None
         combined_features = np.hstack([pixel_pca, physics_scaled])
         log_reg = LogisticRegressionCV(cv=5, max_iter=1000, random_state=42)
         combined_score = cross_val_score(
@@ -278,6 +358,12 @@ def run_dissociation_analysis(neural_activity, scenes, neural_meta,
     print(f"  Pixel          → {metric_label}: {pixel_score:.4f}")
     print(f"  Physics        → {metric_label}: {physics_score:.4f}")
     print(f"  Pixel+physics  → {metric_label}: {combined_score:.4f}")
+    if fg_pixel_score is not None:
+        print(f"  Foreground-masked pixel  R²:  {fg_pixel_score:.4f}")
+        print(f"  Foreground-masked physics R²: {fg_physics_score:.4f}")
+    if delta_pixel_score is not None:
+        print(f"  Delta-frame pixel  R²:        {delta_pixel_score:.4f}")
+        print(f"  Delta-frame physics R²:       {delta_physics_score:.4f}")
 
     print("\n  DISSOCIATION:")
     print(f"    Pixel model:          R² = {mean_r2_pixel:.4f}  |  {metric_label} = {pixel_score:.4f}")
@@ -294,6 +380,10 @@ def run_dissociation_analysis(neural_activity, scenes, neural_meta,
         'pixel_behavioral_score': pixel_score,
         'physics_behavioral_score': physics_score,
         'combined_behavioral_score': combined_score,
+        'fg_pixel_behavioral_score': float(fg_pixel_score) if fg_pixel_score is not None else float('nan'),
+        'fg_physics_behavioral_score': float(fg_physics_score) if fg_physics_score is not None else float('nan'),
+        'delta_pixel_behavioral_score': float(delta_pixel_score) if delta_pixel_score is not None else float('nan'),
+        'delta_physics_behavioral_score': float(delta_physics_score) if delta_physics_score is not None else float('nan'),
         'metric_label': metric_label,
         'objective': objective,
         'chance': chance if chance is not None else float('nan'),
