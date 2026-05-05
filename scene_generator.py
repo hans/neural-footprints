@@ -367,10 +367,20 @@ def _render_scene(physics_client, lighting=None, render_size=None,
     return rgba_bytes, depth_bytes, seg_bytes
 
 
+def open_render_client(use_gui=False):
+    """Open a PyBullet physics client for rendering. Caller must disconnect."""
+    pc = p.connect(p.GUI if use_gui else p.DIRECT,
+                   options="--width=64 --height=64" if use_gui else "")
+    if use_gui:
+        p.configureDebugVisualizer(p.COV_ENABLE_GUI, 0, physicsClientId=pc)
+        p.configureDebugVisualizer(p.COV_ENABLE_SHADOWS, 1, physicsClientId=pc)
+    return pc
+
+
 def resimulate_scene(shape_configs, initial_physics_row, *,
                      n_timesteps=None, return_program_state=False,
                      pillar_gray=0.5, lighting=None, render_size=None,
-                     use_gui=False):
+                     use_gui=False, physics_client=None):
     """
     Rebuild a scene from stored shape configs + initial physics state, step
     N_TIMESTEPS, and return the rendered result.
@@ -386,6 +396,9 @@ def resimulate_scene(shape_configs, initial_physics_row, *,
                              per object: pos(3), orn(4), lin_vel(3), ang_vel(3), mass(1), friction(1), x_accel(1)
         return_program_state: if True, return full program_state float32 vector
                              (3-frame render buffers + physics labels + scene config + lighting).
+        physics_client:      existing client ID to reuse (caller manages lifecycle;
+                             resetSimulation is called between scenes). If None,
+                             a fresh client is opened and closed by this function.
 
     Returns:
         If return_program_state=False: RGBA uint8 [IMAGE_SIZE, IMAGE_SIZE, 4]
@@ -396,10 +409,12 @@ def resimulate_scene(shape_configs, initial_physics_row, *,
     """
     if n_timesteps is None:
         n_timesteps = _CFG_N_TIMESTEPS
-    pc = p.connect(p.GUI if use_gui else p.DIRECT)
-    if use_gui:
-        p.configureDebugVisualizer(p.COV_ENABLE_GUI, 0, physicsClientId=pc)
-        p.configureDebugVisualizer(p.COV_ENABLE_SHADOWS, 1, physicsClientId=pc)
+    owns_client = physics_client is None
+    if owns_client:
+        pc = open_render_client(use_gui)
+    else:
+        pc = physics_client
+        p.resetSimulation(physicsClientId=pc)
     p.setGravity(0, 0, -9.81, physicsClientId=pc)
     _bg = lighting if lighting is not None else _DEFAULT_LIGHTING
     _create_ground(pc, _bg.get('groundColor', [0.6, 0.6, 0.6]))
@@ -498,7 +513,8 @@ def resimulate_scene(shape_configs, initial_physics_row, *,
         )
         scene_config_vec = _encode_scene_config(shape_configs)
         lighting_vec = _encode_scene_lighting(pillar_gray, lighting or _DEFAULT_LIGHTING)
-        p.disconnect(pc)
+        if owns_client:
+            p.disconnect(pc)
         return _build_program_state(
             [initial_frame, early_frame, late_frame],
             final_physics, scene_config_vec, lighting_vec,
@@ -508,7 +524,8 @@ def resimulate_scene(shape_configs, initial_physics_row, *,
         size = render_size if render_size is not None else IMAGE_SIZE
         rgba_bytes, _, _ = _render_scene(pc, lighting=lighting,
                                          render_size=render_size, use_opengl=use_gui)
-        p.disconnect(pc)
+        if owns_client:
+            p.disconnect(pc)
         return np.frombuffer(rgba_bytes, dtype=np.uint8).reshape(size, size, 4)
 
 
@@ -616,7 +633,8 @@ def generate_scenes(n_scenes, seed, *, n_timesteps=None, use_gui=False):
 
     # Reuse one connection for all scenes (resetSimulation between scenes).
     # GUI mode enables OpenGL shadow rendering; DIRECT is faster but shadowless.
-    pc = p.connect(p.GUI if use_gui else p.DIRECT)
+    pc = p.connect(p.GUI if use_gui else p.DIRECT,
+                    options="--width=64 --height=64" if use_gui else "")
     if use_gui:
         p.configureDebugVisualizer(p.COV_ENABLE_GUI, 0, physicsClientId=pc)
         p.configureDebugVisualizer(p.COV_ENABLE_SHADOWS, 1, physicsClientId=pc)

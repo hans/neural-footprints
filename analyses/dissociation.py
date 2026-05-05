@@ -112,7 +112,8 @@ def _score_next_frame_pixels(pixel_input_pca, target_pixel_pca,
              fg_pixel_score, fg_physics_score, delta_pixel_score, delta_physics_score).
     fg_* and delta_* are None when the corresponding raw arrays are not provided.
     """
-    from scene_generator import resimulate_scene
+    import pybullet as _p
+    from scene_generator import resimulate_scene, open_render_client
 
     # Use cross_val_predict so OOF predictions can be inverted to pixel space
     # for the foreground-masked metric (also avoids fitting twice).
@@ -122,13 +123,18 @@ def _score_next_frame_pixels(pixel_input_pca, target_pixel_pca,
     pixel_r2 = float(1.0 - ss_res / ss_tot) if ss_tot > 0 else 1.0
 
     n = min(n_oracle, len(scene_configs))
-    oracle_raw = np.stack([
-        resimulate_scene(scene_configs[i], initial_physics_labels[i],
-                         pillar_gray=pillar_grays[i] if pillar_grays is not None else 0.5,
-                         lighting=lightings[i] if lightings is not None else None,
-                         ).reshape(-1).astype(np.float32)
-        for i in range(n)
-    ])
+    _pc = open_render_client(use_gui=True)
+    try:
+        oracle_raw = np.stack([
+            resimulate_scene(scene_configs[i], initial_physics_labels[i],
+                             pillar_gray=pillar_grays[i] if pillar_grays is not None else 0.5,
+                             lighting=lightings[i] if lightings is not None else None,
+                             use_gui=True, physics_client=_pc,
+                             ).reshape(-1).astype(np.float32)
+            for i in range(n)
+        ])
+    finally:
+        _p.disconnect(_pc)
     physics_r2 = _pixel_prediction_r2(oracle_raw, target_pixel_pca[:n],
                                        scaler_target, pca_target)
 
@@ -173,8 +179,9 @@ def _compute_predicted_frames(
     `target_imgs` is the ground-truth t=N_TIMESTEPS RGBA — the behavioral
     prediction target.
     """
+    import pybullet as _p
     from config import IMAGE_SIZE
-    from scene_generator import resimulate_scene
+    from scene_generator import resimulate_scene, open_render_client
 
     n = min(n_samples, len(initial_renders))
 
@@ -191,12 +198,17 @@ def _compute_predicted_frames(
     pixel_imgs = pca_to_img(pixel_pred_pca)
 
     # Physics oracle: re-simulate to t=N_TIMESTEPS, return target RGBA frame
-    physics_imgs = np.stack([
-        resimulate_scene(scene_configs[j], initial_physics_labels[j],
-                         pillar_gray=pillar_grays[j] if pillar_grays is not None else 0.5,
-                         lighting=lightings[j] if lightings is not None else None)
-        for j in range(n)
-    ])
+    _pc = open_render_client(use_gui=True)
+    try:
+        physics_imgs = np.stack([
+            resimulate_scene(scene_configs[j], initial_physics_labels[j],
+                             pillar_gray=pillar_grays[j] if pillar_grays is not None else 0.5,
+                             lighting=lightings[j] if lightings is not None else None,
+                             use_gui=True, physics_client=_pc)
+            for j in range(n)
+        ])
+    finally:
+        _p.disconnect(_pc)
 
     # initial_renders / target_renders hold full RGBA+depth+seg per frame;
     # slice the leading RGBA bytes for visualization.
