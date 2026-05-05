@@ -314,10 +314,18 @@ _DEFAULT_LIGHTING = {
 }
 
 
-def _render_scene(physics_client, lighting=None):
-    """Render 64x64 image, return RGBA, depth, segmentation as raw bytes."""
+def _render_scene(physics_client, lighting=None, render_size=None,
+                  use_opengl=False):
+    """Render image, return RGBA, depth, segmentation as raw bytes.
+
+    render_size overrides IMAGE_SIZE when set; only use for visualization,
+    not for building program_state (which must match IMAGE_SIZE).
+    use_opengl uses ER_BULLET_HARDWARE_OPENGL (shadows); requires a GUI
+    connection — only safe for visualization renders, not the pipeline.
+    """
     if lighting is None:
         lighting = _DEFAULT_LIGHTING
+    size = render_size if render_size is not None else IMAGE_SIZE
     jitter = lighting.get('camJitter', [0.0, 0.0, 0.0])
     tj = lighting.get('camTargetJitter', [0.0, 0.0, 0.0])
     view_matrix = p.computeViewMatrix(
@@ -331,8 +339,8 @@ def _render_scene(physics_client, lighting=None):
         physicsClientId=physics_client,
     )
 
-    _, _, rgba, depth, seg = p.getCameraImage(
-        width=IMAGE_SIZE, height=IMAGE_SIZE,
+    kwargs = dict(
+        width=size, height=size,
         viewMatrix=view_matrix,
         projectionMatrix=proj_matrix,
         shadow=1,
@@ -342,10 +350,14 @@ def _render_scene(physics_client, lighting=None):
         lightAmbientCoeff=lighting.get('lightAmbientCoeff', 0.4),
         physicsClientId=physics_client,
     )
+    if use_opengl:
+        kwargs['renderer'] = p.ER_BULLET_HARDWARE_OPENGL
 
-    rgba_arr = np.array(rgba, dtype=np.uint8).reshape(IMAGE_SIZE, IMAGE_SIZE, 4)
-    depth_arr = np.array(depth, dtype=np.float32).reshape(IMAGE_SIZE, IMAGE_SIZE)
-    seg_arr = np.array(seg, dtype=np.int32).reshape(IMAGE_SIZE, IMAGE_SIZE)
+    _, _, rgba, depth, seg = p.getCameraImage(**kwargs)
+
+    rgba_arr = np.array(rgba, dtype=np.uint8).reshape(size, size, 4)
+    depth_arr = np.array(depth, dtype=np.float32).reshape(size, size)
+    seg_arr = np.array(seg, dtype=np.int32).reshape(size, size)
 
     rgba_bytes = rgba_arr.tobytes()
     depth_bytes = depth_arr.tobytes()
@@ -356,7 +368,8 @@ def _render_scene(physics_client, lighting=None):
 
 def resimulate_scene(shape_configs, initial_physics_row, *,
                      n_timesteps=None, return_program_state=False,
-                     pillar_gray=0.5, lighting=None):
+                     pillar_gray=0.5, lighting=None, render_size=None,
+                     use_gui=False):
     """
     Rebuild a scene from stored shape configs + initial physics state, step
     N_TIMESTEPS, and return the rendered result.
@@ -382,7 +395,10 @@ def resimulate_scene(shape_configs, initial_physics_row, *,
     """
     if n_timesteps is None:
         n_timesteps = _CFG_N_TIMESTEPS
-    pc = p.connect(p.DIRECT)
+    pc = p.connect(p.GUI if use_gui else p.DIRECT)
+    if use_gui:
+        p.configureDebugVisualizer(p.COV_ENABLE_GUI, 0, physicsClientId=pc)
+        p.configureDebugVisualizer(p.COV_ENABLE_SHADOWS, 1, physicsClientId=pc)
     p.setGravity(0, 0, -9.81, physicsClientId=pc)
     _bg = lighting if lighting is not None else _DEFAULT_LIGHTING
     _create_ground(pc, _bg.get('groundColor', [0.6, 0.6, 0.6]))
@@ -453,7 +469,8 @@ def resimulate_scene(shape_configs, initial_physics_row, *,
     # Render the brain-input frames (t=0, t=PP_EARLY_FRAME, t=PP_LATE_FRAME)
     # only when building a full program_state. For RGBA-target callers we
     # only need the behavioral target at t=n_timesteps.
-    initial_frame = _render_scene(pc, lighting=lighting) if return_program_state else None
+    _rnd = lambda: _render_scene(pc, lighting=lighting, use_opengl=use_gui)
+    initial_frame = _rnd() if return_program_state else None
     early_frame = None
     late_frame = None
 
@@ -468,9 +485,9 @@ def resimulate_scene(shape_configs, initial_physics_row, *,
         p.stepSimulation(physicsClientId=pc)
         _lock_rotation(body_ids, pc)
         if return_program_state and t + 1 == _CFG_PP_EARLY_FRAME:
-            early_frame = _render_scene(pc, lighting=lighting)
+            early_frame = _rnd()
         if return_program_state and t + 1 == _CFG_PP_LATE_FRAME:
-            late_frame = _render_scene(pc, lighting=lighting)
+            late_frame = _rnd()
 
     if return_program_state:
         applied_accels = [cfg.get('x_accel', 0.0) for cfg in shape_configs]
@@ -487,10 +504,11 @@ def resimulate_scene(shape_configs, initial_physics_row, *,
         )
     else:
         # Behavioral target frame at t=n_timesteps.
-        rgba_bytes, _, _ = _render_scene(pc, lighting=lighting)
+        size = render_size if render_size is not None else IMAGE_SIZE
+        rgba_bytes, _, _ = _render_scene(pc, lighting=lighting,
+                                         render_size=render_size, use_opengl=use_gui)
         p.disconnect(pc)
-        return np.frombuffer(rgba_bytes, dtype=np.uint8).reshape(
-            IMAGE_SIZE, IMAGE_SIZE, 4)
+        return np.frombuffer(rgba_bytes, dtype=np.uint8).reshape(size, size, 4)
 
 
 def _frame_render_vec(rgba_bytes, depth_bytes, seg_bytes):
