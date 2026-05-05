@@ -39,6 +39,20 @@ PILLAR_Y_CENTER = -1.0
 PILLAR_Z_CENTER = 0.75
 
 
+def _create_ground(physics_client, ground_color):
+    """Infinite collision plane (physics) + solid-color visual box (render)."""
+    ground_col = p.createCollisionShape(p.GEOM_PLANE, planeNormal=[0, 0, 1],
+                                        physicsClientId=physics_client)
+    p.createMultiBody(baseMass=0, baseCollisionShapeIndex=ground_col,
+                      basePosition=[0, 0, 0], physicsClientId=physics_client)
+    ground_vis = p.createVisualShape(p.GEOM_BOX, halfExtents=[20, 20, 0.001],
+                                     rgbaColor=ground_color + [1.0],
+                                     physicsClientId=physics_client)
+    p.createMultiBody(baseMass=0, baseCollisionShapeIndex=-1,
+                      baseVisualShapeIndex=ground_vis,
+                      basePosition=[0, 0, 0], physicsClientId=physics_client)
+
+
 def _create_scene(physics_client, rng):
     """
     Spawn ground plane + central occluding pillar + single rigid body.
@@ -47,24 +61,12 @@ def _create_scene(physics_client, rng):
     moves with a random x-only velocity. Depending on direction and speed,
     it may end up behind the pillar in the final frame.
 
-    Varying per scene: shape (sphere/box), color, x-velocity direction.
+    Varying per scene: shape (sphere/box), color, x-velocity direction,
+    ground color.
     """
     p.setGravity(0, 0, -9.81, physicsClientId=physics_client)
 
-    # Ground: infinite collision plane (physics) + solid-color visual box.
-    # plane.urdf has a baked checkerboard texture that changeVisualShape
-    # cannot override, so we separate the two bodies: GEOM_PLANE for
-    # collision and a large GEOM_BOX for the visible surface.
-    ground_col = p.createCollisionShape(p.GEOM_PLANE, planeNormal=[0, 0, 1],
-                                        physicsClientId=physics_client)
-    p.createMultiBody(baseMass=0, baseCollisionShapeIndex=ground_col,
-                      basePosition=[0, 0, 0], physicsClientId=physics_client)
-    ground_vis = p.createVisualShape(p.GEOM_BOX, halfExtents=[20, 20, 0.001],
-                                     rgbaColor=[0.6, 0.6, 0.6, 1.0],
-                                     physicsClientId=physics_client)
-    p.createMultiBody(baseMass=0, baseCollisionShapeIndex=-1,
-                      baseVisualShapeIndex=ground_vis,
-                      basePosition=[0, 0, 0], physicsClientId=physics_client)
+    _create_ground(physics_client, [0.6, 0.6, 0.6])
 
     # Central vertical pillar at x=0: VISUAL ONLY (no collision).
     # Objects pass through it freely — physics is unaffected.
@@ -96,7 +98,7 @@ def _create_scene(physics_client, rng):
 
     # Random shape: sphere or box
     if rng.random() < 0.5:
-        radius = float(rng.uniform(0.1, 0.35))
+        radius = float(rng.uniform(0.07, 0.5))
         col_shape = p.createCollisionShape(p.GEOM_SPHERE, radius=radius,
                                            physicsClientId=physics_client)
         vis_shape = p.createVisualShape(p.GEOM_SPHERE, radius=radius,
@@ -105,7 +107,7 @@ def _create_scene(physics_client, rng):
                                         physicsClientId=physics_client)
         shape_cfg = {'shape': 'sphere', 'params': {'radius': radius}, 'color': list(color)}
     else:
-        half_extents = [float(v) for v in rng.uniform(0.1, 0.35, size=3)]
+        half_extents = [float(v) for v in rng.uniform(0.07, 0.5, size=3)]
         col_shape = p.createCollisionShape(p.GEOM_BOX, halfExtents=half_extents,
                                            physicsClientId=physics_client)
         vis_shape = p.createVisualShape(p.GEOM_BOX, halfExtents=half_extents,
@@ -251,20 +253,21 @@ SCENE_CONFIG_DIM = 9  # per object
 
 def _encode_scene_lighting(pillar_gray, lighting):
     """
-    Encode per-scene lighting + camera parameters into a fixed-length float32 vector.
+    Encode per-scene lighting and camera parameters into a fixed-length float32 vector.
 
     pillar_gray(1), lightDirection(3), lightColor(3), lightDistance(1),
-    camJitter(3) = 11 floats.
+    camJitter(3), camTargetJitter(3) = 14 floats.
     """
     vec = [pillar_gray]
     vec.extend(lighting['lightDirection'])
     vec.extend(lighting['lightColor'])
     vec.append(lighting['lightDistance'])
     vec.extend(lighting.get('camJitter', [0.0, 0.0, 0.0]))
+    vec.extend(lighting.get('camTargetJitter', [0.0, 0.0, 0.0]))
     return np.array(vec, dtype=np.float32)
 
 
-SCENE_LIGHTING_DIM = 11
+SCENE_LIGHTING_DIM = 14
 
 
 def _compute_total_kinetic_energy(body_ids, masses, physics_client):
@@ -292,7 +295,10 @@ def _sample_lighting(rng):
                            float(rng.uniform(1, 3))],
         'lightColor': [float(c) for c in rng.uniform(0.6, 1.0, size=3)],
         'lightDistance': float(rng.uniform(3.0, 8.0)),
-        'camJitter': [float(v) for v in rng.uniform(-0.2, 0.2, size=3)],
+        'camJitter': [float(v) for v in rng.uniform(-0.3, 0.3, size=3)],
+        'camTargetJitter': [float(rng.uniform(-0.15, 0.15)),
+                            0.0,
+                            float(rng.uniform(-0.1, 0.1))],
     }
 
 
@@ -301,6 +307,7 @@ _DEFAULT_LIGHTING = {
     'lightColor': [1.0, 1.0, 1.0],
     'lightDistance': 5.0,
     'camJitter': [0.0, 0.0, 0.0],
+    'camTargetJitter': [0.0, 0.0, 0.0],
 }
 
 
@@ -309,9 +316,10 @@ def _render_scene(physics_client, lighting=None):
     if lighting is None:
         lighting = _DEFAULT_LIGHTING
     jitter = lighting.get('camJitter', [0.0, 0.0, 0.0])
+    tj = lighting.get('camTargetJitter', [0.0, 0.0, 0.0])
     view_matrix = p.computeViewMatrix(
         cameraEyePosition=[0 + jitter[0], -3 + jitter[1], 2 + jitter[2]],
-        cameraTargetPosition=[0, 0, 0.3],
+        cameraTargetPosition=[0 + tj[0], 0 + tj[1], 0.3 + tj[2]],
         cameraUpVector=[0, 0, 1],
         physicsClientId=physics_client,
     )
@@ -372,16 +380,8 @@ def resimulate_scene(shape_configs, initial_physics_row, *,
         n_timesteps = _CFG_N_TIMESTEPS
     pc = p.connect(p.DIRECT)
     p.setGravity(0, 0, -9.81, physicsClientId=pc)
-    ground_col = p.createCollisionShape(p.GEOM_PLANE, planeNormal=[0, 0, 1],
-                                        physicsClientId=pc)
-    p.createMultiBody(baseMass=0, baseCollisionShapeIndex=ground_col,
-                      basePosition=[0, 0, 0], physicsClientId=pc)
-    ground_vis = p.createVisualShape(p.GEOM_BOX, halfExtents=[20, 20, 0.001],
-                                     rgbaColor=[0.6, 0.6, 0.6, 1.0],
-                                     physicsClientId=pc)
-    p.createMultiBody(baseMass=0, baseCollisionShapeIndex=-1,
-                      baseVisualShapeIndex=ground_vis,
-                      basePosition=[0, 0, 0], physicsClientId=pc)
+    _bg = lighting if lighting is not None else _DEFAULT_LIGHTING
+    _create_ground(pc, _bg.get('groundColor', [0.6, 0.6, 0.6]))
 
     pillar_vis = p.createVisualShape(
         p.GEOM_BOX,

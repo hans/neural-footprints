@@ -56,4 +56,5 @@ def tiny_lighting() -> dict:
         "lightColor": [0.9, 0.85, 0.95],
         "lightDistance": 4.5,
         "camJitter": [0.05, -0.1, 0.08],
+        "camTargetJitter": [0.03, 0.0, -0.05],
     }
