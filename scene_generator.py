@@ -256,7 +256,7 @@ def _encode_scene_lighting(pillar_gray, lighting):
     Encode per-scene lighting and camera parameters into a fixed-length float32 vector.
 
     pillar_gray(1), lightDirection(3), lightColor(3), lightDistance(1),
-    camJitter(3), camTargetJitter(3) = 14 floats.
+    camJitter(3), camTargetJitter(3), lightAmbientCoeff(1) = 15 floats.
     """
     vec = [pillar_gray]
     vec.extend(lighting['lightDirection'])
@@ -264,10 +264,11 @@ def _encode_scene_lighting(pillar_gray, lighting):
     vec.append(lighting['lightDistance'])
     vec.extend(lighting.get('camJitter', [0.0, 0.0, 0.0]))
     vec.extend(lighting.get('camTargetJitter', [0.0, 0.0, 0.0]))
+    vec.append(lighting.get('lightAmbientCoeff', 0.4))
     return np.array(vec, dtype=np.float32)
 
 
-SCENE_LIGHTING_DIM = 14
+SCENE_LIGHTING_DIM = 15
 
 
 def _compute_total_kinetic_energy(body_ids, masses, physics_client):
@@ -299,6 +300,7 @@ def _sample_lighting(rng):
         'camTargetJitter': [float(rng.uniform(-0.15, 0.15)),
                             0.0,
                             float(rng.uniform(-0.1, 0.1))],
+        'lightAmbientCoeff': float(rng.uniform(0.2, 0.6)),
     }
 
 
@@ -308,6 +310,7 @@ _DEFAULT_LIGHTING = {
     'lightDistance': 5.0,
     'camJitter': [0.0, 0.0, 0.0],
     'camTargetJitter': [0.0, 0.0, 0.0],
+    'lightAmbientCoeff': 0.4,
 }
 
 
@@ -336,6 +339,7 @@ def _render_scene(physics_client, lighting=None):
         lightDirection=lighting['lightDirection'],
         lightColor=lighting['lightColor'],
         lightDistance=lighting['lightDistance'],
+        lightAmbientCoeff=lighting.get('lightAmbientCoeff', 0.4),
         physicsClientId=physics_client,
     )
 

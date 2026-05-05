@@ -57,4 +57,5 @@ def tiny_lighting() -> dict:
         "lightDistance": 4.5,
         "camJitter": [0.05, -0.1, 0.08],
         "camTargetJitter": [0.03, 0.0, -0.05],
+        "lightAmbientCoeff": 0.35,
     }
