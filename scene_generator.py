@@ -300,7 +300,7 @@ def _render_scene(physics_client, lighting=None):
         physicsClientId=physics_client,
     )
     proj_matrix = p.computeProjectionMatrixFOV(
-        fov=60, aspect=1.0, nearVal=0.1, farVal=10.0,
+        fov=_CFG_CAMERA_FOV, aspect=1.0, nearVal=0.1, farVal=10.0,
         physicsClientId=physics_client,
     )
 
