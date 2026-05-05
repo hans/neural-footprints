@@ -12,9 +12,16 @@ random_seed: 42
 # so the object stays on-screen across the longer 500 ms window needed for
 # x_accel inference.
 linvel_x_max: 3.0
+# x_accel sampled uniformly from [-x_accel_max, +x_accel_max] m/s².
+# Tightened from 15 → 6: at T=0.5 s, |a|=15 produced ~1.875 m of horizontal
+# drift, which combined with linvel_x*T pushed many target frames off-camera.
+# σ_a noise floor for the {0,40,80}-frame stride is ~6 m/s², so |a|≤6 still
+# leaves the curvature signal recoverable.
+x_accel_max: 6.0
 rsa_subsample: 500
 pixel_pca_dim: 500
-behavioral_pca_dim: 50
+behavioral_pca_dim: 0.90
+dynamics_pca_dim: 50
 behavioral_objective: "next_frame_pixels"
 
 # Camera — wider FOV keeps the moving object on-screen for more frames

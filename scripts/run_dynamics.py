@@ -16,7 +16,7 @@ encoding_delta_r2 = np.mean(encoding['delta_r2'])
 
 results = run_dynamics_analysis(
     neural, scenes, neural_meta, encoding_delta_r2, encoder,
-    behavioral_pca_dim=cfg['behavioral_pca_dim'],
+    dynamics_pca_dim=cfg['dynamics_pca_dim'],
 )
 save_results(results, snakemake.output.results)
 

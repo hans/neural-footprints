@@ -185,6 +185,21 @@ def evaluate(encoding_results, rsa_results, dissociation_results,
             f"{metric} = {beh_phys:.4f}",
             "expect > 0.90 (oracle re-renders the held-out target)",
         )
+        delta_pix = dissociation_results.get('delta_pixel_behavioral_score', float('nan'))
+        delta_phys = dissociation_results.get('delta_physics_behavioral_score', float('nan'))
+        if delta_pix == delta_pix:  # not nan
+            check(
+                "Delta-frame: physics oracle near-perfect in delta space",
+                delta_phys > 0.90,
+                f"delta R² = {delta_phys:.4f}",
+                "expect > 0.90 — static bg cancels in frame4−frame1 delta, oracle is exact",
+            )
+            check(
+                "Delta-frame: pixel model poor in delta space",
+                delta_pix < 0.70,
+                f"delta R² = {delta_pix:.4f}",
+                "expect < 0.70 — blurry PCA prediction cannot match sharp object-displacement delta",
+            )
 
     # --- Residual Encoding ---
     if residual_results is not None:
