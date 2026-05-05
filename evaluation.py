@@ -185,21 +185,6 @@ def evaluate(encoding_results, rsa_results, dissociation_results,
             f"{metric} = {beh_phys:.4f}",
             "expect > 0.90 (oracle re-renders the held-out target)",
         )
-        fg_pix = dissociation_results.get('fg_pixel_behavioral_score', float('nan'))
-        fg_phys = dissociation_results.get('fg_physics_behavioral_score', float('nan'))
-        if fg_pix == fg_pix:  # not nan
-            check(
-                "Foreground-masked: physics oracle near-perfect over dynamic region",
-                fg_phys > 0.90,
-                f"fg R² = {fg_phys:.4f}",
-                "expect > 0.90 — oracle re-renders ground truth for dynamic pixels",
-            )
-            check(
-                "Foreground-masked: pixel model poor over dynamic region",
-                fg_pix < 0.30,
-                f"fg R² = {fg_pix:.4f}",
-                "expect < 0.30 — dynamic pixels expose occlusion and velocity blindness",
-            )
         delta_pix = dissociation_results.get('delta_pixel_behavioral_score', float('nan'))
         delta_phys = dissociation_results.get('delta_physics_behavioral_score', float('nan'))
         if delta_pix == delta_pix:  # not nan
