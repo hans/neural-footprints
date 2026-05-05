@@ -18,7 +18,6 @@ in the random projection.
 
 import numpy as np
 import pybullet as p
-import pybullet_data
 from config import (
     N_OBJECTS,
     IMAGE_SIZE,
@@ -50,11 +49,22 @@ def _create_scene(physics_client, rng):
 
     Varying per scene: shape (sphere/box), color, x-velocity direction.
     """
-    p.setAdditionalSearchPath(pybullet_data.getDataPath(), physicsClientId=physics_client)
     p.setGravity(0, 0, -9.81, physicsClientId=physics_client)
 
-    # Ground plane
-    p.loadURDF("plane.urdf", physicsClientId=physics_client)
+    # Ground: infinite collision plane (physics) + solid-color visual box.
+    # plane.urdf has a baked checkerboard texture that changeVisualShape
+    # cannot override, so we separate the two bodies: GEOM_PLANE for
+    # collision and a large GEOM_BOX for the visible surface.
+    ground_col = p.createCollisionShape(p.GEOM_PLANE, planeNormal=[0, 0, 1],
+                                        physicsClientId=physics_client)
+    p.createMultiBody(baseMass=0, baseCollisionShapeIndex=ground_col,
+                      basePosition=[0, 0, 0], physicsClientId=physics_client)
+    ground_vis = p.createVisualShape(p.GEOM_BOX, halfExtents=[20, 20, 0.001],
+                                     rgbaColor=[0.6, 0.6, 0.6, 1.0],
+                                     physicsClientId=physics_client)
+    p.createMultiBody(baseMass=0, baseCollisionShapeIndex=-1,
+                      baseVisualShapeIndex=ground_vis,
+                      basePosition=[0, 0, 0], physicsClientId=physics_client)
 
     # Central vertical pillar at x=0: VISUAL ONLY (no collision).
     # Objects pass through it freely — physics is unaffected.
@@ -361,9 +371,17 @@ def resimulate_scene(shape_configs, initial_physics_row, *,
     if n_timesteps is None:
         n_timesteps = _CFG_N_TIMESTEPS
     pc = p.connect(p.DIRECT)
-    p.setAdditionalSearchPath(pybullet_data.getDataPath(), physicsClientId=pc)
     p.setGravity(0, 0, -9.81, physicsClientId=pc)
-    p.loadURDF("plane.urdf", physicsClientId=pc)
+    ground_col = p.createCollisionShape(p.GEOM_PLANE, planeNormal=[0, 0, 1],
+                                        physicsClientId=pc)
+    p.createMultiBody(baseMass=0, baseCollisionShapeIndex=ground_col,
+                      basePosition=[0, 0, 0], physicsClientId=pc)
+    ground_vis = p.createVisualShape(p.GEOM_BOX, halfExtents=[20, 20, 0.001],
+                                     rgbaColor=[0.6, 0.6, 0.6, 1.0],
+                                     physicsClientId=pc)
+    p.createMultiBody(baseMass=0, baseCollisionShapeIndex=-1,
+                      baseVisualShapeIndex=ground_vis,
+                      basePosition=[0, 0, 0], physicsClientId=pc)
 
     pillar_vis = p.createVisualShape(
         p.GEOM_BOX,
