@@ -14,6 +14,7 @@ RANDOM_SEED = _cfg['random_seed']
 RSA_SUBSAMPLE = _cfg['rsa_subsample']
 PIXEL_PCA_DIM = _cfg['pixel_pca_dim']
 BEHAVIORAL_PCA_DIM = _cfg['behavioral_pca_dim']
+DYNAMICS_PCA_DIM = _cfg['dynamics_pca_dim']
 BEHAVIORAL_OBJECTIVE = _cfg['behavioral_objective']
 
 PP_HIDDEN_DIM = _cfg['pp_hidden_dim']

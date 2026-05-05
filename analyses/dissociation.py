@@ -41,11 +41,7 @@ def _make_mlp():
     )
 
 def _pixel_prediction_r2(predicted_raw, actual_pca, scaler, pca):
-    """R² of raw pixel predictions against ground-truth, measured in PCA space.
-
-    All pixel-level comparisons must go through this helper so that both models
-    are scored in the same feature space.
-    """
+    """R² of raw pixel predictions against ground-truth, measured in PCA space."""
     pred_pca = pca.transform(scaler.transform(predicted_raw))
     ss_res = np.sum((actual_pca - pred_pca) ** 2)
     ss_tot = np.sum((actual_pca - actual_pca.mean(axis=0, keepdims=True)) ** 2)
@@ -61,28 +57,24 @@ def _score_next_frame_pixels(pixel_input_pca, target_pixel_pca,
 
     The brain sees three frames (t=0, t=PP_EARLY_FRAME, t=PP_LATE_FRAME).
     The behavioral target is the RGBA at t=N_TIMESTEPS — strictly *beyond*
-    the brain's view, so the test is genuine extrapolation. Both models
-    are scored in the same target PCA space (scaler_target → pca_target).
+    the brain's view, so the test is genuine extrapolation. Both models are
+    scored in the same target PCA space (scaler_target → pca_target), where
+    pca_target retains enough components to explain behavioral_pca_dim of the
+    total pixel variance (default 90%).
 
     Pixel model score:  MLP cross-val R² predicting target-frame pixel PCA
-                         from the brain's 3-frame pixel PCA. Even with three
-                         frames, occlusion + RGBA→world ambiguity prevent a
-                         perfect parabola fit out to t=N_TIMESTEPS.
+                         from the brain's 3-frame pixel PCA.
     Physics model score: Oracle R² — re-simulate each scene from the initial
                          physics state, render at t=N_TIMESTEPS, project into
-                         the target PCA. Deterministic, so approaches 1.0.
+                         the target PCA. Deterministic → ~1.0.
 
     Returns (pixel_score, physics_score, metric_label, chance_line).
     """
     from scene_generator import resimulate_scene
 
-    # Pixel model: MLP cross-val R² in target PCA space
     pixel_r2 = cross_val_score(_make_mlp(), pixel_input_pca, target_pixel_pca,
                                 cv=5, scoring='r2').mean()
 
-    # Physics model: oracle re-simulation R² in same target PCA space.
-    # `resimulate_scene` (return_program_state=False) renders the t=N_TIMESTEPS
-    # behavioral target frame, matching how `target_renders` is built upstream.
     n = min(n_oracle, len(scene_configs))
     oracle_raw = np.stack([
         resimulate_scene(scene_configs[i], initial_physics_labels[i],
@@ -237,6 +229,9 @@ def run_dissociation_analysis(neural_activity, scenes, neural_meta,
 
     # Behavioral target: RGBA at t=N_TIMESTEPS — strictly outside the brain's
     # three observed frames (the brain cannot trivially memorize this).
+    # PCA retains behavioral_pca_dim of the variance (default 0.90), covering
+    # high-frequency components where blur is visible while avoiding
+    # static-background inflation from near-zero-variance pixels.
     target_rgba = target_renders[:, target_pixel_indices]
     scaler_target = StandardScaler()
     target_scaled = scaler_target.fit_transform(target_rgba)

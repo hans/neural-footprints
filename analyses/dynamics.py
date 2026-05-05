@@ -28,13 +28,13 @@ from sklearn.model_selection import KFold, cross_val_predict
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 from analyses.dissociation import _make_mlp
-from config import BEHAVIORAL_PCA_DIM as _CFG_BEHAVIORAL_PCA_DIM
+from config import DYNAMICS_PCA_DIM as _CFG_DYNAMICS_PCA_DIM
 from scene_generator import extract_brain_pixels, extract_frame_pixels
 
 
 def run_dynamics_analysis(neural_activity, scenes, neural_meta,
                           encoding_delta_r2, encoder, *,
-                          behavioral_pca_dim=None):
+                          dynamics_pca_dim=None):
     """
     Future brain state prediction via physics vs. pixel forward models.
 
@@ -55,11 +55,11 @@ def run_dynamics_analysis(neural_activity, scenes, neural_meta,
         Fitted encoder from encoding analysis: {'scaler', 'pca', 'ridge'}.
     fig_dir : str
         Directory for output figures.
-    behavioral_pca_dim : int
+    dynamics_pca_dim : int
         PCA components for MLP pixel prediction target.
     """
-    if behavioral_pca_dim is None:
-        behavioral_pca_dim = _CFG_BEHAVIORAL_PCA_DIM
+    if dynamics_pca_dim is None:
+        dynamics_pca_dim = _CFG_DYNAMICS_PCA_DIM
 
     print("\n" + "=" * 60)
     print("SIMULATION 4: Future Brain State Prediction")
@@ -128,12 +128,12 @@ def run_dynamics_analysis(neural_activity, scenes, neural_meta,
     # space before feeding it.
     scaler_target = StandardScaler()
     target_scaled = scaler_target.fit_transform(pixel_data)
-    pca_target = PCA(n_components=behavioral_pca_dim, whiten=True, random_state=42)
+    pca_target = PCA(n_components=dynamics_pca_dim, whiten=True, random_state=42)
     target_pixel_pca = pca_target.fit_transform(target_scaled)
 
     scaler_init = StandardScaler()
     init_scaled = scaler_init.fit_transform(initial_rgba)
-    pca_init = PCA(n_components=behavioral_pca_dim, whiten=True, random_state=42)
+    pca_init = PCA(n_components=dynamics_pca_dim, whiten=True, random_state=42)
     init_pixel_pca = pca_init.fit_transform(init_scaled)
 
     # Cross-validated MLP predictions (out-of-fold to avoid double-dipping)

@@ -14,7 +14,8 @@ random_seed: 42
 linvel_x_max: 3.0
 rsa_subsample: 500
 pixel_pca_dim: 500
-behavioral_pca_dim: 50
+behavioral_pca_dim: 0.90
+dynamics_pca_dim: 50
 behavioral_objective: "next_frame_pixels"
 
 # Camera — wider FOV keeps the moving object on-screen for more frames
