@@ -10,18 +10,13 @@ COL_WIDTH = 3.5
 FULL_WIDTH = 7.0
 
 # Semantic color palette used across all figures.
-# Naming follows the SPEC.md glossary:
-#   "render"  = full render slice (RGBA + depth + segmentation)
-#   "pixels"  = RGBA only (a subset of render); used by the dynamics
-#               pixel-forward model that predicts only RGBA.
 COLORS = {
     "blue": "#4878CF",
     "red": "#D65F5F",
     "green": "#6ACC65",
     "gray": "#999999",
     # Semantic aliases
-    "render": "#4878CF",
-    "pixels": "#4878CF",
+    "sensory": "#4878CF",
     "physics": "#D65F5F",
     "combined": "#D65F5F",
     "control": "#6ACC65",

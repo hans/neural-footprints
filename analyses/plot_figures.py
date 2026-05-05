@@ -11,9 +11,9 @@ from analyses.plot_style import COLORS, COL_WIDTH, FULL_WIDTH, paper_style
 
 
 # Model names
-LABEL_RENDER = "Sensory"
+LABEL_SENSORY = "Sensory"
 LABEL_PHYSICS = "Physics"
-LABEL_RENDER_PLUS_PHYSICS = "Full"
+LABEL_SENSORY_PLUS_PHYSICS = "Full"
 
 
 def plot_encoding(plot_data, fig_dir="figures"):
@@ -34,11 +34,11 @@ def plot_encoding(plot_data, fig_dir="figures"):
 
         # Panel A: R² bar plot
         ax = axes[0]
-        ax.bar([LABEL_RENDER, LABEL_RENDER_PLUS_PHYSICS],
+        ax.bar([LABEL_SENSORY, LABEL_SENSORY_PLUS_PHYSICS],
                [mean_r2_pixel, mean_r2_comb],
                yerr=[r2_pixel_only.std() / np.sqrt(n_neurons),
                      r2_combined.std() / np.sqrt(n_neurons)],
-               color=[COLORS['pixels'], COLORS['physics']], capsize=3,
+               color=[COLORS['sensory'], COLORS['physics']], capsize=3,
                width=0.6)
         ax.set_ylabel('Mean R\u00b2')
         ax.set_title('Encoding model: R\u00b2 \u00b1 physics labels')
@@ -49,7 +49,7 @@ def plot_encoding(plot_data, fig_dir="figures"):
         # Panel B: Subsampling curve
         ax = axes[1]
         ax.errorbar(neuron_counts, subsample_means, yerr=subsample_sems,
-                    marker='o', color=COLORS['pixels'], capsize=2)
+                    marker='o', color=COLORS['sensory'], capsize=2)
         ax.axhline(0, color='gray', linestyle='--', alpha=0.5)
         ax.set_xlabel('Number of neurons sampled')
         ax.set_ylabel('Mean \u0394R\u00b2')
@@ -115,7 +115,7 @@ def plot_rsa(plot_data, fig_dir="figures"):
         ax_rr = fig.add_subplot(gs[0, 2])
         ax_rr.imshow(rdm_pixel_sq, cmap='viridis', aspect='equal',
                      vmin=vmin, vmax=vmax)
-        ax_rr.set_title(f'{LABEL_RENDER} RDM')
+        ax_rr.set_title(f'{LABEL_SENSORY} RDM')
         ax_rr.set_xticks([]); ax_rr.set_yticks([])
 
         # Vertical colorbar between top two RDMs
@@ -135,9 +135,9 @@ def plot_rsa(plot_data, fig_dir="figures"):
 
         # Correlation bar plot spanning bottom middle+right
         ax = fig.add_subplot(gs[1, 2])
-        labels = [f'Neural\u2013\n{LABEL_RENDER}', f'Neural\u2013\n{LABEL_PHYSICS}']
+        labels = [f'Neural\u2013\n{LABEL_SENSORY}', f'Neural\u2013\n{LABEL_PHYSICS}']
         values = [corr_neural_pixel, corr_neural_physics]
-        colors = [COLORS['pixels'], COLORS['physics']]
+        colors = [COLORS['sensory'], COLORS['physics']]
         bars = ax.bar(labels, values, color=colors, width=0.6)
         ax.set_ylabel('Spearman r')
         ax.set_title('RSA correlations')
@@ -167,8 +167,8 @@ def plot_dissociation(plot_data, fig_dir="figures"):
         fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(COL_WIDTH, 2.0))
 
         bar_width = 0.5
-        colors = [COLORS['pixels'], COLORS['physics']]
-        labels = [LABEL_RENDER, LABEL_PHYSICS]
+        colors = [COLORS['sensory'], COLORS['physics']]
+        labels = [LABEL_SENSORY, LABEL_PHYSICS]
 
         bars1 = ax1.bar(labels, [mean_r2_pixel, mean_r2_physics],
                         width=bar_width, color=colors,
@@ -221,8 +221,8 @@ def plot_dissociation_combined(plot_data, fig_dir="figures"):
         fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(COL_WIDTH, 2.0))
 
         bar_width = 0.5
-        colors = [COLORS['pixels'], COLORS['combined']]
-        labels = [LABEL_RENDER, LABEL_RENDER_PLUS_PHYSICS]
+        colors = [COLORS['sensory'], COLORS['combined']]
+        labels = [LABEL_SENSORY, LABEL_SENSORY_PLUS_PHYSICS]
 
         bars1 = ax1.bar(labels, [mean_r2_pixel, mean_r2_combined],
                         width=bar_width, color=colors,
@@ -261,8 +261,8 @@ def plot_predicted_frames(plot_data, fig_dir="figures"):
     final_imgs = plot_data['predicted_final_imgs']
     n = len(init_imgs)
 
-    col_titles = ['t=0 (input)', f'{LABEL_RENDER} model\nprediction',
-                  'Physics model\nprediction', 't=N (actual)']
+    col_titles = ['t=0 (input)', f'{LABEL_SENSORY} model\nprediction',
+                  f'{LABEL_PHYSICS} model\nprediction', 't=N (actual)']
     cols = [init_imgs, pixel_imgs, physics_imgs, final_imgs]
 
     with paper_style():
@@ -289,8 +289,8 @@ def plot_predicted_frames_compact(plot_data, fig_dir="figures", scene_idx=1):
     physics_imgs = plot_data['predicted_physics_imgs']
     final_imgs = plot_data['predicted_final_imgs']
 
-    titles = ['t=0 (input)', 'Sensory model\nprediction',
-              'Physics model\nprediction', 't=N (actual)']
+    titles = ['t=0 (input)', f'{LABEL_SENSORY} model\nprediction',
+              f'{LABEL_PHYSICS} model\nprediction', 't=N (actual)']
     imgs = [init_imgs[scene_idx], pixel_imgs[scene_idx],
             physics_imgs[scene_idx], final_imgs[scene_idx]]
 
@@ -319,10 +319,8 @@ def plot_dynamics(plot_data, fig_dir="figures"):
         fig, ax1 = plt.subplots(1, 1, figsize=(COL_WIDTH * 0.6, 2.2))
 
         bar_width = 0.5
-        # Bar 1 is the pixel forward model (RGBA-only prediction per glossary),
-        # not the full render slice — label accordingly.
-        colors = [COLORS['pixels'], COLORS['physics']]
-        labels = ['Pixel', LABEL_PHYSICS]
+        colors = [COLORS['sensory'], COLORS['physics']]
+        labels = [LABEL_SENSORY, LABEL_PHYSICS]
 
         bars1 = ax1.bar(labels, [mean_r2_pixel, mean_r2_physics],
                         width=bar_width, color=colors,
@@ -356,7 +354,7 @@ def plot_pca(plot_data, fig_dir="figures"):
         fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(COL_WIDTH, 4.5))
 
         # Elbow + decoding reference
-        ax1.plot(range(1, n_neurons + 1), cumvar, color=COLORS['pixels'])
+        ax1.plot(range(1, n_neurons + 1), cumvar, color=COLORS['sensory'])
         ax1.axhline(all_pc_acc, color=COLORS['physics'], linestyle='--',
                     linewidth=1.0,
                     label=f'Motion decoding (all PCs): {all_pc_acc:.1%}')
@@ -372,7 +370,7 @@ def plot_pca(plot_data, fig_dir="figures"):
         lo, hi = 1, 99
         pc1_lim = np.percentile(pc1, [lo, hi])
         pc2_lim = np.percentile(pc2, [lo, hi])
-        colors = np.where(motion_dir == 1, COLORS['physics'], COLORS['pixels'])
+        colors = np.where(motion_dir == 1, COLORS['physics'], COLORS['sensory'])
         ax2.scatter(pc1, pc2, c=colors, alpha=0.3, s=4, edgecolors='none')
         pad1 = 0.05 * (pc1_lim[1] - pc1_lim[0])
         pad2 = 0.05 * (pc2_lim[1] - pc2_lim[0])
@@ -383,7 +381,7 @@ def plot_pca(plot_data, fig_dir="figures"):
         ax2.set_title('PC1 vs PC2 (colored by motion direction)')
         ax2.legend(handles=[
             Line2D([0], [0], marker='o', color='w',
-                   markerfacecolor=COLORS['pixels'], markersize=5,
+                   markerfacecolor=COLORS['sensory'], markersize=5,
                    label='Left'),
             Line2D([0], [0], marker='o', color='w',
                    markerfacecolor=COLORS['physics'], markersize=5,
@@ -393,7 +391,7 @@ def plot_pca(plot_data, fig_dir="figures"):
         # Inset: decoding accuracy vs number of PCs
         ax_inset = ax2.inset_axes([0.58, 0.05, 0.40, 0.42])
         ax_inset.plot(pc_counts, decode_accs, marker='o',
-                      color=COLORS['pixels'], markersize=3)
+                      color=COLORS['sensory'], markersize=3)
         ax_inset.axhline(0.5, color='gray', linestyle='--', alpha=0.5)
         ax_inset.set_xlabel('# PCs', fontsize=5)
         ax_inset.set_ylabel('Accuracy', fontsize=5)
@@ -414,11 +412,11 @@ def plot_pca(plot_data, fig_dir="figures"):
         ax_dec = ax_var.twinx()
 
         ax_var.plot(range(1, n_neurons + 1), cumvar,
-                    color=COLORS['pixels'], label='Cumulative\nvariance')
+                    color=COLORS['sensory'], label='Cumulative\nvariance')
         ax_var.set_xlabel('Number of principal components')
         ax_var.set_ylabel('Cumulative explained variance',
-                          color=COLORS['pixels'])
-        ax_var.tick_params(axis='y', labelcolor=COLORS['pixels'])
+                          color=COLORS['sensory'])
+        ax_var.tick_params(axis='y', labelcolor=COLORS['sensory'])
         ax_var.set_xlim(1, n_neurons)
         ax_var.set_ylim(0, 1.05)
         ax_var.set_xscale("log")
@@ -515,12 +513,12 @@ def plot_residual(plot_data, fig_dir="figures"):
         x = np.arange(2)
         width = 0.35
         ax.bar(x - width / 2, raw_means, width, yerr=raw_sems,
-               color=COLORS['pixels'], capsize=3, label='Raw neural')
+               color=COLORS['sensory'], capsize=3, label='Raw neural')
         ax.bar(x + width / 2, resid_means, width, yerr=resid_sems,
                color=COLORS['physics'], capsize=3, label='Residualized neural')
         ax.axhline(0, color='gray', linestyle='--', linewidth=0.6)
         ax.set_xticks(x)
-        ax.set_xticklabels(['Pixel', 'GT Physics'])
+        ax.set_xticklabels([LABEL_SENSORY, LABEL_PHYSICS])
         ax.set_ylabel('Mean R²')
         ax.set_title(f'Encoding R² (residual var fraction = {var_kept:.2f})')
         ax.legend()
