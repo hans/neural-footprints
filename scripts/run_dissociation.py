@@ -36,8 +36,10 @@ plot_arrays['pixel_score'] = np.array(results['pixel_behavioral_score'])
 plot_arrays['physics_score'] = np.array(results['physics_behavioral_score'])
 plot_arrays['combined_score'] = np.array(results['combined_behavioral_score'])
 plot_arrays['metric_label'] = np.array(results['metric_label'])
-plot_arrays['fg_pixel_score'] = np.array(results.pop('fg_pixel_behavioral_score'))
-plot_arrays['fg_physics_score'] = np.array(results.pop('fg_physics_behavioral_score'))
+plot_arrays['fg_pixel_score'] = np.array(results['fg_pixel_behavioral_score'])
+plot_arrays['fg_physics_score'] = np.array(results['fg_physics_behavioral_score'])
+plot_arrays['delta_pixel_score'] = np.array(results['delta_pixel_behavioral_score'])
+plot_arrays['delta_physics_score'] = np.array(results['delta_physics_behavioral_score'])
 
 save_results(results, snakemake.output.results)
 

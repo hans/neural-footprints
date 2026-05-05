@@ -78,7 +78,8 @@ def _pixel_prediction_r2(predicted_raw, actual_pca, scaler, pca):
 def _score_next_frame_pixels(pixel_input_pca, target_pixel_pca,
                               scene_configs, initial_physics_labels,
                               scaler_target, pca_target, pillar_grays=None,
-                              lightings=None, n_oracle=200, target_raw=None):
+                              lightings=None, n_oracle=200, target_raw=None,
+                              initial_raw=None):
     """
     Behavioral sufficiency for next-frame pixel prediction.
 
@@ -99,9 +100,15 @@ def _score_next_frame_pixels(pixel_input_pca, target_pixel_pca,
     space), also computes foreground-masked R² in raw pixel space: variance
     across scenes identifies the dynamic region, and R² is measured only there.
 
+    If initial_raw is also provided ([n_scenes, n_pixels] float), additionally
+    computes delta-frame R²: R² on (next_frame − current_frame) in raw pixel
+    space. Static background pixels become zero in the delta, removing their
+    inflation of R²; the only residual signal is the localized object shift,
+    which a blurry prediction cannot match.
+
     Returns (pixel_score, physics_score, metric_label, chance_line,
-             fg_pixel_score, fg_physics_score).
-    fg_* are None when target_raw is not provided.
+             fg_pixel_score, fg_physics_score, delta_pixel_score, delta_physics_score).
+    fg_* and delta_* are None when the corresponding raw arrays are not provided.
     """
     from scene_generator import resimulate_scene
 
@@ -125,6 +132,7 @@ def _score_next_frame_pixels(pixel_input_pca, target_pixel_pca,
 
     fg_pixel_r2 = None
     fg_physics_r2 = None
+    pixel_pred_raw = None
     if target_raw is not None:
         mask = _foreground_pixel_mask(target_raw.astype(float))
         pixel_pred_raw = scaler_target.inverse_transform(
@@ -133,7 +141,21 @@ def _score_next_frame_pixels(pixel_input_pca, target_pixel_pca,
         fg_physics_r2 = _masked_pixel_r2(
             target_raw[:n].astype(float), oracle_raw.astype(float), mask)
 
-    return pixel_r2, physics_r2, "Next-frame pred. R²", None, fg_pixel_r2, fg_physics_r2
+    delta_pixel_r2 = None
+    delta_physics_r2 = None
+    if target_raw is not None and initial_raw is not None:
+        init_f = initial_raw.astype(float)
+        delta_target = target_raw.astype(float) - init_f
+        delta_pred = pixel_pred_raw - init_f
+        delta_oracle = oracle_raw.astype(float) - init_f[:n]
+        ss_res = np.sum((delta_target - delta_pred) ** 2)
+        ss_tot = np.sum((delta_target - delta_target.mean(axis=0, keepdims=True)) ** 2)
+        delta_pixel_r2 = float(1.0 - ss_res / ss_tot) if ss_tot > 0 else 1.0
+        ss_res_o = np.sum((delta_target[:n] - delta_oracle) ** 2)
+        ss_tot_o = np.sum((delta_target[:n] - delta_target[:n].mean(axis=0, keepdims=True)) ** 2)
+        delta_physics_r2 = float(1.0 - ss_res_o / ss_tot_o) if ss_tot_o > 0 else 1.0
+
+    return pixel_r2, physics_r2, "Next-frame pred. R²", None, fg_pixel_r2, fg_physics_r2, delta_pixel_r2, delta_physics_r2
 
 
 def _compute_predicted_frames(
@@ -280,6 +302,7 @@ def run_dissociation_analysis(neural_activity, scenes, neural_meta,
     # high-frequency components where blur is visible while avoiding
     # static-background inflation from near-zero-variance pixels.
     target_rgba = target_renders[:, target_pixel_indices]
+    initial_rgba = initial_renders[:, target_pixel_indices]
     scaler_target = StandardScaler()
     target_scaled = scaler_target.fit_transform(target_rgba)
     pca_target = PCA(n_components=behavioral_pca_dim, whiten=True, random_state=42)
@@ -289,13 +312,15 @@ def run_dissociation_analysis(neural_activity, scenes, neural_meta,
     print(f"Computing behavioral sufficiency ({objective})...")
 
     if objective == "next_frame_pixels":
-        pixel_score, physics_score, metric_label, chance, fg_pixel_score, fg_physics_score = \
+        pixel_score, physics_score, metric_label, chance, fg_pixel_score, fg_physics_score, \
+            delta_pixel_score, delta_physics_score = \
             _score_next_frame_pixels(
                 pixel_input_pca, target_pixel_pca,
                 scene_configs, initial_physics_labels,
                 scaler_target, pca_target, pillar_grays=pillar_grays,
                 lightings=lightings,
                 target_raw=target_rgba,
+                initial_raw=initial_rgba,
             )
         # Combined model: same oracle as physics-only — if you have the
         # physics state you can re-simulate deterministically.
@@ -307,6 +332,8 @@ def run_dissociation_analysis(neural_activity, scenes, neural_meta,
         )
         fg_pixel_score = None
         fg_physics_score = None
+        delta_pixel_score = None
+        delta_physics_score = None
         combined_features = np.hstack([pixel_pca, physics_scaled])
         log_reg = LogisticRegressionCV(cv=5, max_iter=1000, random_state=42)
         combined_score = cross_val_score(
@@ -332,6 +359,9 @@ def run_dissociation_analysis(neural_activity, scenes, neural_meta,
     if fg_pixel_score is not None:
         print(f"  Foreground-masked pixel  R²:  {fg_pixel_score:.4f}")
         print(f"  Foreground-masked physics R²: {fg_physics_score:.4f}")
+    if delta_pixel_score is not None:
+        print(f"  Delta-frame pixel  R²:        {delta_pixel_score:.4f}")
+        print(f"  Delta-frame physics R²:       {delta_physics_score:.4f}")
 
     print("\n  DISSOCIATION:")
     print(f"    Pixel model:          R² = {mean_r2_pixel:.4f}  |  {metric_label} = {pixel_score:.4f}")
@@ -350,6 +380,8 @@ def run_dissociation_analysis(neural_activity, scenes, neural_meta,
         'combined_behavioral_score': combined_score,
         'fg_pixel_behavioral_score': float(fg_pixel_score) if fg_pixel_score is not None else float('nan'),
         'fg_physics_behavioral_score': float(fg_physics_score) if fg_physics_score is not None else float('nan'),
+        'delta_pixel_behavioral_score': float(delta_pixel_score) if delta_pixel_score is not None else float('nan'),
+        'delta_physics_behavioral_score': float(delta_physics_score) if delta_physics_score is not None else float('nan'),
         'metric_label': metric_label,
         'objective': objective,
         'chance': chance if chance is not None else float('nan'),
