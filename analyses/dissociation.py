@@ -112,7 +112,8 @@ def _score_next_frame_pixels(pixel_input_pca, target_pixel_pca,
              fg_pixel_score, fg_physics_score, delta_pixel_score, delta_physics_score).
     fg_* and delta_* are None when the corresponding raw arrays are not provided.
     """
-    from scene_generator import resimulate_scene
+    import pybullet as _p
+    from scene_generator import resimulate_scene, open_render_client
 
     # Use cross_val_predict so OOF predictions can be inverted to pixel space
     # for the foreground-masked metric (also avoids fitting twice).
@@ -122,13 +123,18 @@ def _score_next_frame_pixels(pixel_input_pca, target_pixel_pca,
     pixel_r2 = float(1.0 - ss_res / ss_tot) if ss_tot > 0 else 1.0
 
     n = min(n_oracle, len(scene_configs))
-    oracle_raw = np.stack([
-        resimulate_scene(scene_configs[i], initial_physics_labels[i],
-                         pillar_gray=pillar_grays[i] if pillar_grays is not None else 0.5,
-                         lighting=lightings[i] if lightings is not None else None,
-                         ).reshape(-1).astype(np.float32)
-        for i in range(n)
-    ])
+    _pc = open_render_client(use_gui=True)
+    try:
+        oracle_raw = np.stack([
+            resimulate_scene(scene_configs[i], initial_physics_labels[i],
+                             pillar_gray=pillar_grays[i] if pillar_grays is not None else 0.5,
+                             lighting=lightings[i] if lightings is not None else None,
+                             use_gui=True, physics_client=_pc,
+                             ).reshape(-1).astype(np.float32)
+            for i in range(n)
+        ])
+    finally:
+        _p.disconnect(_pc)
     physics_r2 = _pixel_prediction_r2(oracle_raw, target_pixel_pca[:n],
                                        scaler_target, pca_target)
 
@@ -160,6 +166,9 @@ def _score_next_frame_pixels(pixel_input_pca, target_pixel_pca,
     return pixel_r2, physics_r2, "Next-frame pred. R²", None, fg_pixel_r2, fg_physics_r2, delta_pixel_r2, delta_physics_r2
 
 
+HIRES_VIZ = 256  # render resolution for visualization plots only
+
+
 def _compute_predicted_frames(
     pixel_input_pca, target_pixel_pca, scaler_target, pca_target,
     initial_renders, target_renders, rgba_bytes,
@@ -170,40 +179,69 @@ def _compute_predicted_frames(
     Compute pixel model vs. physics model predicted frame images.
 
     Returns (init_imgs, pixel_imgs, physics_imgs, target_imgs) as uint8 arrays.
-    `target_imgs` is the ground-truth t=N_TIMESTEPS RGBA — the behavioral
-    prediction target.
+    Physics oracle, init, and target are re-rendered at HIRES_VIZ resolution
+    with the OpenGL renderer (shadows). Pixel model predictions are bilinearly
+    upscaled from their native 64×64 since they are learned outputs.
+    `target_imgs` is the ground-truth t=N_TIMESTEPS RGBA.
     """
+    import pybullet as _p
+    from PIL import Image as _Image
     from config import IMAGE_SIZE
-    from scene_generator import resimulate_scene
+    from scene_generator import resimulate_scene, open_render_client
 
     n = min(n_samples, len(initial_renders))
 
-    # Pixel model: MLP trained on 3-frame pixel PCA → target RGBA PCA
+    # Pixel model: MLP trained on 3-frame pixel PCA → target RGBA PCA.
+    # Bilinearly upscale to HIRES_VIZ for display (it's a learned prediction,
+    # not re-renderable at higher resolution).
     pixel_model = _make_mlp()
     pixel_model.fit(pixel_input_pca, target_pixel_pca)
     pixel_pred_pca = pixel_model.predict(pixel_input_pca[:n])
 
-    def pca_to_img(pred_pca):
+    def pca_to_img_upscaled(pred_pca):
         pred_scaled = pca_target.inverse_transform(pred_pca)
         pred_pixels = scaler_target.inverse_transform(pred_scaled)
-        return np.clip(pred_pixels, 0, 255).astype(np.uint8).reshape(n, IMAGE_SIZE, IMAGE_SIZE, 4)
+        raw = np.clip(pred_pixels, 0, 255).astype(np.uint8).reshape(
+            n, IMAGE_SIZE, IMAGE_SIZE, 4)
+        upscaled = np.stack([
+            np.array(_Image.fromarray(raw[i]).resize(
+                (HIRES_VIZ, HIRES_VIZ), _Image.BILINEAR))
+            for i in range(n)
+        ])
+        return upscaled
 
-    pixel_imgs = pca_to_img(pixel_pred_pca)
+    pixel_imgs = pca_to_img_upscaled(pixel_pred_pca)
 
-    # Physics oracle: re-simulate to t=N_TIMESTEPS, return target RGBA frame
-    physics_imgs = np.stack([
-        resimulate_scene(scene_configs[j], initial_physics_labels[j],
-                         pillar_gray=pillar_grays[j] if pillar_grays is not None else 0.5,
-                         lighting=lightings[j] if lightings is not None else None)
-        for j in range(n)
-    ])
-
-    # initial_renders / target_renders hold full RGBA+depth+seg per frame;
-    # slice the leading RGBA bytes for visualization.
-    init_imgs = initial_renders[:n, :rgba_bytes].astype(np.uint8).reshape(
-        n, IMAGE_SIZE, IMAGE_SIZE, 4)
-    target_imgs = target_renders[:n, :rgba_bytes].astype(np.uint8).reshape(
-        n, IMAGE_SIZE, IMAGE_SIZE, 4)
+    # Physics oracle, init, and target: re-render at HIRES_VIZ with OpenGL.
+    _pc = open_render_client(use_gui=True)
+    try:
+        init_imgs = np.stack([
+            resimulate_scene(scene_configs[j], initial_physics_labels[j],
+                             n_timesteps=0,
+                             pillar_gray=pillar_grays[j] if pillar_grays is not None else 0.5,
+                             lighting=lightings[j] if lightings is not None else None,
+                             use_gui=True, physics_client=_pc,
+                             render_size=HIRES_VIZ)
+            for j in range(n)
+        ])
+        physics_imgs = np.stack([
+            resimulate_scene(scene_configs[j], initial_physics_labels[j],
+                             pillar_gray=pillar_grays[j] if pillar_grays is not None else 0.5,
+                             lighting=lightings[j] if lightings is not None else None,
+                             use_gui=True, physics_client=_pc,
+                             render_size=HIRES_VIZ)
+            for j in range(n)
+        ])
+        target_imgs = np.stack([
+            resimulate_scene(scene_configs[j], initial_physics_labels[j],
+                             pillar_gray=pillar_grays[j] if pillar_grays is not None else 0.5,
+                             lighting=lightings[j] if lightings is not None else None,
+                             use_gui=True, physics_client=_pc,
+                             render_size=HIRES_VIZ)
+            for j in range(n)
+        ])
+    finally:
+        _p.disconnect(_pc)
 
     return init_imgs, pixel_imgs, physics_imgs, target_imgs
 
