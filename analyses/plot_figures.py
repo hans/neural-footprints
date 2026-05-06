@@ -339,23 +339,51 @@ def plot_dynamics(plot_data, fig_dir="figures"):
         plt.close()
 
 
+# Decoding targets shown on the PCA panels. Order controls draw order
+# and legend order: positive controls first (largest pixel footprint at
+# top), negative control (motion) last in physics red.
+PCA_TARGET_STYLE = [
+    ('mean_brightness', 'Mean pixel brightness', '#4878CF'),  # blue
+    ('pillar_gray',     'Pillar gray',           '#9B59B6'),  # purple
+    ('motion_dir',      'Motion direction',      '#D65F5F'),  # physics red
+]
+
+
+def _draw_pca_decoding(ax, pc_counts, plot_data):
+    """Plot per-target decoding curves, each with its own chance band."""
+    for name, label, color in PCA_TARGET_STYLE:
+        key = f'decode_accs__{name}'
+        if key not in plot_data:
+            continue
+        accs = plot_data[key]
+        lo_key, hi_key = f'chance_lo__{name}', f'chance_hi__{name}'
+        if lo_key in plot_data and hi_key in plot_data:
+            ax.fill_between(pc_counts, plot_data[lo_key], plot_data[hi_key],
+                            color=color, alpha=0.15, linewidth=0)
+        linestyle = '--' if name == 'motion_dir' else '-'
+        ax.plot(pc_counts, accs, marker='o', markersize=3,
+                color=color, linestyle=linestyle, label=label)
+
+    ax.set_xscale('log')
+    ax.set_ylim(0.4, 1.02)
+    ax.yaxis.set_major_formatter(mticker.PercentFormatter(xmax=1.0))
+
+
 def plot_pca(plot_data, fig_dir="figures"):
     cumvar = plot_data['cumvar']
     neural_pca_2d = plot_data['neural_pca_2d']
     motion_dir = plot_data['motion_dir']
     pc_counts = plot_data['pc_counts'].astype(int)
-    decode_accs = plot_data['decode_accs']
-    chance_lo = plot_data['chance_lo'] if 'chance_lo' in plot_data else None
-    chance_hi = plot_data['chance_hi'] if 'chance_hi' in plot_data else None
     n_neurons = int(plot_data['n_neurons'])
-    all_pc_acc = decode_accs[-1]
+    motion_decode_accs = plot_data['decode_accs__motion_dir']
+    all_pc_acc = float(motion_decode_accs[-1])
     pc1, pc2 = neural_pca_2d[:, 0], neural_pca_2d[:, 1]
 
-    # Figure 1: elbow + scatter (stacked vertically)
+    # Figure 1: elbow + scatter + multi-target decoding (stacked vertically)
     with paper_style():
-        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(COL_WIDTH, 4.5))
+        fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(COL_WIDTH, 6.0))
 
-        # Elbow + decoding reference
+        # Elbow + motion decoding reference line
         ax1.plot(range(1, n_neurons + 1), cumvar, color=COLORS['sensory'])
         ax1.axhline(all_pc_acc, color=COLORS['physics'], linestyle='--',
                     linewidth=1.0,
@@ -390,63 +418,43 @@ def plot_pca(plot_data, fig_dir="figures"):
                    label='Right'),
         ])
 
-        # Inset: decoding accuracy vs number of PCs
-        ax_inset = ax2.inset_axes([0.58, 0.05, 0.40, 0.42])
-        ax_inset.plot(pc_counts, decode_accs, marker='o',
-                      color=COLORS['sensory'], markersize=3)
-        if chance_lo is not None and chance_hi is not None:
-            ax_inset.fill_between(pc_counts, chance_lo, chance_hi,
-                                  color='gray', alpha=0.25, label='Chance (5–95%)')
-        else:
-            ax_inset.axhline(0.5, color='gray', linestyle='--', alpha=0.5)
-        ax_inset.set_xlabel('# PCs', fontsize=5)
-        ax_inset.set_ylabel('Accuracy', fontsize=5)
-        ax_inset.set_title('Motion decoding', fontsize=6)
-        ax_inset.tick_params(labelsize=5)
-        ax_inset.set_xscale('log')
-        ax_inset.set_ylim(0.4, 1.0)
+        # Multi-target decoding sweep: sensory positive controls + motion
+        _draw_pca_decoding(ax3, pc_counts, plot_data)
+        ax3.set_xlabel('Number of principal components')
+        ax3.set_ylabel('Decoding accuracy')
+        ax3.set_title('Decoding from top-k PCs')
+        ax3.legend(loc='center right', frameon=False)
 
-        fig.align_ylabels([ax1, ax2])
+        fig.align_ylabels([ax1, ax2, ax3])
         plt.tight_layout()
         fig_path = f"{fig_dir}/pca_analysis.pdf"
         plt.savefig(fig_path)
         plt.close()
 
-    # Figure 2: elbow + decoding overlay with twinx
+    # Figure 2: elbow + multi-target decoding overlay with twinx
     with paper_style():
-        fig, ax_var = plt.subplots(figsize=(COL_WIDTH * 0.7, 1.6))
+        fig, ax_var = plt.subplots(figsize=(COL_WIDTH, 2.0))
         ax_dec = ax_var.twinx()
 
         ax_var.plot(range(1, n_neurons + 1), cumvar,
-                    color=COLORS['sensory'], label='Cumulative\nvariance')
+                    color=COLORS['neutral'], linewidth=0.8,
+                    label='Cumulative variance')
         ax_var.set_xlabel('Number of principal components')
         ax_var.set_ylabel('Cumulative explained variance',
-                          color=COLORS['sensory'])
-        ax_var.tick_params(axis='y', labelcolor=COLORS['sensory'])
+                          color=COLORS['neutral'])
+        ax_var.tick_params(axis='y', labelcolor=COLORS['neutral'])
         ax_var.set_xlim(1, n_neurons)
         ax_var.set_ylim(0, 1.05)
         ax_var.set_xscale("log")
         ax_var.yaxis.set_major_formatter(mticker.PercentFormatter(xmax=1.0))
 
-        ax_dec.plot(pc_counts, decode_accs, marker='o',
-                    color=COLORS['physics'], markersize=3,
-                    label='Motion decoding\naccuracy')
-        if chance_lo is not None and chance_hi is not None:
-            ax_dec.fill_between(pc_counts, chance_lo, chance_hi,
-                                color='gray', alpha=0.25, label='Chance (5–95%)')
-        else:
-            ax_dec.axhline(0.5, color='gray', linestyle=':', alpha=0.5)
-        ax_dec.set_ylabel('Decoding accuracy', color=COLORS['physics'])
-        ax_dec.tick_params(axis='y', labelcolor=COLORS['physics'])
-        ax_dec.set_ylim(0.4, 1.05)
-        ax_dec.yaxis.set_major_formatter(mticker.PercentFormatter(xmax=1.0))
+        _draw_pca_decoding(ax_dec, pc_counts, plot_data)
+        ax_dec.set_ylabel('Decoding accuracy')
 
         lines_var, labels_var = ax_var.get_legend_handles_labels()
         lines_dec, labels_dec = ax_dec.get_legend_handles_labels()
         ax_var.legend(lines_var + lines_dec, labels_var + labels_dec,
-                      loc='upper left')
-
-        # ax_var.set_title('PCA variance vs motion decoding')
+                      loc='center right', frameon=False, fontsize=5)
 
         fig_path2 = f"{fig_dir}/pca_variance_decoding.pdf"
         plt.savefig(fig_path2)
