@@ -18,7 +18,6 @@ in the random projection.
 
 import numpy as np
 import pybullet as p
-import pybullet_data
 from config import (
     N_OBJECTS,
     IMAGE_SIZE,
@@ -40,6 +39,21 @@ PILLAR_Y_CENTER = -1.0
 PILLAR_Z_CENTER = 0.75
 
 
+def _create_ground(physics_client, ground_color):
+    """Infinite collision plane (physics) + solid-color visual box (render)."""
+    ground_col = p.createCollisionShape(p.GEOM_PLANE, planeNormal=[0, 0, 1],
+                                        physicsClientId=physics_client)
+    p.createMultiBody(baseMass=0, baseCollisionShapeIndex=ground_col,
+                      basePosition=[0, 0, 0], physicsClientId=physics_client)
+    ground_vis = p.createVisualShape(p.GEOM_BOX, halfExtents=[20, 20, 0.001],
+                                     rgbaColor=ground_color + [1.0],
+                                     specularColor=[0, 0, 0],
+                                     physicsClientId=physics_client)
+    p.createMultiBody(baseMass=0, baseCollisionShapeIndex=-1,
+                      baseVisualShapeIndex=ground_vis,
+                      basePosition=[0, 0, 0], physicsClientId=physics_client)
+
+
 def _create_scene(physics_client, rng):
     """
     Spawn ground plane + central occluding pillar + single rigid body.
@@ -48,13 +62,12 @@ def _create_scene(physics_client, rng):
     moves with a random x-only velocity. Depending on direction and speed,
     it may end up behind the pillar in the final frame.
 
-    Varying per scene: shape (sphere/box), color, x-velocity direction.
+    Varying per scene: shape (sphere/box), color, x-velocity direction,
+    ground color.
     """
-    p.setAdditionalSearchPath(pybullet_data.getDataPath(), physicsClientId=physics_client)
     p.setGravity(0, 0, -9.81, physicsClientId=physics_client)
 
-    # Ground plane
-    p.loadURDF("plane.urdf", physicsClientId=physics_client)
+    _create_ground(physics_client, [0.6, 0.6, 0.6])
 
     # Central vertical pillar at x=0: VISUAL ONLY (no collision).
     # Objects pass through it freely — physics is unaffected.
@@ -86,7 +99,7 @@ def _create_scene(physics_client, rng):
 
     # Random shape: sphere or box
     if rng.random() < 0.5:
-        radius = float(rng.uniform(0.1, 0.35))
+        radius = float(rng.uniform(0.07, 0.5))
         col_shape = p.createCollisionShape(p.GEOM_SPHERE, radius=radius,
                                            physicsClientId=physics_client)
         vis_shape = p.createVisualShape(p.GEOM_SPHERE, radius=radius,
@@ -95,7 +108,7 @@ def _create_scene(physics_client, rng):
                                         physicsClientId=physics_client)
         shape_cfg = {'shape': 'sphere', 'params': {'radius': radius}, 'color': list(color)}
     else:
-        half_extents = [float(v) for v in rng.uniform(0.1, 0.35, size=3)]
+        half_extents = [float(v) for v in rng.uniform(0.07, 0.5, size=3)]
         col_shape = p.createCollisionShape(p.GEOM_BOX, halfExtents=half_extents,
                                            physicsClientId=physics_client)
         vis_shape = p.createVisualShape(p.GEOM_BOX, halfExtents=half_extents,
@@ -241,18 +254,22 @@ SCENE_CONFIG_DIM = 9  # per object
 
 def _encode_scene_lighting(pillar_gray, lighting):
     """
-    Encode per-scene lighting parameters into a fixed-length float32 vector.
+    Encode per-scene lighting and camera parameters into a fixed-length float32 vector.
 
-    pillar_gray(1), lightDirection(3), lightColor(3), lightDistance(1) = 8 floats.
+    pillar_gray(1), lightDirection(3), lightColor(3), lightDistance(1),
+    camJitter(3), camTargetJitter(3), lightAmbientCoeff(1) = 15 floats.
     """
     vec = [pillar_gray]
     vec.extend(lighting['lightDirection'])
     vec.extend(lighting['lightColor'])
     vec.append(lighting['lightDistance'])
+    vec.extend(lighting.get('camJitter', [0.0, 0.0, 0.0]))
+    vec.extend(lighting.get('camTargetJitter', [0.0, 0.0, 0.0]))
+    vec.append(lighting.get('lightAmbientCoeff', 0.4))
     return np.array(vec, dtype=np.float32)
 
 
-SCENE_LIGHTING_DIM = 8
+SCENE_LIGHTING_DIM = 15
 
 
 def _compute_total_kinetic_energy(body_ids, masses, physics_client):
@@ -273,13 +290,18 @@ def _compute_total_kinetic_energy(body_ids, masses, physics_client):
 
 
 def _sample_lighting(rng):
-    """Sample random lighting parameters for a scene."""
+    """Sample random lighting and camera parameters for a scene."""
     return {
         'lightDirection': [float(rng.uniform(-2, 2)),
                            float(rng.uniform(-2, 0)),
                            float(rng.uniform(1, 3))],
         'lightColor': [float(c) for c in rng.uniform(0.6, 1.0, size=3)],
         'lightDistance': float(rng.uniform(3.0, 8.0)),
+        'camJitter': [float(v) for v in rng.uniform(-0.3, 0.3, size=3)],
+        'camTargetJitter': [float(rng.uniform(-0.15, 0.15)),
+                            0.0,
+                            float(rng.uniform(-0.1, 0.1))],
+        'lightAmbientCoeff': float(rng.uniform(0.2, 0.6)),
     }
 
 
@@ -287,16 +309,29 @@ _DEFAULT_LIGHTING = {
     'lightDirection': [1, -1, 2],
     'lightColor': [1.0, 1.0, 1.0],
     'lightDistance': 5.0,
+    'camJitter': [0.0, 0.0, 0.0],
+    'camTargetJitter': [0.0, 0.0, 0.0],
+    'lightAmbientCoeff': 0.4,
 }
 
 
-def _render_scene(physics_client, lighting=None):
-    """Render 64x64 image, return RGBA, depth, segmentation as raw bytes."""
+def _render_scene(physics_client, lighting=None, render_size=None,
+                  use_opengl=False):
+    """Render image, return RGBA, depth, segmentation as raw bytes.
+
+    render_size overrides IMAGE_SIZE when set; only use for visualization,
+    not for building program_state (which must match IMAGE_SIZE).
+    use_opengl uses ER_BULLET_HARDWARE_OPENGL (shadows); requires a GUI
+    connection — only safe for visualization renders, not the pipeline.
+    """
     if lighting is None:
         lighting = _DEFAULT_LIGHTING
+    size = render_size if render_size is not None else IMAGE_SIZE
+    jitter = lighting.get('camJitter', [0.0, 0.0, 0.0])
+    tj = lighting.get('camTargetJitter', [0.0, 0.0, 0.0])
     view_matrix = p.computeViewMatrix(
-        cameraEyePosition=[0, -3, 2],
-        cameraTargetPosition=[0, 0, 0.3],
+        cameraEyePosition=[0 + jitter[0], -3 + jitter[1], 2 + jitter[2]],
+        cameraTargetPosition=[0 + tj[0], 0 + tj[1], 0.3 + tj[2]],
         cameraUpVector=[0, 0, 1],
         physicsClientId=physics_client,
     )
@@ -305,20 +340,25 @@ def _render_scene(physics_client, lighting=None):
         physicsClientId=physics_client,
     )
 
-    _, _, rgba, depth, seg = p.getCameraImage(
-        width=IMAGE_SIZE, height=IMAGE_SIZE,
+    kwargs = dict(
+        width=size, height=size,
         viewMatrix=view_matrix,
         projectionMatrix=proj_matrix,
         shadow=1,
         lightDirection=lighting['lightDirection'],
         lightColor=lighting['lightColor'],
         lightDistance=lighting['lightDistance'],
+        lightAmbientCoeff=lighting.get('lightAmbientCoeff', 0.4),
         physicsClientId=physics_client,
     )
+    if use_opengl:
+        kwargs['renderer'] = p.ER_BULLET_HARDWARE_OPENGL
 
-    rgba_arr = np.array(rgba, dtype=np.uint8).reshape(IMAGE_SIZE, IMAGE_SIZE, 4)
-    depth_arr = np.array(depth, dtype=np.float32).reshape(IMAGE_SIZE, IMAGE_SIZE)
-    seg_arr = np.array(seg, dtype=np.int32).reshape(IMAGE_SIZE, IMAGE_SIZE)
+    _, _, rgba, depth, seg = p.getCameraImage(**kwargs)
+
+    rgba_arr = np.array(rgba, dtype=np.uint8).reshape(size, size, 4)
+    depth_arr = np.array(depth, dtype=np.float32).reshape(size, size)
+    seg_arr = np.array(seg, dtype=np.int32).reshape(size, size)
 
     rgba_bytes = rgba_arr.tobytes()
     depth_bytes = depth_arr.tobytes()
@@ -327,9 +367,20 @@ def _render_scene(physics_client, lighting=None):
     return rgba_bytes, depth_bytes, seg_bytes
 
 
+def open_render_client(use_gui=False):
+    """Open a PyBullet physics client for rendering. Caller must disconnect."""
+    pc = p.connect(p.GUI if use_gui else p.DIRECT,
+                   options="--width=64 --height=64" if use_gui else "")
+    if use_gui:
+        p.configureDebugVisualizer(p.COV_ENABLE_GUI, 0, physicsClientId=pc)
+        p.configureDebugVisualizer(p.COV_ENABLE_SHADOWS, 1, physicsClientId=pc)
+    return pc
+
+
 def resimulate_scene(shape_configs, initial_physics_row, *,
                      n_timesteps=None, return_program_state=False,
-                     pillar_gray=0.5, lighting=None):
+                     pillar_gray=0.5, lighting=None, render_size=None,
+                     use_gui=False, physics_client=None):
     """
     Rebuild a scene from stored shape configs + initial physics state, step
     N_TIMESTEPS, and return the rendered result.
@@ -345,6 +396,9 @@ def resimulate_scene(shape_configs, initial_physics_row, *,
                              per object: pos(3), orn(4), lin_vel(3), ang_vel(3), mass(1), friction(1), x_accel(1)
         return_program_state: if True, return full program_state float32 vector
                              (3-frame render buffers + physics labels + scene config + lighting).
+        physics_client:      existing client ID to reuse (caller manages lifecycle;
+                             resetSimulation is called between scenes). If None,
+                             a fresh client is opened and closed by this function.
 
     Returns:
         If return_program_state=False: RGBA uint8 [IMAGE_SIZE, IMAGE_SIZE, 4]
@@ -355,10 +409,15 @@ def resimulate_scene(shape_configs, initial_physics_row, *,
     """
     if n_timesteps is None:
         n_timesteps = _CFG_N_TIMESTEPS
-    pc = p.connect(p.DIRECT)
-    p.setAdditionalSearchPath(pybullet_data.getDataPath(), physicsClientId=pc)
+    owns_client = physics_client is None
+    if owns_client:
+        pc = open_render_client(use_gui)
+    else:
+        pc = physics_client
+        p.resetSimulation(physicsClientId=pc)
     p.setGravity(0, 0, -9.81, physicsClientId=pc)
-    p.loadURDF("plane.urdf", physicsClientId=pc)
+    _bg = lighting if lighting is not None else _DEFAULT_LIGHTING
+    _create_ground(pc, _bg.get('groundColor', [0.6, 0.6, 0.6]))
 
     pillar_vis = p.createVisualShape(
         p.GEOM_BOX,
@@ -426,7 +485,8 @@ def resimulate_scene(shape_configs, initial_physics_row, *,
     # Render the brain-input frames (t=0, t=PP_EARLY_FRAME, t=PP_LATE_FRAME)
     # only when building a full program_state. For RGBA-target callers we
     # only need the behavioral target at t=n_timesteps.
-    initial_frame = _render_scene(pc, lighting=lighting) if return_program_state else None
+    _rnd = lambda: _render_scene(pc, lighting=lighting, use_opengl=use_gui)
+    initial_frame = _rnd() if return_program_state else None
     early_frame = None
     late_frame = None
 
@@ -441,9 +501,9 @@ def resimulate_scene(shape_configs, initial_physics_row, *,
         p.stepSimulation(physicsClientId=pc)
         _lock_rotation(body_ids, pc)
         if return_program_state and t + 1 == _CFG_PP_EARLY_FRAME:
-            early_frame = _render_scene(pc, lighting=lighting)
+            early_frame = _rnd()
         if return_program_state and t + 1 == _CFG_PP_LATE_FRAME:
-            late_frame = _render_scene(pc, lighting=lighting)
+            late_frame = _rnd()
 
     if return_program_state:
         applied_accels = [cfg.get('x_accel', 0.0) for cfg in shape_configs]
@@ -453,17 +513,20 @@ def resimulate_scene(shape_configs, initial_physics_row, *,
         )
         scene_config_vec = _encode_scene_config(shape_configs)
         lighting_vec = _encode_scene_lighting(pillar_gray, lighting or _DEFAULT_LIGHTING)
-        p.disconnect(pc)
+        if owns_client:
+            p.disconnect(pc)
         return _build_program_state(
             [initial_frame, early_frame, late_frame],
             final_physics, scene_config_vec, lighting_vec,
         )
     else:
         # Behavioral target frame at t=n_timesteps.
-        rgba_bytes, _, _ = _render_scene(pc, lighting=lighting)
-        p.disconnect(pc)
-        return np.frombuffer(rgba_bytes, dtype=np.uint8).reshape(
-            IMAGE_SIZE, IMAGE_SIZE, 4)
+        size = render_size if render_size is not None else IMAGE_SIZE
+        rgba_bytes, _, _ = _render_scene(pc, lighting=lighting,
+                                         render_size=render_size, use_opengl=use_gui)
+        if owns_client:
+            p.disconnect(pc)
+        return np.frombuffer(rgba_bytes, dtype=np.uint8).reshape(size, size, 4)
 
 
 def _frame_render_vec(rgba_bytes, depth_bytes, seg_bytes):
@@ -518,7 +581,7 @@ def _build_program_state(frame_renders, physics_labels,
                                           lighting_vec])
 
 
-def generate_scenes(n_scenes, seed, *, n_timesteps=None):
+def generate_scenes(n_scenes, seed, *, n_timesteps=None, use_gui=False):
     """
     Generate n_scenes PyBullet scenes, returning program states and analysis labels.
 
@@ -568,72 +631,82 @@ def generate_scenes(n_scenes, seed, *, n_timesteps=None):
     all_pillar_grays = []
     all_lightings = []
 
-    for i in range(n_scenes):
-        if (i + 1) % 100 == 0 or i == 0:
-            print(f"  Generating scene {i+1}/{n_scenes}...")
+    # Reuse one connection for all scenes (resetSimulation between scenes).
+    # GUI mode enables OpenGL shadow rendering; DIRECT is faster but shadowless.
+    pc = p.connect(p.GUI if use_gui else p.DIRECT,
+                    options="--width=64 --height=64" if use_gui else "")
+    if use_gui:
+        p.configureDebugVisualizer(p.COV_ENABLE_GUI, 0, physicsClientId=pc)
+        p.configureDebugVisualizer(p.COV_ENABLE_SHADOWS, 1, physicsClientId=pc)
 
-        pc = p.connect(p.DIRECT)
-        scene_seed = rng.integers(0, 2**31)
-        scene_rng = np.random.default_rng(scene_seed)
+    try:
+        for i in range(n_scenes):
+            if (i + 1) % 100 == 0 or i == 0:
+                print(f"  Generating scene {i+1}/{n_scenes}...")
 
-        body_ids, masses, frictions, is_occluded, shape_configs, pillar_gray = _create_scene(pc, scene_rng)
-        all_scene_configs.append(shape_configs)
-        all_pillar_grays.append(pillar_gray)
+            p.resetSimulation(physicsClientId=pc)
+            scene_seed = rng.integers(0, 2**31)
+            scene_rng = np.random.default_rng(scene_seed)
 
-        # Sample lighting once per scene (consistent across all frames)
-        lighting = _sample_lighting(scene_rng)
-        all_lightings.append(lighting)
+            body_ids, masses, frictions, is_occluded, shape_configs, pillar_gray = _create_scene(pc, scene_rng)
+            all_scene_configs.append(shape_configs)
+            all_pillar_grays.append(pillar_gray)
 
-        # Capture initial state (t=0) before stepping
-        applied_accels = [cfg.get('x_accel', 0.0) for cfg in shape_configs]
-        initial_physics_labels[i] = _collect_physics_labels(
-            body_ids, masses, frictions, pc, applied_accels=applied_accels,
-        )
-        init_frame = _render_scene(pc, lighting=lighting)
-        initial_renders[i] = _frame_render_vec(*init_frame)
+            # Sample lighting once per scene (consistent across all frames)
+            lighting = _sample_lighting(scene_rng)
+            all_lightings.append(lighting)
 
-        # Step physics (with per-scene random x-acceleration as external force).
-        # Capture full RGBA+depth+seg frames at t=PP_EARLY_FRAME and
-        # t=PP_LATE_FRAME (the brain's later observations) and at
-        # t=n_timesteps (the behavioral prediction target, not in brain data).
-        early_frame = None
-        late_frame = None
-        target_frame = None
-        for t in range(n_timesteps):
-            for obj_idx, bid in enumerate(body_ids):
-                x_accel = shape_configs[obj_idx].get('x_accel', 0.0)
-                if x_accel != 0.0:
-                    p.applyExternalForce(bid, -1,
-                                         [x_accel * masses[obj_idx], 0, 0],
-                                         [0, 0, 0], p.WORLD_FRAME,
-                                         physicsClientId=pc)
-            p.stepSimulation(physicsClientId=pc)
-            _lock_rotation(body_ids, pc)
-            if t + 1 == _CFG_PP_EARLY_FRAME:
-                early_frame = _render_scene(pc, lighting=lighting)
-                early_renders[i] = _frame_render_vec(*early_frame)
-            if t + 1 == _CFG_PP_LATE_FRAME:
-                late_frame = _render_scene(pc, lighting=lighting)
-                late_renders[i] = _frame_render_vec(*late_frame)
+            _rnd = lambda: _render_scene(pc, lighting=lighting, use_opengl=use_gui)
 
-        # Collect final-state analysis labels (NOT used in neural generation)
-        physics_labels[i] = _collect_physics_labels(
-            body_ids, masses, frictions, pc, applied_accels=applied_accels,
-        )
-        kinetic_energies[i] = _compute_total_kinetic_energy(body_ids, masses, pc)
+            # Capture initial state (t=0) before stepping
+            applied_accels = [cfg.get('x_accel', 0.0) for cfg in shape_configs]
+            initial_physics_labels[i] = _collect_physics_labels(
+                body_ids, masses, frictions, pc, applied_accels=applied_accels,
+            )
+            init_frame = _rnd()
+            initial_renders[i] = _frame_render_vec(*init_frame)
 
-        # Render behavioral target frame at t=n_timesteps (held out from brain)
-        target_frame = _render_scene(pc, lighting=lighting)
-        target_renders[i] = _frame_render_vec(*target_frame)
+            # Step physics (with per-scene random x-acceleration as external force).
+            # Capture full RGBA+depth+seg frames at t=PP_EARLY_FRAME and
+            # t=PP_LATE_FRAME (the brain's later observations) and at
+            # t=n_timesteps (the behavioral prediction target, not in brain data).
+            early_frame = None
+            late_frame = None
+            for t in range(n_timesteps):
+                for obj_idx, bid in enumerate(body_ids):
+                    x_accel = shape_configs[obj_idx].get('x_accel', 0.0)
+                    if x_accel != 0.0:
+                        p.applyExternalForce(bid, -1,
+                                             [x_accel * masses[obj_idx], 0, 0],
+                                             [0, 0, 0], p.WORLD_FRAME,
+                                             physicsClientId=pc)
+                p.stepSimulation(physicsClientId=pc)
+                _lock_rotation(body_ids, pc)
+                if t + 1 == _CFG_PP_EARLY_FRAME:
+                    early_frame = _rnd()
+                    early_renders[i] = _frame_render_vec(*early_frame)
+                if t + 1 == _CFG_PP_LATE_FRAME:
+                    late_frame = _rnd()
+                    late_renders[i] = _frame_render_vec(*late_frame)
 
-        # Build program state from the three brain-input frames.
-        scene_config_vec = _encode_scene_config(shape_configs)
-        lighting_vec = _encode_scene_lighting(pillar_gray, lighting)
-        program_states[i] = _build_program_state(
-            [init_frame, early_frame, late_frame],
-            physics_labels[i], scene_config_vec, lighting_vec,
-        )
+            # Collect final-state analysis labels (NOT used in neural generation)
+            physics_labels[i] = _collect_physics_labels(
+                body_ids, masses, frictions, pc, applied_accels=applied_accels,
+            )
+            kinetic_energies[i] = _compute_total_kinetic_energy(body_ids, masses, pc)
 
+            # Render behavioral target frame at t=n_timesteps (held out from brain)
+            target_frame = _rnd()
+            target_renders[i] = _frame_render_vec(*target_frame)
+
+            # Build program state from the three brain-input frames.
+            scene_config_vec = _encode_scene_config(shape_configs)
+            lighting_vec = _encode_scene_lighting(pillar_gray, lighting)
+            program_states[i] = _build_program_state(
+                [init_frame, early_frame, late_frame],
+                physics_labels[i], scene_config_vec, lighting_vec,
+            )
+    finally:
         p.disconnect(pc)
 
     # Behavior label: median split on total final kinetic energy.
