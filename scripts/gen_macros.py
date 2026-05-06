@@ -94,7 +94,7 @@ for k, label in [(1, "One"), (5, "Five"), (10, "Ten"), (50, "Fifty")]:
         add(f"pcaVarExplained{label}", pct(cumvar[k - 1]))
 
 pc_counts = pca["pc_counts"]
-decode_accs = pca["decode_accuracies"]
+decode_accs = pca["decode_accs_per_target"]["motion_dir"]
 
 # Decoding accuracy at specific PC counts
 for k, label in [(5, "Five"), (10, "Ten")]:
