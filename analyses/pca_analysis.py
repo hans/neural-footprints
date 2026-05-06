@@ -24,17 +24,15 @@ def _build_targets(scenes):
     All targets are balanced ~50/50: median splits are exact (uniform
     samples have no ties); motion direction is symmetric by sampling.
     """
-    mean_brightness = scenes['initial_renders'].mean(axis=1)
     pillar_grays = np.asarray(scenes['pillar_grays'])
     cam_height = np.array([
         float(lt['camJitter'][2]) for lt in scenes['lightings']
     ])
     vx = scenes['initial_physics_labels'][:, 7]
     return {
-        'cam_height':      (cam_height > np.median(cam_height)).astype(int),
-        'mean_brightness': (mean_brightness > np.median(mean_brightness)).astype(int),
-        'pillar_gray':     (pillar_grays > np.median(pillar_grays)).astype(int),
-        'motion_dir':      (vx > 0).astype(int),
+        'cam_height':  (cam_height > np.median(cam_height)).astype(int),
+        'pillar_gray': (pillar_grays > np.median(pillar_grays)).astype(int),
+        'motion_dir':  (vx > 0).astype(int),
     }
 
 

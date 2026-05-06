@@ -343,10 +343,9 @@ def plot_dynamics(plot_data, fig_dir="figures"):
 # and legend order: positive controls first (largest pixel footprint at
 # top), negative control (motion) last in physics red.
 PCA_TARGET_STYLE = [
-    ('cam_height',      'Camera height',         '#6ACC65'),  # green
-    ('mean_brightness', 'Mean pixel brightness', '#4878CF'),  # blue
-    ('pillar_gray',     'Pillar gray',           '#9B59B6'),  # purple
-    ('motion_dir',      'Motion direction',      '#D65F5F'),  # physics red
+    ('cam_height',  'Camera height',     '#6ACC65'),  # green
+    ('pillar_gray', 'Pillar gray',       '#9B59B6'),  # purple
+    ('motion_dir',  'Motion direction',  '#D65F5F'),  # physics red
 ]
 
 
