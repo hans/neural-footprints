@@ -11,7 +11,7 @@ from sklearn.decomposition import PCA
 from sklearn.linear_model import LogisticRegressionCV
 from sklearn.model_selection import cross_val_score
 from sklearn.preprocessing import StandardScaler
-def run_pca_analysis(neural_activity, scenes, neural_meta):
+def run_pca_analysis(neural_activity, scenes, neural_meta, n_permutations=50):
     print("\n" + "=" * 60)
     print("PCA NEGATIVE ANALYSIS: Variance ≠ Information")
     print("=" * 60)
@@ -44,11 +44,27 @@ def run_pca_analysis(neural_activity, scenes, neural_meta):
 
     all_pc_acc = decode_accs[-1]
 
+    # Permutation null distribution: shuffle labels, re-decode at each k
+    print(f"  Computing permutation null ({n_permutations} shuffles)...")
+    rng = np.random.default_rng(0)
+    perm_accs = np.zeros((len(pc_counts), n_permutations))
+    for p in range(n_permutations):
+        shuffled = rng.permutation(motion_dir)
+        for i, k in enumerate(pc_counts):
+            perm_accs[i, p] = cross_val_score(
+                LogisticRegressionCV(cv=5, max_iter=1000, random_state=42),
+                neural_pca[:, :k], shuffled, cv=5, scoring='accuracy',
+            ).mean()
+    chance_lo = np.percentile(perm_accs, 5, axis=1)
+    chance_hi = np.percentile(perm_accs, 95, axis=1)
+
     return {
         'cumulative_variance': cumvar.tolist(),
         'all_pc_decoding_accuracy': float(all_pc_acc),
         'pc_counts': pc_counts,
         'decode_accuracies': [float(a) for a in decode_accs],
+        'chance_lo': chance_lo.tolist(),
+        'chance_hi': chance_hi.tolist(),
         'neural_pca_2d': neural_pca[:, :2],
         'motion_dir': motion_dir,
         'n_neurons': n_neurons,

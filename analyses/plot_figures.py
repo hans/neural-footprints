@@ -345,6 +345,8 @@ def plot_pca(plot_data, fig_dir="figures"):
     motion_dir = plot_data['motion_dir']
     pc_counts = plot_data['pc_counts'].astype(int)
     decode_accs = plot_data['decode_accs']
+    chance_lo = plot_data['chance_lo'] if 'chance_lo' in plot_data else None
+    chance_hi = plot_data['chance_hi'] if 'chance_hi' in plot_data else None
     n_neurons = int(plot_data['n_neurons'])
     all_pc_acc = decode_accs[-1]
     pc1, pc2 = neural_pca_2d[:, 0], neural_pca_2d[:, 1]
@@ -392,7 +394,11 @@ def plot_pca(plot_data, fig_dir="figures"):
         ax_inset = ax2.inset_axes([0.58, 0.05, 0.40, 0.42])
         ax_inset.plot(pc_counts, decode_accs, marker='o',
                       color=COLORS['sensory'], markersize=3)
-        ax_inset.axhline(0.5, color='gray', linestyle='--', alpha=0.5)
+        if chance_lo is not None and chance_hi is not None:
+            ax_inset.fill_between(pc_counts, chance_lo, chance_hi,
+                                  color='gray', alpha=0.25, label='Chance (5–95%)')
+        else:
+            ax_inset.axhline(0.5, color='gray', linestyle='--', alpha=0.5)
         ax_inset.set_xlabel('# PCs', fontsize=5)
         ax_inset.set_ylabel('Accuracy', fontsize=5)
         ax_inset.set_title('Motion decoding', fontsize=6)
@@ -425,7 +431,11 @@ def plot_pca(plot_data, fig_dir="figures"):
         ax_dec.plot(pc_counts, decode_accs, marker='o',
                     color=COLORS['physics'], markersize=3,
                     label='Motion decoding\naccuracy')
-        ax_dec.axhline(0.5, color='gray', linestyle=':', alpha=0.5)
+        if chance_lo is not None and chance_hi is not None:
+            ax_dec.fill_between(pc_counts, chance_lo, chance_hi,
+                                color='gray', alpha=0.25, label='Chance (5–95%)')
+        else:
+            ax_dec.axhline(0.5, color='gray', linestyle=':', alpha=0.5)
         ax_dec.set_ylabel('Decoding accuracy', color=COLORS['physics'])
         ax_dec.tick_params(axis='y', labelcolor=COLORS['physics'])
         ax_dec.set_ylim(0.4, 1.05)

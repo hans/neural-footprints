@@ -26,5 +26,7 @@ np.savez_compressed(snakemake.output.plot_data,
     motion_dir=motion_dir,
     pc_counts=np.array(results['pc_counts']),
     decode_accs=np.array(results['decode_accuracies']),
+    chance_lo=np.array(results['chance_lo']),
+    chance_hi=np.array(results['chance_hi']),
     n_neurons=np.array(n_neurons),
 )
