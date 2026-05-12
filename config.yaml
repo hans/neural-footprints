@@ -33,3 +33,4 @@ pp_pixel_pca_dim: 50
 pp_early_frame: 40
 pp_late_frame: 80
 pp_dropout_rate: 0.05
+pp_neural_layer: "h2"
