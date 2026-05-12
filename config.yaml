@@ -1,0 +1,35 @@
+n_scenes: 2000
+n_objects: 1
+image_size: 64
+n_neurons: 500
+n_timesteps: 120
+noise_level: 0.3
+random_seed: 42
+
+# Generative scene parameters
+# linvel_x is sampled uniformly from [-linvel_x_max, +linvel_x_max].
+# Experiment B (specs/scene_generation_review.md): tightened from 8.0 to 3.0
+# so the object stays on-screen across the longer 500 ms window needed for
+# x_accel inference.
+linvel_x_max: 3.0
+# x_accel sampled uniformly from [-x_accel_max, +x_accel_max] m/s².
+# Tightened from 15 → 6: at T=0.5 s, |a|=15 produced ~1.875 m of horizontal
+# drift, which combined with linvel_x*T pushed many target frames off-camera.
+# σ_a noise floor for the {0,40,80}-frame stride is ~6 m/s², so |a|≤6 still
+# leaves the curvature signal recoverable.
+x_accel_max: 6.0
+rsa_subsample: 500
+pixel_pca_dim: 500
+behavioral_pca_dim: 0.90
+dynamics_pca_dim: 50
+behavioral_objective: "next_frame_pixels"
+
+# Camera — wider FOV keeps the moving object on-screen for more frames
+camera_fov: 90
+
+# Predictive processing
+pp_hidden_dim: 256
+pp_pixel_pca_dim: 50
+pp_early_frame: 40
+pp_late_frame: 80
+pp_dropout_rate: 0.05

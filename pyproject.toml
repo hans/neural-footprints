@@ -1,0 +1,14 @@
+[project]
+name = "neural-footprints"
+version = "0.1.0"
+requires-python = ">=3.14"
+dependencies = [
+    "pybullet",
+    "numpy",
+    "scipy",
+    "scikit-learn",
+    "matplotlib",
+    "snakemake>=9",
+    "pyyaml",
+    "seaborn>=0.13.2",
+]

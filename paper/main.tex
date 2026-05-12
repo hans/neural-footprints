@@ -1,0 +1,199 @@
+% Minimal draft -- swap documentclass for conference template later
+\documentclass{ccn}
+
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{amsmath}
+
+\bibliography{references}
+
+\input{results_macros}          % auto-generated numbers
+
+\title{Neural Footprints: Standard Neuroscience Methods\\
+       Systematically Miss Causally Operative Variables}
+\author{Draft}
+\date{}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+The brain computes at vastly different levels of representation, encoding
+both abstract knowledge and fine-grained sensory information about the
+world. These two ends of the spectrum have distinct statistical properties:
+while abstract knowledge about the world is compact and low-dimensional
+(object identities, motion and collision, etc.), sensory information is
+highly variable and difficult to compress (textures, patterns of color and
+luminance). This statistical asymmetry creates fundamental issues for
+neuroscience analysis techniques which rely on variance explained as a
+measure of model fit (brain encoding, RSA, PCA). In a series of simulation
+experiments, we demonstrate that variance-based techniques fail to
+distinguish between obviously correct and incorrect models of visual
+perception. Reliable neural analysis therefore requires more than variance
+explained: it demands models that link representations to the
+computations they support.
+\end{abstract}
+
+\begin{figure}[t]
+    \includegraphics[width=\linewidth]{figures/Artboard 1.pdf}
+    \label{fig:abstract}
+    \caption{We characterize two models of visual perception (top). A {\color{blue}sensory-inputs model} represents only low-level visual properties — high-dimensional and difficult to compress. A {\color{red}full model} additionally represents physical states such as object identity and motion — low-dimensional and compact. The full model predicts future scene dynamics and the sensory-inputs model does not (bottom left). Despite this major behavioral difference, standard neural analyses (encoding, RSA, PCA) cannot distinguish the two (bottom right).}
+\end{figure}
+
+% ===================================================================
+\section{Introduction}
+% ===================================================================
+
+Perception requires the brain to maintain representations at multiple
+levels of abstraction simultaneously. At one end, neurons encode
+fine-grained sensory detail---textures, luminance gradients, color
+patterns, spectrotemporal modulations---that varies enormously across
+stimuli. At the other, the brain must represent compact, abstract
+knowledge about the world: object identities, physical properties like
+mass and friction, syntactic structure, and the causal dynamics that
+govern how a scene, utterance, or action will unfold. These two levels
+of representation have fundamentally different informational footprints.
+Sensory features are intrinsically high-dimensional and account for the
+bulk of signal variance; abstract knowledge is low-dimensional and
+occupies a comparatively tiny portion of the signal.
+
+Encoding models, representational similarity analysis, and principal
+component analysis underlie many of the central findings in
+computational neuroscience---from semantic tuning in language cortex to
+hierarchical feature selectivity in the ventral stream to
+task-optimized models of auditory processing
+\citep{huth2016natural,yamins2014performance,kriegeskorte2008representational,kay2008identifying,naselaris2011encoding,kell2018task}.
+Yet these methods share a structural vulnerability: each is dominated
+by the highest-variance directions in neural activity. Encoding models
+fit regressors that maximize variance explained; representational
+similarity analysis computes similarity structures shaped by the most
+variable features; PCA explicitly extracts the principal axes of
+variance. When an intrinsically high-dimensional sensory feature set
+and a low-dimensional abstract feature set both contribute to neural
+activity, all three methods will systematically privilege the sensory
+features---not because the abstract features are absent, but because
+they are statistically dwarfed.
+
+This informational asymmetry matters because the representations that
+dominate neural variance are not necessarily the representations that
+drive behavior. Consider a concrete test of model adequacy: given a
+model's account of current neural activity, can it predict what happens
+next---where the scene is headed, what the organism will do, how the
+environment will change? A model built from the right variables should
+succeed at this task; a model that merely captures the dominant
+statistical surface of the signal will not. Success at this behavioral
+prediction task is what separates a model that has identified the
+computationally relevant representations from one that has merely
+found the loudest signal.
+
+We demonstrate this with a controlled simulation. Using PyBullet, we
+construct partially-occluded physics scenes and generate synthetic
+neural activity by random projection of the full program state (render
+buffers $+$ serialized physics). This guarantees that both sensory and
+abstract features are linearly present in the neural code. Standard
+encoding models, RSA, and PCA uniformly fail to detect the abstract
+physics features, even though those features are linearly decodable by
+construction. Critically, this failure is not a matter of statistical
+power: it is a structural consequence of the informational asymmetry
+between representational levels. The implication is that commonly used
+neural analysis methods are unreliable without cognitive insight into
+what representations are for.
+
+% ===================================================================
+\section{Methods}
+% ===================================================================
+
+We construct a simulation in which both sensory and abstract features are
+\emph{guaranteed} to be linearly present in neural activity, so that any
+failure of analysis methods is structural rather than a matter of
+statistical power. This mirrors the logic of neuroscience benchmarking
+studies that use synthetic data to validate analysis pipelines
+\citep{naselaris2011encoding,kriegeskorte2008representational}, but here
+we use the ground truth to expose a systematic blind spot.
+
+We use a rigid-body physics engine to simulate scenes with partial
+occlusion: some objects are hidden from the camera by a wall, so that
+pixel-level information is fundamentally incomplete for predicting scene
+dynamics. The \emph{program state} concatenates all render buffers with
+the serialized engine state. Synthetic neural activity is generated by
+random linear projection of this program state plus noise, guaranteeing
+that both sensory and physics information are linearly decodable in
+principle.
+
+We compare two candidate models of the neural population
+(Figure~\ref{fig:abstract}). A \textbf{sensory model} uses only
+render-derived features (RGBA, depth, and segmentation
+buffers)---${\sim}49{,}000$ floats per scene.
+A \textbf{full model} additionally includes physical variables that govern
+scene dynamics---position, velocity, mass, and friction per object, 75
+variables in total. The physics component is low-dimensional by nature:
+it is a compact summary of the scene compared with the high-dimensional
+sensory surface. As we show below, this dimensionality gap is sufficient
+to make the physics component invisible to variance-based analyses,
+regardless of how those variables are represented.
+
+% ===================================================================
+\section{Results}
+% ===================================================================
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=0.9\columnwidth]{figures/dissociation_combined.pdf}
+  \caption{Brain encoding vs. behavioral results. The sensory
+  model dominates neural variance but cannot predict scene dynamics;
+  the full model barely contributes to the neural encoding result, yet perfectly
+  predicts the next frame.}
+  \label{fig:dissociation}
+\end{figure}
+
+\textbf{Encoding models.}\quad
+A render-only model (RGBA + depth + segmentation buffers) achieves $R^2 = \encodingRsqRender$; adding all 75
+physics variables yields a barely distinguishable $R^2 = \encodingRsqCombined$ (figure~\ref{fig:dissociation}).
+While we know by construction that physical features are necessary and sufficient for forming expectations about the visual world, this encoding anlaysis would lead us to conclude that these quantities are not represented in the brain.
+
+\begin{figure}[t]
+    \centering\includegraphics[width=0.8\columnwidth]{figures/rsa_analysis.pdf}
+    \label{fig:rsa}
+    \caption{Representational similarity analysis. The sensory model is a far better match to the similarity structure present in the neural data, despite being behaviorally insufficient.}
+\end{figure}
+
+\textbf{RSA.}\quad A similar mismatch emerges in representational similarity analysis: the similarity matrices induced from brain data are extremely similar to those induced from the sensory model, and don't match the structure in the low-dimensional physics representations (figure~\ref{fig:rsa}).
+
+\textbf{PCA.}\quad The principal components of neural activity in our simulation do not reveal high-level features such as object motion; instead, they correspond with low-level visual features. Decoding the direction of an object's motion from the top 5 PCs (\pcaVarExplainedFive\% of variance) yields \pcaDecodeTopFive\% accuracy (chance $=50\%$); \pcaDecodeThresholdK{} PCs are required before accuracy
+exceeds $60\%$ (\pcaDecodeThresholdAcc\%, capturing \pcaDecodeThresholdVar\%
+of variance).
+
+% ===================================================================
+\section{Discussion}
+% ===================================================================
+
+Our results do not challenge the correctness of encoding models, RSA, or
+PCA---each faithfully identifies the dominant sources of variance in
+neural activity. The problem is that variance explained is structurally
+insufficient as a criterion for identifying the representations that
+matter. The brain encodes both sensory detail and abstract knowledge, but
+these occupy vastly different statistical regimes. Because abstract
+knowledge is compact and low-dimensional, it is invisible to methods that
+equate explanatory relevance with variance accounted for.
+
+This statistical asymmetry is not an artifact of our simulation. It
+reflects a general property of neural representation: the features that
+dominate neural variance are not necessarily the features that the brain
+computes over. In auditory cortex, spectrotemporal modulation features
+explain substantial neural variance, but syntactic structure---which
+determines sentence meaning---is low-dimensional and may be similarly
+invisible to encoding models. In visual neuroscience, deep network
+features dominate encoding performance throughout the ventral stream
+\citep{yamins2014performance}, yet category-diagnostic or
+affordance-relevant variables occupy a small subspace of those
+representations. In motor cortex, high-dimensional kinematic features may
+swamp the low-dimensional planning variables that govern action selection.
+In each case, variance-based methods will find the statistically dominant
+signal, not the computationally relevant one.
+
+Variance explained tells you what dominates the signal. Cognitive insight
+into what representations are \emph{for} is what tells you whether a
+model is right.
+
+\printbibliography
+\end{document}

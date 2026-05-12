@@ -1,6 +1,0 @@
-pybullet
-numpy
-scipy
-scikit-learn
-matplotlib
-torch
