@@ -20,5 +20,7 @@ def build_frame_stack(scenes):
         raise ValueError("scenes lacks 3 frames")
     n = init.shape[0]
     H = W = IMAGE_SIZE
+    rgba_n = H * W * 4  # render vectors include depth+seg after RGBA; take only RGBA
+    init, f1, f2 = init[:, :rgba_n], f1[:, :rgba_n], f2[:, :rgba_n]
     frames = np.stack([init, f1, f2], axis=1).astype(np.uint8)
     return frames.reshape(n, 3, H, W, 4).transpose(0, 1, 4, 2, 3)

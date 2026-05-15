@@ -41,7 +41,8 @@ def ridge_r2_per_neuron(X, neural_activity, alphas=None, cv=5):
 
 
 def run_encoding_analysis(neural_activity, scenes, neural_meta,
-                          *, pixel_pca_dim=None):
+                          *, pixel_pca_dim=None,
+                          predicted_pixel_pca=None):
     """
     Run encoding model analysis.
 
@@ -100,6 +101,15 @@ def run_encoding_analysis(neural_activity, scenes, neural_meta,
     print(f"  Mean R² (pixel+physics):      {mean_r2_comb:.4f}")
     print(f"  Mean ΔR²:                     {mean_delta:.6f}")
 
+    # --- Encoding model: predicted pixels (forward-model render, Predicted S) ---
+    r2_predicted_pixel = None
+    mean_r2_predicted_pixel = None
+    if predicted_pixel_pca is not None:
+        print("Fitting encoding model: neural ~ predicted_pixel_PCA (Predicted S) ...")
+        r2_predicted_pixel = ridge_r2_per_neuron(predicted_pixel_pca, neural_activity)
+        mean_r2_predicted_pixel = r2_predicted_pixel.mean()
+        print(f"  Mean R² (predicted S):        {mean_r2_predicted_pixel:.4f}")
+
     # --- Control: physics_labels -> behavior_label ---
     # MLP because KE = 0.5*m*v² is nonlinear in the physics label features.
     print("\nControl: MLP physics_labels -> behavior_label ...")
@@ -140,7 +150,7 @@ def run_encoding_analysis(neural_activity, scenes, neural_meta,
     encoder_ridge = RidgeCV(alphas=alphas, alpha_per_target=True)
     encoder_ridge.fit(pixel_pca, neural_activity)
 
-    return {
+    result = {
         'r2_pixel_only': r2_pixel_only,
         'r2_physics_only': r2_physics_only,
         'r2_combined': r2_combined,
@@ -157,3 +167,6 @@ def run_encoding_analysis(neural_activity, scenes, neural_meta,
             'scaler_phys': scaler_phys,
         },
     }
+    if r2_predicted_pixel is not None:
+        result['r2_predicted_pixel'] = r2_predicted_pixel
+    return result

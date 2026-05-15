@@ -1006,9 +1006,10 @@ def run_predictive_processing_analysis(neural_activity, scenes,
                          lighting=lightings[frame_idx[j]])
         for j in range(n_frame_samples)
     ])
-    init_frame_imgs = initial_renders[frame_idx].astype(np.uint8).reshape(
+    _rgba_s = scenes['metadata']['target_pixel_indices']  # RGBA slice within per-frame render vecs
+    init_frame_imgs = initial_renders[frame_idx][:, _rgba_s].astype(np.uint8).reshape(
         n_frame_samples, IMAGE_SIZE, IMAGE_SIZE, 4)
-    early_frame_imgs = early_renders[frame_idx].astype(np.uint8).reshape(
+    early_frame_imgs = early_renders[frame_idx][:, _rgba_s].astype(np.uint8).reshape(
         n_frame_samples, IMAGE_SIZE, IMAGE_SIZE, 4)
     final_frame_imgs = program_states[frame_idx][:, pixel_indices].astype(np.uint8).reshape(
         n_frame_samples, IMAGE_SIZE, IMAGE_SIZE, 4)
@@ -1056,5 +1057,6 @@ def run_predictive_processing_analysis(neural_activity, scenes,
             'pp_frame_imgs': pp_frame_imgs,
             'render_frame_imgs': render_frame_imgs,
             'final_frame_imgs': final_frame_imgs,
+            'frame_idx': frame_idx,
         },
     }
