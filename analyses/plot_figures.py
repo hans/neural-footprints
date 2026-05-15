@@ -29,20 +29,30 @@ def plot_encoding(plot_data, fig_dir="figures"):
     control_acc = float(plot_data['control_accuracy'])
     control_acc_std = float(plot_data['control_accuracy_std'])
 
+    keys = plot_data.files if hasattr(plot_data, 'files') else plot_data
+    has_predicted = 'r2_predicted_pixel' in keys
+    r2_predicted = plot_data['r2_predicted_pixel'] if has_predicted else None
+
     with paper_style():
         fig, axes = plt.subplots(3, 1, figsize=(COL_WIDTH, 5.5))
 
         # Panel A: R² bar plot
         ax = axes[0]
-        ax.bar([LABEL_SENSORY, LABEL_SENSORY_PLUS_PHYSICS],
-               [mean_r2_pixel, mean_r2_comb],
-               yerr=[r2_pixel_only.std() / np.sqrt(n_neurons),
-                     r2_combined.std() / np.sqrt(n_neurons)],
-               color=[COLORS['sensory'], COLORS['physics']], capsize=3,
-               width=0.6)
+        bar_labels = [LABEL_SENSORY, LABEL_SENSORY_PLUS_PHYSICS]
+        bar_heights = [mean_r2_pixel, mean_r2_comb]
+        bar_errs = [r2_pixel_only.std() / np.sqrt(n_neurons),
+                    r2_combined.std() / np.sqrt(n_neurons)]
+        bar_colors = [COLORS['sensory'], COLORS['physics']]
+        if has_predicted:
+            bar_labels.append('Predicted S')
+            bar_heights.append(float(r2_predicted.mean()))
+            bar_errs.append(float(r2_predicted.std() / np.sqrt(n_neurons)))
+            bar_colors.append(COLORS['control'])
+        ax.bar(bar_labels, bar_heights, yerr=bar_errs,
+               color=bar_colors, capsize=3, width=0.6)
         ax.set_ylabel('Mean R\u00b2')
         ax.set_title('Encoding model: R\u00b2 \u00b1 physics labels')
-        ymax = max(mean_r2_pixel, mean_r2_comb) * 1.12
+        ymax = max(bar_heights) * 1.12
         ax.annotate(f'\u0394R\u00b2 = {mean_delta:.6f}', xy=(0.5, ymax),
                     ha='center', style='italic')
 
@@ -86,6 +96,11 @@ def plot_rsa(plot_data, fig_dir="figures"):
     rdm_physics_inf = plot_data['rdm_inferred'] if has_inferred else None
     corr_neural_physics_inf = (
         float(plot_data['corr_neural_inferred']) if has_inferred else None
+    )
+    has_predicted = 'rdm_predicted' in keys
+    rdm_predicted_flat = plot_data['rdm_predicted'] if has_predicted else None
+    corr_neural_predicted = (
+        float(plot_data['corr_neural_predicted']) if has_predicted else None
     )
 
     with paper_style():
@@ -161,6 +176,10 @@ def plot_rsa(plot_data, fig_dir="figures"):
             labels.append(f'Neural\u2013\n{LABEL_PHYSICS}\n(inferred)')
             values.append(corr_neural_physics_inf)
             colors.append(COLORS['control'])
+        if has_predicted:
+            labels.append(f'Neural\u2013\nPredicted S')
+            values.append(corr_neural_predicted)
+            colors.append('#E67E22')
         bars = ax.bar(labels, values, color=colors, width=0.6)
         ax.set_ylabel('Spearman r')
         ax.set_title('RSA correlations')
@@ -186,33 +205,46 @@ def plot_dissociation(plot_data, fig_dir="figures"):
     chance_val = float(plot_data['chance'])
     chance = None if np.isnan(chance_val) else chance_val
 
+    keys = plot_data.files if hasattr(plot_data, 'files') else plot_data
+    has_predicted = ('r2_predicted_pixel' in keys and 'predicted_pixel_score' in keys)
+    if has_predicted:
+        r2_predicted = plot_data['r2_predicted_pixel']
+        predicted_score = float(plot_data['predicted_pixel_score'])
+        mean_r2_predicted = r2_predicted.mean()
+
     with paper_style():
         fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(COL_WIDTH, 2.0))
 
         bar_width = 0.5
         colors = [COLORS['sensory'], COLORS['physics']]
         labels = [LABEL_SENSORY, LABEL_PHYSICS]
+        r2_heights = [mean_r2_pixel, mean_r2_physics]
+        r2_errs = [r2_pixel.std() / np.sqrt(n_neurons),
+                   r2_physics.std() / np.sqrt(n_neurons)]
+        behav_heights = [pixel_score, physics_score]
+        if has_predicted:
+            colors.append('#E67E22')
+            labels.append('Predicted S')
+            r2_heights.append(mean_r2_predicted)
+            r2_errs.append(r2_predicted.std() / np.sqrt(n_neurons))
+            behav_heights.append(predicted_score)
 
-        bars1 = ax1.bar(labels, [mean_r2_pixel, mean_r2_physics],
-                        width=bar_width, color=colors,
-                        yerr=[r2_pixel.std() / np.sqrt(n_neurons),
-                              r2_physics.std() / np.sqrt(n_neurons)],
-                        capsize=3)
+        bars1 = ax1.bar(labels, r2_heights, width=bar_width, color=colors,
+                        yerr=r2_errs, capsize=3)
         ax1.set_ylabel('Neural R\u00b2')
         ax1.set_title('Encoding performance')
-        for bar, val in zip(bars1, [mean_r2_pixel, mean_r2_physics]):
+        for bar, val in zip(bars1, r2_heights):
             ax1.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.01,
                      f'{val:.3f}', ha='center', va='bottom', fontweight='bold')
 
-        bars2 = ax2.bar(labels, [pixel_score, physics_score],
-                        width=bar_width, color=colors, capsize=3)
+        bars2 = ax2.bar(labels, behav_heights, width=bar_width, color=colors, capsize=3)
         if chance is not None:
             ax2.axhline(chance, color='gray', linestyle='--', alpha=0.5, label='Chance')
             ax2.set_ylim(0, 1.1)
             ax2.legend()
         ax2.set_ylabel(metric_label)
         ax2.set_title('Computational sufficiency')
-        for bar, val in zip(bars2, [pixel_score, physics_score]):
+        for bar, val in zip(bars2, behav_heights):
             ax2.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.01,
                      f'{val:.3f}', ha='center', va='bottom', fontweight='bold')
 
@@ -284,12 +316,19 @@ def plot_predicted_frames(plot_data, fig_dir="figures"):
     final_imgs = plot_data['predicted_final_imgs']
     n = len(init_imgs)
 
+    keys = plot_data.files if hasattr(plot_data, 'files') else plot_data
+    fwd_imgs = plot_data['predicted_fwd_imgs'] if 'predicted_fwd_imgs' in keys else None
+
     col_titles = ['t=0 (input)', f'{LABEL_SENSORY} model\nprediction',
                   f'{LABEL_PHYSICS} model\nprediction', 't=N (actual)']
     cols = [init_imgs, pixel_imgs, physics_imgs, final_imgs]
+    if fwd_imgs is not None:
+        col_titles.insert(3, 'Cog. fwd model\n(late frame)')
+        cols.insert(3, fwd_imgs[:n])
 
+    n_cols = len(cols)
     with paper_style():
-        fig, axes = plt.subplots(n, 4, figsize=(FULL_WIDTH, 1.6 * n))
+        fig, axes = plt.subplots(n, n_cols, figsize=(FULL_WIDTH * n_cols / 4, 1.6 * n))
         if n == 1:
             axes = axes[np.newaxis, :]
 
@@ -495,15 +534,19 @@ def plot_pca(plot_data, fig_dir="figures"):
 
 def plot_sample_scenes(initial_renders, target_renders, rgba_bytes,
                        image_size, n_timesteps, fig_dir="figures",
-                       n_samples=6):
+                       n_samples=6, fwd_renders=None):
     n = min(n_samples, len(initial_renders))
+    n_cols = 3 if fwd_renders is not None else 2
     with paper_style():
-        fig, axes = plt.subplots(n, 2, figsize=(COL_WIDTH, 1.6 * n))
+        fig, axes = plt.subplots(n, n_cols,
+                                 figsize=(COL_WIDTH * n_cols / 2, 1.6 * n))
         if n == 1:
             axes = axes[np.newaxis, :]
 
-        axes[0, 0].set_title('t = 0 (initial)')
+        axes[0, 0].set_title('t = 0 (actual)')
         axes[0, 1].set_title(f't = {n_timesteps} (target)')
+        if fwd_renders is not None:
+            axes[0, 2].set_title('Fwd model (t=0 pred)')
 
         for i in range(n):
             init_rgba = initial_renders[i, :rgba_bytes].astype(np.uint8).reshape(
@@ -514,6 +557,9 @@ def plot_sample_scenes(initial_renders, target_renders, rgba_bytes,
             axes[i, 0].axis('off')
             axes[i, 1].imshow(target_rgba)
             axes[i, 1].axis('off')
+            if fwd_renders is not None:
+                axes[i, 2].imshow(fwd_renders[i])
+                axes[i, 2].axis('off')
 
         plt.tight_layout(pad=0.3)
         fig_path = f"{fig_dir}/sample_scenes.pdf"
@@ -575,5 +621,79 @@ def plot_residual(plot_data, fig_dir="figures"):
 
         plt.tight_layout()
         fig_path = f"{fig_dir}/residual_analysis.pdf"
+        plt.savefig(fig_path)
+        plt.close()
+
+
+def plot_pp(plot_data, fig_dir="figures"):
+    """Bar charts summarizing the predictive processing analysis."""
+    prior_r2 = float(plot_data['prior_r2'])
+    oracle_r2 = float(plot_data['oracle_r2'])
+    pp_r2 = float(plot_data['pp_r2'])
+    render_r2 = float(plot_data['render_r2'])
+    full_per_dim_r2 = plot_data['full_per_dim_r2']
+
+    with paper_style():
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(FULL_WIDTH, 2.2))
+
+        # Panel A: model comparison bar
+        labels = ['Prior', 'Render\nbaseline', 'InverseModel\n(PP)', 'Oracle']
+        heights = [prior_r2, render_r2, pp_r2, oracle_r2]
+        colors = [COLORS['neutral'], COLORS['sensory'], COLORS['control'], COLORS['physics']]
+        bars = ax1.bar(labels, heights, color=colors, width=0.6)
+        ax1.set_ylabel('Physics inference R²')
+        ax1.set_title('PP model vs. baselines')
+        for bar, val in zip(bars, heights):
+            ax1.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.005,
+                     f'{val:.3f}', ha='center', va='bottom', fontsize=5)
+
+        # Panel B: per-dimension R²
+        x = np.arange(len(full_per_dim_r2))
+        ax2.bar(x, full_per_dim_r2, color=COLORS['control'], width=0.8)
+        ax2.axhline(0, color='gray', linestyle='--', linewidth=0.6)
+        ax2.set_xlabel('Physics dimension')
+        ax2.set_ylabel('R²')
+        ax2.set_title('InverseModel per-dimension R²')
+
+        plt.tight_layout()
+        fig_path = f"{fig_dir}/predictive_processing.pdf"
+        plt.savefig(fig_path)
+        plt.close()
+
+
+def plot_pp_frames(plot_data, fig_dir="figures", fwd_frame_imgs=None):
+    """Frame grid for the PP analysis: input frames → PP sim → render baseline → target."""
+    init_imgs = plot_data['init_frame_imgs']
+    early_imgs = plot_data['early_frame_imgs']
+    pp_imgs = plot_data['pp_frame_imgs']
+    render_imgs = plot_data['render_frame_imgs']
+    final_imgs = plot_data['final_frame_imgs']
+    n = len(init_imgs)
+
+    col_titles = ['t=0 (input)', 'Early frame', 'PP inferred\nsim', 'Render\nprediction',
+                  't=N (target)']
+    cols = [init_imgs, early_imgs, pp_imgs, render_imgs, final_imgs]
+    if fwd_frame_imgs is not None:
+        col_titles.append('Cog. fwd\n(t=0 pred)')
+        cols.append(fwd_frame_imgs[:n])
+
+    n_cols = len(cols)
+    with paper_style():
+        fig, axes = plt.subplots(n, n_cols,
+                                 figsize=(FULL_WIDTH * n_cols / 4, 1.4 * n))
+        if n == 1:
+            axes = axes[np.newaxis, :]
+
+        for col_idx, (title, imgs) in enumerate(zip(col_titles, cols)):
+            axes[0, col_idx].set_title(title, fontsize=5)
+            for row_idx in range(n):
+                img = imgs[row_idx]
+                if img.dtype != np.uint8:
+                    img = np.clip(img, 0, 255).astype(np.uint8)
+                axes[row_idx, col_idx].imshow(img)
+                axes[row_idx, col_idx].axis('off')
+
+        plt.tight_layout(pad=0.2)
+        fig_path = f"{fig_dir}/pp_frames.pdf"
         plt.savefig(fig_path)
         plt.close()

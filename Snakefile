@@ -58,10 +58,21 @@ rule train_pp_for_neural:
         "scripts/train_pp_for_neural.py"
 
 
+rule forward_render:
+    input:
+        scenes="data/scenes.npz",
+        pp_activations="data/pp_activations.npz",
+    output:
+        forward_renders="data/forward_renders.npz",
+    script:
+        "scripts/gen_forward_renders.py"
+
+
 rule generate_neural:
     input:
         scenes="data/scenes.npz",
         pp_activations="data/pp_activations.npz",
+        forward_renders="data/forward_renders.npz",
     output:
         neural="data/neural.npz",
     script:
@@ -89,6 +100,7 @@ rule encoding:
     input:
         scenes="data/scenes.npz",
         neural="data/neural.npz",
+        forward_renders="data/forward_renders.npz",
     output:
         results="outputs/encoding_results.json",
         encoder="data/encoder.joblib",
@@ -101,6 +113,7 @@ rule rsa:
     input:
         scenes="data/scenes.npz",
         neural="data/neural.npz",
+        forward_renders="data/forward_renders.npz",
     output:
         results="outputs/rsa_results.json",
         plot_data="data/rsa_plot_data.npz",
@@ -113,6 +126,7 @@ rule dissociation:
         scenes="data/scenes.npz",
         neural="data/neural.npz",
         encoder="data/encoder.joblib",
+        forward_renders="data/forward_renders.npz",
     output:
         results="outputs/dissociation_results.json",
         plot_data="data/dissociation_plot_data.npz",
@@ -164,6 +178,7 @@ rule residual:
 rule plot_scenes:
     input:
         scenes="data/scenes.npz",
+        forward_renders="data/forward_renders.npz",
     output:
         figure="figures/sample_scenes.pdf",
     script:
@@ -222,6 +237,8 @@ rule plot_dynamics:
 rule plot_pp:
     input:
         plot_data="data/pp_plot_data.npz",
+        forward_renders="data/forward_renders.npz",
+        scenes="data/scenes.npz",
     output:
         figure="figures/predictive_processing.pdf",
         frames="figures/pp_frames.pdf",

@@ -4,15 +4,24 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import numpy as np
 from load_config import load_config
 from io_utils import load_scenes, load_neural, save_results, save_encoder
-from analyses.encoding import run_encoding_analysis
+from analyses.encoding import run_encoding_analysis, pca_reduce_pixels
+from scene_generator import extract_brain_pixels
 
 cfg = load_config()
 scenes = load_scenes(snakemake.input.scenes)
 neural, neural_meta = load_neural(snakemake.input.neural)
+fwd = np.load(snakemake.input.forward_renders)
+
+# Predicted-S: brain pixels extracted from the forward-model program states
+fwd_states = fwd['forward_program_states']
+predicted_brain_pixels = extract_brain_pixels(fwd_states, scenes['metadata'])
+predicted_pixel_pca, _, _ = pca_reduce_pixels(predicted_brain_pixels,
+                                               cfg['pixel_pca_dim'])
 
 results = run_encoding_analysis(
     neural, scenes, neural_meta,
     pixel_pca_dim=cfg['pixel_pca_dim'],
+    predicted_pixel_pca=predicted_pixel_pca,
 )
 encoder = results.pop('encoder')
 encoder['r2_pixel_only'] = results['r2_pixel_only']
@@ -22,7 +31,7 @@ save_results(results, snakemake.output.results)
 save_encoder(encoder, snakemake.output.encoder)
 
 # Save plot data
-np.savez_compressed(snakemake.output.plot_data,
+plot_kwargs = dict(
     r2_pixel_only=results['r2_pixel_only'],
     r2_physics_only=results['r2_physics_only'],
     r2_combined=results['r2_combined'],
@@ -32,3 +41,6 @@ np.savez_compressed(snakemake.output.plot_data,
     control_accuracy=np.array(results['control_accuracy']),
     control_accuracy_std=np.array(results['control_accuracy_std']),
 )
+if 'r2_predicted_pixel' in results:
+    plot_kwargs['r2_predicted_pixel'] = results['r2_predicted_pixel']
+np.savez_compressed(snakemake.output.plot_data, **plot_kwargs)

@@ -16,7 +16,7 @@ Two behavioral sufficiency objectives are supported (set in config.py):
 
 import numpy as np
 from sklearn.decomposition import PCA
-from sklearn.linear_model import LogisticRegressionCV
+from sklearn.linear_model import LogisticRegressionCV, RidgeCV
 from sklearn.model_selection import cross_val_predict, cross_val_score
 from sklearn.neural_network import MLPRegressor
 from sklearn.pipeline import make_pipeline
@@ -25,6 +25,16 @@ from sklearn.preprocessing import StandardScaler
 from config import BEHAVIORAL_PCA_DIM as _CFG_BEHAVIORAL_PCA_DIM
 from config import BEHAVIORAL_OBJECTIVE as _CFG_BEHAVIORAL_OBJECTIVE
 from scene_generator import extract_brain_pixels
+
+
+def ridge_r2_per_neuron_dissoc(X, neural_activity, cv=5):
+    """Cross-validated ridge R² per neuron (local helper for predicted-S scoring)."""
+    alphas = np.logspace(-2, 6, 20)
+    ridge = RidgeCV(alphas=alphas, alpha_per_target=True)
+    predictions = cross_val_predict(ridge, X, neural_activity, cv=cv)
+    ss_res = ((neural_activity - predictions) ** 2).sum(axis=0)
+    ss_tot = ((neural_activity - neural_activity.mean(axis=0)) ** 2).sum(axis=0)
+    return 1 - ss_res / ss_tot
 
 
 # ---------------------------------------------------------------------------
@@ -265,7 +275,10 @@ def _score_kinetic_energy(pixel_pca, physics_scaled, behavior_labels):
 def run_dissociation_analysis(neural_activity, scenes, neural_meta,
                                encoder, encoding_results,
                                objective=None,
-                               *, behavioral_pca_dim=None):
+                               *, behavioral_pca_dim=None,
+                               predicted_pixel_pca=None,
+                               predicted_brain_pixels=None,
+                               forward_program_states=None):
     """
     Compute and plot the R² vs. behavioral sufficiency dissociation.
 
@@ -384,6 +397,42 @@ def run_dissociation_analysis(neural_activity, scenes, neural_meta,
         raise ValueError(f"Unknown objective: {objective!r}. "
                          "Use 'next_frame_pixels' or 'kinetic_energy'.")
 
+    # --- Predicted-S (forward-model render) behavioral sufficiency ---
+    predicted_pixel_score = None
+    r2_predicted_pixel_dissoc = None
+    if predicted_pixel_pca is not None:
+        print(f"Computing predicted-S behavioral sufficiency ({objective})...")
+        # Behavioral-sized PCA of raw predicted pixels (same treatment as pixel_data above).
+        # predicted_pixel_pca (encoder-PCA reduced) is used only for neural R² below.
+        if predicted_brain_pixels is not None:
+            scaler_pred_3f = StandardScaler()
+            pred_3f_scaled = scaler_pred_3f.fit_transform(predicted_brain_pixels)
+        else:
+            # Fallback: use encoder-PCA features if raw pixels not provided
+            scaler_pred_3f = StandardScaler()
+            pred_3f_scaled = scaler_pred_3f.fit_transform(predicted_pixel_pca)
+        pca_pred_3f = PCA(n_components=behavioral_pca_dim, whiten=True, random_state=42)
+        predicted_input_pca = pca_pred_3f.fit_transform(pred_3f_scaled)
+
+        if objective == "next_frame_pixels":
+            pixel_pred_pca_cv = cross_val_predict(
+                _make_mlp(), predicted_input_pca, target_pixel_pca, cv=5
+            )
+            ss_res = np.sum((target_pixel_pca - pixel_pred_pca_cv) ** 2)
+            ss_tot = np.sum((target_pixel_pca - target_pixel_pca.mean(axis=0, keepdims=True)) ** 2)
+            predicted_pixel_score = float(1.0 - ss_res / ss_tot) if ss_tot > 0 else 1.0
+        elif objective == "kinetic_energy":
+            log_reg = LogisticRegressionCV(cv=5, max_iter=1000, random_state=42)
+            predicted_pixel_score = cross_val_score(
+                log_reg, predicted_input_pca, behavior_labels,
+                cv=5, scoring='accuracy').mean()
+
+        # Neural R² for predicted-S (reuse encoder's PCA for consistency)
+        r2_predicted_pixel_dissoc = ridge_r2_per_neuron_dissoc(
+            predicted_pixel_pca, neural_activity)
+        print(f"  Predicted-S    → {metric_label}: {predicted_pixel_score:.4f}")
+        print(f"  Predicted-S neural R²: {r2_predicted_pixel_dissoc.mean():.4f}")
+
     # --- Compute predicted frame images for visualization ---
     print("Computing predicted frame images...")
     init_imgs, pixel_imgs, physics_imgs, final_imgs = _compute_predicted_frames(
@@ -392,6 +441,20 @@ def run_dissociation_analysis(neural_activity, scenes, neural_meta,
         scene_configs, initial_physics_labels,
         pillar_grays=pillar_grays, lightings=lightings,
     )
+
+    # Cognitive forward model frames: late-frame RGBA from forward program states
+    fwd_imgs = None
+    if forward_program_states is not None:
+        from scene_generator import extract_brain_pixels as _ebp
+        n_fwd = min(8, len(forward_program_states))
+        metadata_local = scenes['metadata']
+        fri = metadata_local['frame_render_indices']
+        rgba_n = target_pixel_indices.stop - target_pixel_indices.start
+        fwd_late_rgba = forward_program_states[:n_fwd,
+                                               fri['late'].start:fri['late'].start + rgba_n]
+        from config import IMAGE_SIZE as _IMG
+        fwd_imgs = np.clip(fwd_late_rgba, 0, 255).astype(np.uint8).reshape(
+            n_fwd, _IMG, _IMG, 4)
 
     print(f"  Pixel          → {metric_label}: {pixel_score:.4f}")
     print(f"  Physics        → {metric_label}: {physics_score:.4f}")
@@ -407,8 +470,10 @@ def run_dissociation_analysis(neural_activity, scenes, neural_meta,
     print(f"    Pixel model:          R² = {mean_r2_pixel:.4f}  |  {metric_label} = {pixel_score:.4f}")
     print(f"    Physics model:        R² = {mean_r2_physics:.4f}  |  {metric_label} = {physics_score:.4f}")
     print(f"    Pixel+physics model:  R² = {mean_r2_combined:.4f}  |  {metric_label} = {combined_score:.4f}")
+    if predicted_pixel_score is not None:
+        print(f"    Predicted-S model:    R² = {r2_predicted_pixel_dissoc.mean():.4f}  |  {metric_label} = {predicted_pixel_score:.4f}")
 
-    return {
+    result = {
         'mean_r2_pixel': mean_r2_pixel,
         'mean_r2_physics': mean_r2_physics,
         'mean_r2_combined': mean_r2_combined,
@@ -430,3 +495,9 @@ def run_dissociation_analysis(neural_activity, scenes, neural_meta,
         'predicted_physics_imgs': physics_imgs,
         'predicted_final_imgs': final_imgs,
     }
+    if predicted_pixel_score is not None:
+        result['predicted_pixel_behavioral_score'] = float(predicted_pixel_score)
+        result['r2_predicted_pixel'] = r2_predicted_pixel_dissoc
+    if fwd_imgs is not None:
+        result['predicted_fwd_imgs'] = fwd_imgs
+    return result
