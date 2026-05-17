@@ -22,11 +22,14 @@ results = run_encoding_analysis(
     neural, scenes, neural_meta,
     pixel_pca_dim=cfg['pixel_pca_dim'],
     predicted_pixel_pca=predicted_pixel_pca,
+    compute_null=cfg.get('encoding_compute_null', True),
+    n_null_permutations=cfg.get('encoding_n_null_permutations', 50),
 )
 encoder = results.pop('encoder')
-encoder['r2_pixel_only'] = results['r2_pixel_only']
-encoder['r2_physics_only'] = results['r2_physics_only']
-encoder['r2_combined'] = results['r2_combined']
+# Forward arrays needed by downstream analyses (dissociation, etc.).
+for key in ('r2_pixel_only', 'r2_physics_only', 'r2_combined',
+            'r2_physics_only_null', 'r2_combined_null', 'delta_r2_null'):
+    encoder[key] = results[key]
 save_results(results, snakemake.output.results)
 save_encoder(encoder, snakemake.output.encoder)
 
@@ -35,6 +38,9 @@ plot_kwargs = dict(
     r2_pixel_only=results['r2_pixel_only'],
     r2_physics_only=results['r2_physics_only'],
     r2_combined=results['r2_combined'],
+    r2_physics_only_null=results['r2_physics_only_null'],
+    r2_combined_null=results['r2_combined_null'],
+    delta_r2_null=results['delta_r2_null'],
     subsample_means=np.array(results['subsample_means']),
     subsample_sems=np.array(results['subsample_sems']),
     neuron_counts=np.array(results['subsample_neuron_counts']),

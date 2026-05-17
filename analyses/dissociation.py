@@ -326,6 +326,9 @@ def run_dissociation_analysis(neural_activity, scenes, neural_meta,
     r2_pixel = encoding_results['r2_pixel_only']
     r2_physics = encoding_results['r2_physics_only']
     r2_combined = encoding_results['r2_combined']
+    r2_physics_null = encoding_results['r2_physics_only_null']
+    r2_combined_null = encoding_results['r2_combined_null']
+    delta_r2_null = encoding_results['delta_r2_null']
 
     mean_r2_pixel = r2_pixel.mean()
     mean_r2_physics = r2_physics.mean()
@@ -480,6 +483,9 @@ def run_dissociation_analysis(neural_activity, scenes, neural_meta,
         'r2_pixel': r2_pixel,
         'r2_physics': r2_physics,
         'r2_combined': r2_combined,
+        'r2_physics_null': r2_physics_null,
+        'r2_combined_null': r2_combined_null,
+        'delta_r2_null': delta_r2_null,
         'pixel_behavioral_score': pixel_score,
         'physics_behavioral_score': physics_score,
         'combined_behavioral_score': combined_score,
