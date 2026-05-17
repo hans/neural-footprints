@@ -16,6 +16,40 @@ LABEL_PHYSICS = "Physics"
 LABEL_SENSORY_PLUS_PHYSICS = "Full"
 
 
+def _null_ci_from_perm_array(null_array, lo_pct=2.5, hi_pct=97.5):
+    """Per-perm mean across neurons → (lo, mid, hi). Returns None if empty."""
+    if null_array is None or null_array.size == 0:
+        return None
+    perm_means = null_array.mean(axis=1)
+    lo, hi = np.percentile(perm_means, [lo_pct, hi_pct])
+    return float(lo), float(perm_means.mean()), float(hi)
+
+
+def _draw_null_marker(ax, bar, null_ci, *, label=None):
+    """
+    Render the null distribution at the bar's x-position as a horizontal mean
+    line with vertical CI caps. Used because the typical null CI is thinner
+    than a pixel on the bar's R² axis — a translucent rectangle would be
+    invisible. Returns the artist used for the legend.
+    """
+    if null_ci is None:
+        return None
+    lo, mid, hi = null_ci
+    x0 = bar.get_x()
+    x1 = x0 + bar.get_width()
+    color = '#222222'
+    ax.plot([x0, x1], [mid, mid], color=color, linewidth=0.9, zorder=4,
+            solid_capstyle='butt')
+    cx = 0.5 * (x0 + x1)
+    ax.plot([cx, cx], [lo, hi], color=color, linewidth=0.9, zorder=4)
+    cap_w = 0.18 * (x1 - x0)
+    for y in (lo, hi):
+        ax.plot([cx - cap_w, cx + cap_w], [y, y], color=color, linewidth=0.9,
+                zorder=4)
+    proxy = ax.plot([], [], color=color, linewidth=0.9, label=label)[0]
+    return proxy
+
+
 def plot_encoding(plot_data, fig_dir="figures"):
     r2_pixel_only = plot_data['r2_pixel_only']
     r2_combined = plot_data['r2_combined']
@@ -207,6 +241,8 @@ def plot_dissociation(plot_data, fig_dir="figures"):
 
     keys = plot_data.files if hasattr(plot_data, 'files') else plot_data
     has_predicted = ('r2_predicted_pixel' in keys and 'predicted_pixel_score' in keys)
+    physics_null_ci = (_null_ci_from_perm_array(plot_data['r2_physics_null'])
+                       if 'r2_physics_null' in keys else None)
     if has_predicted:
         r2_predicted = plot_data['r2_predicted_pixel']
         predicted_score = float(plot_data['predicted_pixel_score'])
@@ -233,6 +269,14 @@ def plot_dissociation(plot_data, fig_dir="figures"):
                         yerr=r2_errs, capsize=3)
         ax1.set_ylabel('Neural R\u00b2')
         ax1.set_title('Encoding performance')
+        _draw_null_marker(ax1, bars1[1], physics_null_ci,
+                          label='Permutation null')
+        if physics_null_ci is not None:
+            ax1.legend(loc='center right', frameon=False, fontsize=5,
+                       handlelength=1.5, borderpad=0.2)
+            ymin, ymax = ax1.get_ylim()
+            if physics_null_ci[0] < ymin:
+                ax1.set_ylim(physics_null_ci[0] - 0.02 * (ymax - ymin), ymax)
         for bar, val in zip(bars1, r2_heights):
             ax1.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.01,
                      f'{val:.3f}', ha='center', va='bottom', fontweight='bold')
@@ -271,6 +315,9 @@ def plot_dissociation_combined(plot_data, fig_dir="figures"):
     metric_label = str(plot_data['metric_label'])
     chance_val = float(plot_data['chance'])
     chance = None if np.isnan(chance_val) else chance_val
+    keys = plot_data.files if hasattr(plot_data, 'files') else plot_data
+    combined_null_ci = (_null_ci_from_perm_array(plot_data['r2_combined_null'])
+                        if 'r2_combined_null' in keys else None)
 
     with paper_style():
         fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(COL_WIDTH, 2.0))
@@ -286,6 +333,11 @@ def plot_dissociation_combined(plot_data, fig_dir="figures"):
                         capsize=3)
         ax1.set_ylabel('Neural R\u00b2')
         ax1.set_title('Encoding performance')
+        _draw_null_marker(ax1, bars1[1], combined_null_ci,
+                          label='Permutation null')
+        if combined_null_ci is not None:
+            ax1.legend(loc='center right', frameon=False, fontsize=5,
+                       handlelength=1.5, borderpad=0.2)
         for bar, val in zip(bars1, [mean_r2_pixel, mean_r2_combined]):
             ax1.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.01,
                      f'{val:.3f}', ha='center', va='bottom', fontweight='bold')

@@ -20,6 +20,12 @@ linvel_x_max: 3.0
 x_accel_max: 6.0
 rsa_subsample: 500
 pixel_pca_dim: 500
+
+# Encoding analysis: permutation null on physics-only and combined R²s.
+# Shuffles scene→physics association; refits ridge to get null R² distribution.
+encoding_compute_null: true
+encoding_n_null_permutations: 50
+
 behavioral_pca_dim: 0.90
 dynamics_pca_dim: 50
 behavioral_objective: "next_frame_pixels"

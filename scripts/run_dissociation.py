@@ -24,6 +24,9 @@ encoding_results = {
     'r2_pixel_only': encoder.pop('r2_pixel_only'),
     'r2_physics_only': encoder.pop('r2_physics_only'),
     'r2_combined': encoder.pop('r2_combined'),
+    'r2_physics_only_null': encoder.pop('r2_physics_only_null'),
+    'r2_combined_null': encoder.pop('r2_combined_null'),
+    'delta_r2_null': encoder.pop('delta_r2_null'),
 }
 
 results = run_dissociation_analysis(
@@ -38,7 +41,9 @@ results = run_dissociation_analysis(
 
 # Separate large arrays / plot-only data from JSON results
 plot_arrays = {}
-for key in ['r2_pixel', 'r2_physics', 'r2_combined', 'chance',
+for key in ['r2_pixel', 'r2_physics', 'r2_combined',
+            'r2_physics_null', 'r2_combined_null', 'delta_r2_null',
+            'chance',
             'predicted_init_imgs', 'predicted_pixel_imgs',
             'predicted_physics_imgs', 'predicted_final_imgs']:
     plot_arrays[key] = results.pop(key)
