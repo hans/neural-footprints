@@ -70,7 +70,7 @@ def save_neural(neural_activity, meta, path):
         neural_activity=neural_activity,
         W=meta['W'],
         means=meta['means'],
-        stds=meta['stds'],
+        block_norms=meta['block_norms'],
         signal_std=np.array(meta['signal_std']),
         var_per_dim=meta['var_per_dim'],
         total_var=np.array(meta['total_var']),
@@ -84,7 +84,7 @@ def load_neural(path):
     meta = {
         'W': data['W'],
         'means': data['means'],
-        'stds': data['stds'],
+        'block_norms': data['block_norms'],
         'signal_std': float(data['signal_std']),
         'var_per_dim': data['var_per_dim'],
         'total_var': float(data['total_var']),
