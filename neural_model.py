@@ -7,7 +7,6 @@ it emerges from the structure of the program state.
 """
 
 import numpy as np
-from scipy.sparse.linalg import svds
 
 from config import N_NEURONS as _CFG_N_NEURONS, NOISE_LEVEL as _CFG_NOISE_LEVEL
 
@@ -45,14 +44,14 @@ def generate_neural_activity(program_states, seed, *, n_neurons=None, noise_leve
     means = program_states.mean(axis=0)
     centered = program_states - means
 
-    # Step 2: Per-block operator-norm normalization
+    # Step 2: Per-block operator-norm normalization, done in-place on centered.
     # Each block is divided by its largest singular value so the trace ratio
     # across blocks reflects intrinsic-dim (participation ratio) asymmetry,
     # not raw amplitude differences.
+    # In-place avoids allocating another full copy of the (potentially large) matrix.
     if block_sizes is None:
         block_sizes = [D]
 
-    blocks = []
     block_norms = []
     start = 0
     for size in block_sizes:
@@ -64,18 +63,21 @@ def generate_neural_activity(program_states, seed, *, n_neurons=None, noise_leve
             if sigma == 0.0:
                 sigma = 1.0
         else:
-            sigma = float(svds(block.astype(np.float64), k=1,
-                               return_singular_vectors=False, solver='arpack')[0])
+            # Form the smaller Gram matrix — only the (min(n,D) × min(n,D)) result
+            # needs float64; the large block stays float32 throughout.
+            n, d = block.shape
+            gram = (block @ block.T if n <= d else block.T @ block).astype(np.float64)
+            sigma = float(np.sqrt(np.linalg.eigvalsh(gram).max()))
             if sigma == 0.0:
                 sigma = 1.0
         block_norms.append(sigma)
-        blocks.append((block / sigma).astype(program_states.dtype))
+        centered[:, start:start + size] /= sigma
         start += size
 
-    normalized = np.concatenate(blocks, axis=1)  # [n_scenes x D]
+    normalized = centered  # normalized in-place; alias for clarity below
 
-    # Step 3: Random projection matrix
-    W = rng.normal(0, 1.0 / np.sqrt(D), size=(n_neurons, D))
+    # Step 3: Random projection matrix (float32 keeps the matmul in float32)
+    W = rng.normal(0, 1.0 / np.sqrt(D), size=(n_neurons, D)).astype(np.float32)
 
     # Step 4: Signal
     signal = normalized @ W.T  # [n_scenes x n_neurons]
