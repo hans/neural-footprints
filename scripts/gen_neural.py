@@ -26,6 +26,9 @@ D_inferred = inferred_physics.shape[1]
 
 neural_input = np.concatenate([render, hidden_acts, inferred_physics], axis=1).astype(np.float32)
 
+block_sizes = [D_render, D_hidden, D_inferred]
+block_names = ['render', 'hidden_acts', 'inferred_physics']
+
 neural_input_metadata = {
     'D_render': D_render,
     'D_hidden': D_hidden,
@@ -41,7 +44,8 @@ neural_input_metadata = {
 neural, neural_meta = generate_neural_activity(
     neural_input, cfg['random_seed'],
     n_neurons=cfg['n_neurons'], noise_level=cfg['noise_level'],
+    block_sizes=block_sizes,
 )
-print_variance_diagnostic(neural_input_metadata, neural_meta)
+print_variance_diagnostic(neural_input_metadata, neural_meta, block_sizes, block_names)
 
 save_neural(neural, neural_meta, snakemake.output.neural)
