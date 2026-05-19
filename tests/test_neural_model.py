@@ -10,7 +10,6 @@ import numpy as np
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
-from scipy.sparse.linalg import svds
 
 from neural_model import generate_neural_activity
 
@@ -78,8 +77,9 @@ def test_noise_level_zero_matches_signal(tiny_program_states, rng_seed):
     # Reproduce the noise-free signal manually using op-norm normalization.
     means = tiny_program_states.mean(axis=0)
     centered = tiny_program_states - means
-    sigma = float(svds(centered.astype(np.float64), k=1,
-                       return_singular_vectors=False, solver='arpack')[0])
+    n, d = centered.shape
+    gram = (centered @ centered.T if n <= d else centered.T @ centered).astype(np.float64)
+    sigma = float(np.sqrt(np.linalg.eigvalsh(gram).max()))
     if sigma == 0.0:
         sigma = 1.0
     normalized = (centered / sigma).astype(tiny_program_states.dtype)
