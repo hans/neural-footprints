@@ -121,6 +121,7 @@ def run_encoding_analysis(neural_activity, scenes, neural_meta,
     pixel_data = extract_brain_pixels(program_states, metadata)
     pixel_pca, pca, pixel_scaler = pca_reduce_pixels(pixel_data, pixel_pca_dim)
     print(f"  PCA explained variance: {pca.explained_variance_ratio_.sum():.2%}")
+    del pixel_data  # free ~393 MB — PCA-reduced result is all we need
 
     # --- Standardize physics labels ---
     scaler_phys = StandardScaler()
@@ -144,6 +145,7 @@ def run_encoding_analysis(neural_activity, scenes, neural_meta,
     combined = np.hstack([pixel_pca, physics_scaled])
     r2_combined = ridge_r2_per_neuron_fast(combined, neural_activity)
 
+    del combined
     delta_r2 = r2_combined - r2_pixel_only
     mean_r2_pixel = r2_pixel_only.mean()
     mean_r2_phys = r2_physics_only.mean()
@@ -158,11 +160,19 @@ def run_encoding_analysis(neural_activity, scenes, neural_meta,
     # --- Encoding model: predicted pixels (forward-model render, Predicted S) ---
     r2_predicted_pixel = None
     mean_r2_predicted_pixel = None
+    r2_combined_pred = None
+    delta_r2_pred = None
     if predicted_pixel_pca is not None:
         print("Fitting encoding model: neural ~ predicted_pixel_PCA (Predicted S) ...")
         r2_predicted_pixel = ridge_r2_per_neuron_fast(predicted_pixel_pca, neural_activity)
         mean_r2_predicted_pixel = r2_predicted_pixel.mean()
         print(f"  Mean R² (predicted S):        {mean_r2_predicted_pixel:.4f}")
+        print("Fitting encoding model: neural ~ predicted_pixel_PCA + physics_labels ...")
+        combined_pred = np.hstack([predicted_pixel_pca, physics_scaled])
+        r2_combined_pred = ridge_r2_per_neuron_fast(combined_pred, neural_activity)
+        delta_r2_pred = r2_combined_pred - r2_predicted_pixel
+        print(f"  Mean R² (predicted S + physics): {r2_combined_pred.mean():.4f}")
+        print(f"  Mean ΔR² (physics | predicted S): {delta_r2_pred.mean():.6f}")
 
     # --- Control: physics_labels -> behavior_label ---
     # MLP because KE = 0.5*m*v² is nonlinear in the physics label features.
@@ -234,6 +244,9 @@ def run_encoding_analysis(neural_activity, scenes, neural_meta,
     }
     if r2_predicted_pixel is not None:
         result['r2_predicted_pixel'] = r2_predicted_pixel
+    if r2_combined_pred is not None:
+        result['r2_combined_pred'] = r2_combined_pred
+        result['delta_r2_pred'] = delta_r2_pred
     return result
 
 

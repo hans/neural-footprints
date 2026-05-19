@@ -164,6 +164,7 @@ rule residual:
         scenes="data/scenes.npz",
         neural="data/neural.npz",
         encoding="outputs/encoding_results.json",
+        forward_renders="data/forward_renders.npz",
     output:
         results="outputs/residual_results.json",
         plot_data="data/residual_plot_data.npz",

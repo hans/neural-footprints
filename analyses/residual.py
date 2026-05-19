@@ -45,6 +45,7 @@ def _ridge_cv_predict(X, y, cv, alphas):
 def run_residual_analysis(neural_activity, scenes, neural_meta,
                           *, pixel_pca_dim,
                           r2_raw_pixel, r2_raw_physics_gt,
+                          predicted_pixel_pca=None,
                           n_splits=5, random_state=42):
     """
     Run residual encoding analysis.
@@ -112,7 +113,7 @@ def run_residual_analysis(neural_activity, scenes, neural_meta,
         print(f"  WARNING: r2_pixel_resid mean is {r2_resid['pixel'].mean():.4f}, "
               "expected ~0 — stage-1 ridge may be underfitting pixels.")
 
-    return {
+    result = {
         'r2_raw_pixel': r2_raw['pixel'],
         'r2_raw_physics_gt': r2_raw['physics_gt'],
         'r2_resid_pixel': r2_resid['pixel'],
@@ -122,3 +123,35 @@ def run_residual_analysis(neural_activity, scenes, neural_meta,
         'n_splits': int(n_splits),
         'random_state': int(random_state),
     }
+
+    # --- Predicted-S Stage-1 residualization ---
+    if predicted_pixel_pca is not None:
+        print("\nStage 1 (predicted-S): cross-validated predicted-pixel residuals...")
+        y_pred_pred = _ridge_cv_predict(predicted_pixel_pca, neural_activity, cv=cv,
+                                        alphas=alphas)
+        y_resid_pred = neural_activity - y_pred_pred
+        var_kept_pred = (y_resid_pred.var(axis=0).mean()
+                         / neural_activity.var(axis=0).mean())
+        print(f"  mean residual variance / raw variance = {var_kept_pred:.4f}")
+
+        print("\nStage 2 (predicted-S): encoding on predicted-S residual neural...")
+        r2_resid_pred_self = _r2_per_neuron(
+            y_resid_pred,
+            _ridge_cv_predict(predicted_pixel_pca, y_resid_pred, cv=cv, alphas=alphas))
+        r2_resid_physics_via_pred = _r2_per_neuron(
+            y_resid_pred,
+            _ridge_cv_predict(physics_scaled, y_resid_pred, cv=cv, alphas=alphas))
+        print(f"  R² (resid_pred, predicted_S):  mean={r2_resid_pred_self.mean():.4f}  "
+              "(sanity — expect ~0)")
+        print(f"  R² (resid_pred, physics_gt):   mean={r2_resid_physics_via_pred.mean():.4f}  "
+              "(expect ~0)")
+
+        if r2_resid_pred_self.mean() > 0.05:
+            print(f"  WARNING: predicted-S self-residual mean is "
+                  f"{r2_resid_pred_self.mean():.4f}, expected ~0.")
+
+        result['r2_resid_predicted_pixel'] = r2_resid_pred_self
+        result['r2_resid_physics_gt_via_predicted_pixel'] = r2_resid_physics_via_pred
+        result['residual_variance_fraction_predicted'] = float(var_kept_pred)
+
+    return result
