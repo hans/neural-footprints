@@ -5,6 +5,7 @@ data/
 outputs/
 .snakemake/
 .venv/
+.venv-container/
 
 figures
 
