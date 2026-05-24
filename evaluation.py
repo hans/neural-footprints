@@ -5,6 +5,8 @@ Defines explicit pass/fail criteria for each analysis and prints
 a colored report.
 """
 
+import numpy as np
+
 # ANSI color codes
 GREEN = "\033[92m"
 RED = "\033[91m"
