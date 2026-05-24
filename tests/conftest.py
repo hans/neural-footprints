@@ -58,4 +58,12 @@ def tiny_lighting() -> dict:
         "camJitter": [0.05, -0.1, 0.08],
         "camTargetJitter": [0.03, 0.0, -0.05],
         "lightAmbientCoeff": 0.35,
+        "groundColor": [0.6, 0.55, 0.65],
+        "backdropColor": [0.2, 0.3, 0.4],
+        "backdropSpecular": [0.05, 0.1, 0.15],
+        # Single populated bg object; encoder zero-pads remaining slots.
+        "backgroundObjects": [
+            {"x": -1.5, "y": -1.0, "z": 0.3, "radius": 0.4,
+             "color": [0.5, 0.6, 0.7], "specular": [0.2, 0.3, 0.4]},
+        ],
     }

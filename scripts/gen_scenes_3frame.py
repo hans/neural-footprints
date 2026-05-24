@@ -88,11 +88,13 @@ def generate_3frame_scenes(n_scenes, seed, n_timesteps, t_mid, t_late, fov):
         scene_seed = rng.integers(0, 2**31)
         scene_rng = np.random.default_rng(scene_seed)
 
-        body_ids, masses, frictions, _, shape_configs, pillar_gray = _create_scene(pc, scene_rng)
-        all_scene_configs.append(shape_configs)
-        all_pillar_grays.append(pillar_gray)
         lighting = _sample_lighting(scene_rng)
         all_lightings.append(lighting)
+
+        (body_ids, masses, frictions, _, shape_configs,
+         pillar_gray, _ground_body_id) = _create_scene(pc, scene_rng, lighting)
+        all_scene_configs.append(shape_configs)
+        all_pillar_grays.append(pillar_gray)
 
         applied_accels = [cfg.get('x_accel', 0.0) for cfg in shape_configs]
         initial_physics_labels[i] = _collect_physics_labels(
