@@ -1,5 +1,5 @@
 """
-Scene generation using PyBullet.
+Scene generation using MuJoCo.
 
 Generates physics scenes with a central vertical occluding pillar, captures
 raw program state (render buffers + physics labels + scene config), and
@@ -16,8 +16,9 @@ Non-render variables are a tiny fraction of the signal — swamped by pixels
 in the random projection.
 """
 
+import mujoco
 import numpy as np
-import pybullet as p
+from scipy.spatial.transform import Rotation
 from config import (
     N_OBJECTS,
     IMAGE_SIZE,
@@ -39,189 +40,186 @@ PILLAR_Y_CENTER = -1.0
 PILLAR_Z_CENTER = 0.75
 
 
-def _create_ground(physics_client, ground_color):
-    """Infinite collision plane (physics) + solid-color visual box (render)."""
-    ground_col = p.createCollisionShape(p.GEOM_PLANE, planeNormal=[0, 0, 1],
-                                        physicsClientId=physics_client)
-    p.createMultiBody(baseMass=0, baseCollisionShapeIndex=ground_col,
-                      basePosition=[0, 0, 0], physicsClientId=physics_client)
-    ground_vis = p.createVisualShape(p.GEOM_BOX, halfExtents=[20, 20, 0.001],
-                                     rgbaColor=ground_color + [1.0],
-                                     specularColor=[0, 0, 0],
-                                     physicsClientId=physics_client)
-    p.createMultiBody(baseMass=0, baseCollisionShapeIndex=-1,
-                      baseVisualShapeIndex=ground_vis,
-                      basePosition=[0, 0, 0], physicsClientId=physics_client)
+SCENE_CONFIG_DIM = 9  # per object
+SCENE_LIGHTING_DIM = 15
 
 
-def _create_scene(physics_client, rng):
+_DEFAULT_LIGHTING = {
+    'lightDirection': [1, -1, 2],
+    'lightColor': [1.0, 1.0, 1.0],
+    'lightDistance': 5.0,
+    'camJitter': [0.0, 0.0, 0.0],
+    'camTargetJitter': [0.0, 0.0, 0.0],
+    'lightAmbientCoeff': 0.4,
+}
+
+
+def _sample_lighting(rng):
+    """Sample random lighting and camera parameters for a scene."""
+    return {
+        'lightDirection': [float(rng.uniform(-2, 2)),
+                           float(rng.uniform(-2, 0)),
+                           float(rng.uniform(1, 3))],
+        'lightColor': [float(c) for c in rng.uniform(0.6, 1.0, size=3)],
+        'lightDistance': float(rng.uniform(3.0, 8.0)),
+        'camJitter': [float(v) for v in rng.uniform(-0.3, 0.3, size=3)],
+        'camTargetJitter': [float(rng.uniform(-0.15, 0.15)),
+                            0.0,
+                            float(rng.uniform(-0.1, 0.1))],
+        'lightAmbientCoeff': float(rng.uniform(0.2, 0.6)),
+    }
+
+
+def _look_at_quat(eye, target, up=(0, 0, 1)):
+    eye, target, up = (np.array(v, float) for v in (eye, target, up))
+    fwd = target - eye;  fwd /= np.linalg.norm(fwd)
+    z_ax = -fwd
+    x_ax = np.cross(fwd, up);  x_ax /= np.linalg.norm(x_ax)
+    y_ax = np.cross(z_ax, x_ax)
+    R = np.column_stack([x_ax, y_ax, z_ax])
+    q_xyzw = Rotation.from_matrix(R).as_quat()
+    return [q_xyzw[3], q_xyzw[0], q_xyzw[1], q_xyzw[2]]
+
+
+def _build_mjspec(rng):
+    """Build a MuJoCo model/data for one randomized scene.
+
+    Returns (model, data, body_id, qvel_offset, mass, friction, x_accel,
+             shape_config, pillar_gray, lighting).
     """
-    Spawn ground plane + central occluding pillar + single rigid body.
-
-    The object starts clearly to the left or right of the pillar (x=0) and
-    moves with a random x-only velocity. Depending on direction and speed,
-    it may end up behind the pillar in the final frame.
-
-    Varying per scene: shape (sphere/box), color, x-velocity direction,
-    ground color.
-    """
-    p.setGravity(0, 0, -9.81, physicsClientId=physics_client)
-
-    _create_ground(physics_client, [0.6, 0.6, 0.6])
-
-    # Central vertical pillar at x=0: VISUAL ONLY (no collision).
-    # Objects pass through it freely — physics is unaffected.
-    # Camera (at y=-3) cannot see objects behind it when they cross x=0.
     pillar_gray = float(rng.uniform(0.3, 0.8))
-    pillar_vis = p.createVisualShape(
-        p.GEOM_BOX,
-        halfExtents=[PILLAR_WIDTH / 2, PILLAR_DEPTH / 2, PILLAR_HEIGHT / 2],
-        rgbaColor=[pillar_gray, pillar_gray, pillar_gray, 1.0],
-        physicsClientId=physics_client,
-    )
-    p.createMultiBody(
-        baseMass=0,
-        baseCollisionShapeIndex=-1,  # no collision — visual only
-        baseVisualShapeIndex=pillar_vis,
-        basePosition=[PILLAR_X, PILLAR_Y_CENTER, PILLAR_Z_CENTER],
-        physicsClientId=physics_client,
-    )
+    lighting = _sample_lighting(rng)
 
-    body_ids = []
-    masses = []
-    frictions = []
-    is_occluded = []
-    shape_configs = []
+    spec = mujoco.MjSpec()
+    spec.option.gravity = [0, 0, -9.81]
 
+    # Ground plane
+    g = spec.worldbody.add_geom()
+    g.type = mujoco.mjtGeom.mjGEOM_PLANE
+    g.size = [0, 0, 0.01]
+    g.rgba = [0.6, 0.6, 0.6, 1.0]
+
+    # Pillar (visual only)
+    pil = spec.worldbody.add_geom()
+    pil.type = mujoco.mjtGeom.mjGEOM_BOX
+    pil.size = [PILLAR_WIDTH/2, PILLAR_DEPTH/2, PILLAR_HEIGHT/2]
+    pil.pos = [PILLAR_X, PILLAR_Y_CENTER, PILLAR_Z_CENTER]
+    pil.rgba = [pillar_gray, pillar_gray, pillar_gray, 1.0]
+    pil.contype = 0
+    pil.conaffinity = 0
+
+    # Light
+    lt = spec.worldbody.add_light()
+    lt.type = mujoco.mjtLightType.mjLIGHT_DIRECTIONAL
+    lt.dir = [-d for d in lighting['lightDirection']]
+    lt.diffuse = lighting['lightColor']
+    lt.ambient = [lighting['lightAmbientCoeff']] * 3
+    lt.specular = [0.3, 0.3, 0.3]
+    lt.castshadow = False
+
+    # Camera
+    jitter = lighting.get('camJitter', [0, 0, 0])
+    tj = lighting.get('camTargetJitter', [0, 0, 0])
+    eye = [jitter[0], -3 + jitter[1], 2 + jitter[2]]
+    target = [tj[0], tj[1], 0.3 + tj[2]]
+    cam = spec.worldbody.add_camera()
+    cam.name = "scene_cam"
+    cam.pos = eye
+    cam.quat = _look_at_quat(eye, target)
+    cam.fovy = _CFG_CAMERA_FOV
+
+    # Object randomization (same distributions as old _create_scene)
     mass = rng.uniform(0.5, 5.0)
     friction = rng.uniform(0.1, 1.0)
     color = list(rng.uniform(0.1, 1.0, size=3)) + [1.0]
-
-    # Random shape: sphere or box
-    if rng.random() < 0.5:
-        radius = float(rng.uniform(0.07, 0.5))
-        col_shape = p.createCollisionShape(p.GEOM_SPHERE, radius=radius,
-                                           physicsClientId=physics_client)
-        vis_shape = p.createVisualShape(p.GEOM_SPHERE, radius=radius,
-                                        rgbaColor=color,
-                                        specularColor=[0.4, 0.4, 0.4],
-                                        physicsClientId=physics_client)
-        shape_cfg = {'shape': 'sphere', 'params': {'radius': radius}, 'color': list(color)}
-    else:
-        half_extents = [float(v) for v in rng.uniform(0.07, 0.5, size=3)]
-        col_shape = p.createCollisionShape(p.GEOM_BOX, halfExtents=half_extents,
-                                           physicsClientId=physics_client)
-        vis_shape = p.createVisualShape(p.GEOM_BOX, halfExtents=half_extents,
-                                        rgbaColor=color,
-                                        specularColor=[0.4, 0.4, 0.4],
-                                        physicsClientId=physics_client)
-        shape_cfg = {'shape': 'box', 'params': {'half_extents': half_extents}, 'color': list(color)}
-
-    # Start clearly on one side of the pillar; random y depth and z height
     side = rng.choice([-1, 1])
     x = side * rng.uniform(0.6, 1.5)
     y = rng.uniform(-1.5, -0.5)
     z = rng.uniform(0.4, 0.8)
-    pos = [x, y, z]
-    orn = p.getQuaternionFromEuler([0.0, 0.0, 0.0])
-
-    body_id = p.createMultiBody(
-        baseMass=mass,
-        baseCollisionShapeIndex=col_shape,
-        baseVisualShapeIndex=vis_shape,
-        basePosition=pos,
-        baseOrientation=orn,
-        physicsClientId=physics_client,
-    )
-    p.changeDynamics(body_id, -1, lateralFriction=friction,
-                     physicsClientId=physics_client)
-
-    body_ids.append(body_id)
-    masses.append(mass)
-    frictions.append(friction)
-    is_occluded.append(False)
-    shape_configs.append(shape_cfg)
-
-    # x-only velocity (left or right); gravity handles vertical fall.
-    # Range is configurable so the longer-window scene-gen experiments can
-    # tighten linvel_x to keep the object on-screen.
     x_vel = float(rng.uniform(-_CFG_LINVEL_X_MAX, _CFG_LINVEL_X_MAX))
-    p.resetBaseVelocity(body_ids[0], linearVelocity=[x_vel, 0.0, 0.0],
-                        physicsClientId=physics_client)
-
-    # Random x-acceleration (invisible in initial frame, breaks pixel predictability)
     x_accel = float(rng.uniform(-_CFG_X_ACCEL_MAX, _CFG_X_ACCEL_MAX))
-    shape_configs[0]['x_accel'] = x_accel
 
-    return body_ids, masses, frictions, is_occluded, shape_configs, pillar_gray
+    if rng.random() < 0.5:
+        radius = float(rng.uniform(0.07, 0.5))
+        shape_cfg = {'shape': 'sphere', 'params': {'radius': radius}, 'color': list(color), 'x_accel': x_accel}
+    else:
+        half_extents = [float(v) for v in rng.uniform(0.07, 0.5, size=3)]
+        shape_cfg = {'shape': 'box', 'params': {'half_extents': half_extents}, 'color': list(color), 'x_accel': x_accel}
 
+    # Object body — 3 slide joints (no rotation DOF)
+    body = spec.worldbody.add_body()
+    body.name = "object"
+    body.pos = [x, y, z]
+    for name, axis in [("obj_sx", [1,0,0]), ("obj_sy", [0,1,0]), ("obj_sz", [0,0,1])]:
+        jnt = body.add_joint()
+        jnt.name = name
+        jnt.type = mujoco.mjtJoint.mjJNT_SLIDE
+        jnt.axis = axis
 
-def _lock_rotation(body_ids, physics_client):
-    """Zero angular velocity and reset orientation to identity for every body.
+    geom = body.add_geom()
+    if shape_cfg['shape'] == 'sphere':
+        geom.type = mujoco.mjtGeom.mjGEOM_SPHERE
+        geom.size = [shape_cfg['params']['radius'], 0, 0]
+    else:
+        geom.type = mujoco.mjtGeom.mjGEOM_BOX
+        geom.size = shape_cfg['params']['half_extents']
+    geom.rgba = color
+    geom.friction = [friction, 0.005, 0.0001]
+    geom.mass = mass  # NOTE: if MuJoCo requires density instead, compute density = mass / volume
 
-    Called after each simulation step. Free rigid bodies tumble under
-    friction torque, but rotation is not a target of the inverse model
-    (orn / angvel are not in observable_offsets) and only adds non-
-    observable noise to the pixel features at t=mid and t=late.
+    model = spec.compile()
+    data = mujoco.MjData(model)
+    body_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, "object")
+    qvel_offset = int(model.jnt_dofadr[
+        mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, "obj_sx")])
 
-    Note: resetBasePositionAndOrientation zeros linear velocity as a
-    side-effect, so we capture lin_vel before the orientation reset and
-    restore it via resetBaseVelocity.
-    """
-    for bid in body_ids:
-        pos, _ = p.getBasePositionAndOrientation(bid, physicsClientId=physics_client)
-        lin_vel, _ = p.getBaseVelocity(bid, physicsClientId=physics_client)
-        p.resetBasePositionAndOrientation(bid, pos, [0.0, 0.0, 0.0, 1.0],
-                                          physicsClientId=physics_client)
-        p.resetBaseVelocity(bid, linearVelocity=lin_vel,
-                            angularVelocity=[0.0, 0.0, 0.0],
-                            physicsClientId=physics_client)
+    # Set initial velocity
+    data.qvel[qvel_offset:qvel_offset+3] = [x_vel, 0.0, 0.0]
+    mujoco.mj_forward(model, data)
 
-
-def _get_initial_positions(body_ids, physics_client):
-    """Record starting positions for behavior label computation."""
-    positions = []
-    for bid in body_ids:
-        pos, _ = p.getBasePositionAndOrientation(bid, physicsClientId=physics_client)
-        positions.append(np.array(pos))
-    return positions
-
-
-def _get_current_positions(body_ids, physics_client):
-    """Get current positions of all objects."""
-    positions = []
-    for bid in body_ids:
-        pos, _ = p.getBasePositionAndOrientation(bid, physicsClientId=physics_client)
-        positions.append(np.array(pos))
-    return positions
+    return model, data, body_id, qvel_offset, mass, friction, x_accel, shape_cfg, pillar_gray, lighting
 
 
-def _collect_physics_labels(body_ids, masses, frictions, physics_client,
-                            applied_accels=None):
-    """
-    Collect per-object physics labels from the API.
-    Per object: pos(3), orn(4), lin_vel(3), ang_vel(3), mass(1), friction(1), x_accel(1) = 16
-    Total: 16 * N_OBJECTS floats.
+def _render_frame(renderer, model, data, lighting=None):
+    """Returns (rgba_bytes, depth_bytes, seg_bytes)."""
+    renderer.update_scene(data, camera="scene_cam")
 
-    `applied_accels` is the per-object x-acceleration (in m/s²) being injected
-    as an external force this scene; PyBullet has no notion of "acceleration"
-    as state, so the caller must pass it. If None, defaults to zero per object
-    (off-pipeline callers that don't apply acceleration).
-    """
-    if applied_accels is None:
-        applied_accels = [0.0] * len(body_ids)
-    labels = []
-    for i, bid in enumerate(body_ids):
-        pos, orn = p.getBasePositionAndOrientation(bid, physicsClientId=physics_client)
-        lin_vel, ang_vel = p.getBaseVelocity(bid, physicsClientId=physics_client)
-        labels.extend(pos)                  # 3
-        labels.extend(orn)                  # 4
-        labels.extend(lin_vel)              # 3
-        labels.extend(ang_vel)              # 3
-        labels.append(masses[i])            # 1
-        labels.append(frictions[i])         # 1
-        labels.append(applied_accels[i])    # 1
+    # Pass 1: RGB → RGBA
+    rgb = renderer.render()          # (H, W, 3) uint8
+    H, W = rgb.shape[:2]
+    alpha = np.full((H, W, 1), 255, dtype=np.uint8)
+    rgba = np.concatenate([rgb, alpha], axis=2)
+    rgba_bytes = rgba.tobytes()
+
+    # Pass 2: depth
+    renderer.enable_depth_rendering()
+    depth = renderer.render()        # (H, W) float32
+    renderer.disable_depth_rendering()
+    depth_bytes = depth.tobytes()
+
+    # Pass 3: segmentation
+    renderer.enable_segmentation_rendering()
+    seg_raw = renderer.render()      # (H, W, 2) int32
+    renderer.disable_segmentation_rendering()
+    seg = seg_raw[:, :, 0].astype(np.int32)
+    seg_bytes = seg.tobytes()
+
+    return rgba_bytes, depth_bytes, seg_bytes
+
+
+def _collect_physics_labels(body_id, qvel_offset, mass, friction, x_accel, data):
+    """Returns float32 array of shape (16,): pos(3), orn(4), lin_vel(3), ang_vel(3), mass(1), friction(1), x_accel(1)."""
+    pos = data.xpos[body_id].tolist()
+    orn = [0.0, 0.0, 0.0, 1.0]   # identity — slide joints, no rotation
+    lin_vel = data.qvel[qvel_offset:qvel_offset+3].tolist()
+    ang_vel = [0.0, 0.0, 0.0]
+    labels = pos + orn + lin_vel + ang_vel + [mass, friction, x_accel]
     return np.array(labels, dtype=np.float32)
+
+
+def _compute_total_kinetic_energy(qvel_offset, mass, data):
+    lin_vel = data.qvel[qvel_offset:qvel_offset+3]
+    return float(0.5 * mass * np.dot(lin_vel, lin_vel))
 
 
 def _encode_scene_config(shape_configs):
@@ -249,9 +247,6 @@ def _encode_scene_config(shape_configs):
     return np.array(vec, dtype=np.float32)
 
 
-SCENE_CONFIG_DIM = 9  # per object
-
-
 def _encode_scene_lighting(pillar_gray, lighting):
     """
     Encode per-scene lighting and camera parameters into a fixed-length float32 vector.
@@ -269,270 +264,29 @@ def _encode_scene_lighting(pillar_gray, lighting):
     return np.array(vec, dtype=np.float32)
 
 
-SCENE_LIGHTING_DIM = 15
-
-
-def _compute_total_kinetic_energy(body_ids, masses, physics_client):
-    """
-    Total kinetic energy of all objects: KE = Σ 0.5 * mass_i * |lin_vel_i|².
-
-    Directly computable from physics API labels (mass + final linear velocity).
-    Not recoverable from pixel renders (pixels carry no velocity signal).
-
-    Returns a float. The binary behavior label is computed as a median split
-    across all scenes after generation.
-    """
-    ke = 0.0
-    for i, bid in enumerate(body_ids):
-        lin_vel, _ = p.getBaseVelocity(bid, physicsClientId=physics_client)
-        ke += 0.5 * masses[i] * float(np.dot(lin_vel, lin_vel))
-    return ke
-
-
-def _sample_lighting(rng):
-    """Sample random lighting and camera parameters for a scene."""
-    return {
-        'lightDirection': [float(rng.uniform(-2, 2)),
-                           float(rng.uniform(-2, 0)),
-                           float(rng.uniform(1, 3))],
-        'lightColor': [float(c) for c in rng.uniform(0.6, 1.0, size=3)],
-        'lightDistance': float(rng.uniform(3.0, 8.0)),
-        'camJitter': [float(v) for v in rng.uniform(-0.3, 0.3, size=3)],
-        'camTargetJitter': [float(rng.uniform(-0.15, 0.15)),
-                            0.0,
-                            float(rng.uniform(-0.1, 0.1))],
-        'lightAmbientCoeff': float(rng.uniform(0.2, 0.6)),
-    }
-
-
-_DEFAULT_LIGHTING = {
-    'lightDirection': [1, -1, 2],
-    'lightColor': [1.0, 1.0, 1.0],
-    'lightDistance': 5.0,
-    'camJitter': [0.0, 0.0, 0.0],
-    'camTargetJitter': [0.0, 0.0, 0.0],
-    'lightAmbientCoeff': 0.4,
-}
-
-
-def _render_scene(physics_client, lighting=None, render_size=None,
-                  use_opengl=False):
-    """Render image, return RGBA, depth, segmentation as raw bytes.
-
-    render_size overrides IMAGE_SIZE when set; only use for visualization,
-    not for building program_state (which must match IMAGE_SIZE).
-    use_opengl uses ER_BULLET_HARDWARE_OPENGL (shadows); requires a GUI
-    connection — only safe for visualization renders, not the pipeline.
-    """
-    if lighting is None:
-        lighting = _DEFAULT_LIGHTING
-    size = render_size if render_size is not None else IMAGE_SIZE
-    jitter = lighting.get('camJitter', [0.0, 0.0, 0.0])
-    tj = lighting.get('camTargetJitter', [0.0, 0.0, 0.0])
-    view_matrix = p.computeViewMatrix(
-        cameraEyePosition=[0 + jitter[0], -3 + jitter[1], 2 + jitter[2]],
-        cameraTargetPosition=[0 + tj[0], 0 + tj[1], 0.3 + tj[2]],
-        cameraUpVector=[0, 0, 1],
-        physicsClientId=physics_client,
-    )
-    proj_matrix = p.computeProjectionMatrixFOV(
-        fov=_CFG_CAMERA_FOV, aspect=1.0, nearVal=0.1, farVal=10.0,
-        physicsClientId=physics_client,
-    )
-
-    kwargs = dict(
-        width=size, height=size,
-        viewMatrix=view_matrix,
-        projectionMatrix=proj_matrix,
-        shadow=1,
-        lightDirection=lighting['lightDirection'],
-        lightColor=lighting['lightColor'],
-        lightDistance=lighting['lightDistance'],
-        lightAmbientCoeff=lighting.get('lightAmbientCoeff', 0.4),
-        physicsClientId=physics_client,
-    )
-    if use_opengl:
-        kwargs['renderer'] = p.ER_BULLET_HARDWARE_OPENGL
-
-    _, _, rgba, depth, seg = p.getCameraImage(**kwargs)
-
-    rgba_arr = np.array(rgba, dtype=np.uint8).reshape(size, size, 4)
-    depth_arr = np.array(depth, dtype=np.float32).reshape(size, size)
-    seg_arr = np.array(seg, dtype=np.int32).reshape(size, size)
-
-    rgba_bytes = rgba_arr.tobytes()
-    depth_bytes = depth_arr.tobytes()
-    seg_bytes = seg_arr.tobytes()
-
-    return rgba_bytes, depth_bytes, seg_bytes
-
-
-def open_render_client(use_gui=False):
-    """Open a PyBullet physics client for rendering. Caller must disconnect."""
-    pc = p.connect(p.GUI if use_gui else p.DIRECT,
-                   options="--width=64 --height=64" if use_gui else "")
-    if use_gui:
-        p.configureDebugVisualizer(p.COV_ENABLE_GUI, 0, physicsClientId=pc)
-        p.configureDebugVisualizer(p.COV_ENABLE_SHADOWS, 1, physicsClientId=pc)
-    return pc
-
-
-def resimulate_scene(shape_configs, initial_physics_row, *,
-                     n_timesteps=None, return_program_state=False,
-                     pillar_gray=0.5, lighting=None, render_size=None,
-                     use_gui=False, physics_client=None):
-    """
-    Rebuild a scene from stored shape configs + initial physics state, step
-    N_TIMESTEPS, and return the rendered result.
-
-    Used for oracle physics-model prediction: given the full initial state
-    (position, velocity, mass, friction, shape, color), the simulation is
-    deterministic.
-
-    Args:
-        shape_configs:       list of dicts (one per object) with keys
-                             'shape' ('sphere'|'box'), 'params', 'color'
-        initial_physics_row: 1-D array of length 16*N_OBJECTS:
-                             per object: pos(3), orn(4), lin_vel(3), ang_vel(3), mass(1), friction(1), x_accel(1)
-        return_program_state: if True, return full program_state float32 vector
-                             (3-frame render buffers + physics labels + scene config + lighting).
-        physics_client:      existing client ID to reuse (caller manages lifecycle;
-                             resetSimulation is called between scenes). If None,
-                             a fresh client is opened and closed by this function.
-
-    Returns:
-        If return_program_state=False: RGBA uint8 [IMAGE_SIZE, IMAGE_SIZE, 4]
-            of the BEHAVIORAL TARGET frame (rendered at t=n_timesteps).
-        If return_program_state=True: float32 [D] program_state vector with
-            three brain-input frames concatenated (t=0, t=PP_EARLY_FRAME,
-            t=PP_LATE_FRAME).
-    """
-    if n_timesteps is None:
-        n_timesteps = _CFG_N_TIMESTEPS
-    owns_client = physics_client is None
-    if owns_client:
-        pc = open_render_client(use_gui)
-    else:
-        pc = physics_client
-        p.resetSimulation(physicsClientId=pc)
-    p.setGravity(0, 0, -9.81, physicsClientId=pc)
-    _bg = lighting if lighting is not None else _DEFAULT_LIGHTING
-    _create_ground(pc, _bg.get('groundColor', [0.6, 0.6, 0.6]))
-
-    pillar_vis = p.createVisualShape(
-        p.GEOM_BOX,
-        halfExtents=[PILLAR_WIDTH / 2, PILLAR_DEPTH / 2, PILLAR_HEIGHT / 2],
-        rgbaColor=[pillar_gray, pillar_gray, pillar_gray, 1.0],
-        physicsClientId=pc,
-    )
-    p.createMultiBody(
-        baseMass=0,
-        baseCollisionShapeIndex=-1,
-        baseVisualShapeIndex=pillar_vis,
-        basePosition=[PILLAR_X, PILLAR_Y_CENTER, PILLAR_Z_CENTER],
-        physicsClientId=pc,
-    )
-
-    body_ids = []
-    masses_list = []
-    frictions_list = []
-    for i, cfg in enumerate(shape_configs):
-        off = i * 16
-        pos = initial_physics_row[off:off + 3].tolist()
-        orn = initial_physics_row[off + 3:off + 7].tolist()
-        lin_vel = initial_physics_row[off + 7:off + 10].tolist()
-        ang_vel = initial_physics_row[off + 10:off + 13].tolist()
-        mass = float(initial_physics_row[off + 13])
-        friction = float(initial_physics_row[off + 14])
-        # off + 15 is x_accel (the per-scene applied acceleration), read from
-        # the cfg dict below for consistency with how _create_scene applies it.
-        color = cfg['color']
-
-        if cfg['shape'] == 'sphere':
-            col = p.createCollisionShape(p.GEOM_SPHERE,
-                                         radius=cfg['params']['radius'],
-                                         physicsClientId=pc)
-            vis = p.createVisualShape(p.GEOM_SPHERE,
-                                      radius=cfg['params']['radius'],
-                                      rgbaColor=color,
-                                      specularColor=[0.4, 0.4, 0.4],
-                                      physicsClientId=pc)
-        else:
-            col = p.createCollisionShape(p.GEOM_BOX,
-                                         halfExtents=cfg['params']['half_extents'],
-                                         physicsClientId=pc)
-            vis = p.createVisualShape(p.GEOM_BOX,
-                                      halfExtents=cfg['params']['half_extents'],
-                                      rgbaColor=color,
-                                      specularColor=[0.4, 0.4, 0.4],
-                                      physicsClientId=pc)
-
-        body_id = p.createMultiBody(
-            baseMass=mass,
-            baseCollisionShapeIndex=col,
-            baseVisualShapeIndex=vis,
-            basePosition=pos,
-            baseOrientation=orn,
-            physicsClientId=pc,
-        )
-        p.changeDynamics(body_id, -1, lateralFriction=friction, physicsClientId=pc)
-        p.resetBaseVelocity(body_id, linearVelocity=lin_vel,
-                            angularVelocity=ang_vel, physicsClientId=pc)
-        body_ids.append(body_id)
-        masses_list.append(mass)
-        frictions_list.append(friction)
-
-    # Render the brain-input frames (t=0, t=PP_EARLY_FRAME, t=PP_LATE_FRAME)
-    # only when building a full program_state. For RGBA-target callers we
-    # only need the behavioral target at t=n_timesteps.
-    _rnd = lambda: _render_scene(pc, lighting=lighting, use_opengl=use_gui)
-    initial_frame = _rnd() if return_program_state else None
-    early_frame = None
-    late_frame = None
-
-    for t in range(n_timesteps):
-        for i, (bid, cfg) in enumerate(zip(body_ids, shape_configs)):
-            x_accel = cfg.get('x_accel', 0.0)
-            if x_accel != 0.0:
-                p.applyExternalForce(bid, -1,
-                                     [x_accel * masses_list[i], 0, 0],
-                                     [0, 0, 0], p.WORLD_FRAME,
-                                     physicsClientId=pc)
-        p.stepSimulation(physicsClientId=pc)
-        _lock_rotation(body_ids, pc)
-        if return_program_state and t + 1 == _CFG_PP_EARLY_FRAME:
-            early_frame = _rnd()
-        if return_program_state and t + 1 == _CFG_PP_LATE_FRAME:
-            late_frame = _rnd()
-
-    if return_program_state:
-        applied_accels = [cfg.get('x_accel', 0.0) for cfg in shape_configs]
-        final_physics = _collect_physics_labels(
-            body_ids, masses_list, frictions_list, pc,
-            applied_accels=applied_accels,
-        )
-        scene_config_vec = _encode_scene_config(shape_configs)
-        lighting_vec = _encode_scene_lighting(pillar_gray, lighting or _DEFAULT_LIGHTING)
-        if owns_client:
-            p.disconnect(pc)
-        return _build_program_state(
-            [initial_frame, early_frame, late_frame],
-            final_physics, scene_config_vec, lighting_vec,
-        )
-    else:
-        # Behavioral target frame at t=n_timesteps.
-        size = render_size if render_size is not None else IMAGE_SIZE
-        rgba_bytes, _, _ = _render_scene(pc, lighting=lighting,
-                                         render_size=render_size, use_opengl=use_gui)
-        if owns_client:
-            p.disconnect(pc)
-        return np.frombuffer(rgba_bytes, dtype=np.uint8).reshape(size, size, 4)
-
-
 def _frame_render_vec(rgba_bytes, depth_bytes, seg_bytes):
     """One frame's RGBA+depth+seg bytes cast to float32 vector."""
     return np.frombuffer(rgba_bytes + depth_bytes + seg_bytes,
                          dtype=np.uint8).astype(np.float32)
+
+
+def _build_program_state(frame_renders, physics_labels,
+                         scene_config_vec, lighting_vec):
+    """
+    Concatenate three frames of render bytes (uint8->float32) with physics
+    labels, scene config, and lighting parameters (native float32).
+
+    Args:
+        frame_renders: list of (rgba_bytes, depth_bytes, seg_bytes) tuples,
+                       one per brain-input frame (initial / early / late).
+        physics_labels, scene_config_vec, lighting_vec: per-scene 1-D arrays.
+
+    The z-scoring in neural_model.py handles the scale difference between
+    render bytes (0-255) and native float32 values.
+    """
+    render_vecs = [_frame_render_vec(*frame) for frame in frame_renders]
+    return np.concatenate(render_vecs + [physics_labels, scene_config_vec,
+                                          lighting_vec])
 
 
 def extract_brain_pixels(states, metadata):
@@ -562,28 +316,14 @@ def extract_frame_pixels(frame_data, metadata):
     return frame_data[:, s]
 
 
-def _build_program_state(frame_renders, physics_labels,
-                         scene_config_vec, lighting_vec):
-    """
-    Concatenate three frames of render bytes (uint8->float32) with physics
-    labels, scene config, and lighting parameters (native float32).
-
-    Args:
-        frame_renders: list of (rgba_bytes, depth_bytes, seg_bytes) tuples,
-                       one per brain-input frame (initial / early / late).
-        physics_labels, scene_config_vec, lighting_vec: per-scene 1-D arrays.
-
-    The z-scoring in neural_model.py handles the scale difference between
-    render bytes (0-255) and native float32 values.
-    """
-    render_vecs = [_frame_render_vec(*frame) for frame in frame_renders]
-    return np.concatenate(render_vecs + [physics_labels, scene_config_vec,
-                                          lighting_vec])
+def open_render_client(use_gui=False):
+    """Stub — MuJoCo does not use persistent render clients."""
+    return None
 
 
 def generate_scenes(n_scenes, seed, *, n_timesteps=None, use_gui=False):
     """
-    Generate n_scenes PyBullet scenes, returning program states and analysis labels.
+    Generate n_scenes MuJoCo scenes, returning program states and analysis labels.
 
     Brain-input frames (full RGBA+depth+seg, concatenated into program_state):
       t=0 (initial), t=PP_EARLY_FRAME (early), t=PP_LATE_FRAME (late).
@@ -631,83 +371,55 @@ def generate_scenes(n_scenes, seed, *, n_timesteps=None, use_gui=False):
     all_pillar_grays = []
     all_lightings = []
 
-    # Reuse one connection for all scenes (resetSimulation between scenes).
-    # GUI mode enables OpenGL shadow rendering; DIRECT is faster but shadowless.
-    pc = p.connect(p.GUI if use_gui else p.DIRECT,
-                    options="--width=64 --height=64" if use_gui else "")
-    if use_gui:
-        p.configureDebugVisualizer(p.COV_ENABLE_GUI, 0, physicsClientId=pc)
-        p.configureDebugVisualizer(p.COV_ENABLE_SHADOWS, 1, physicsClientId=pc)
+    for i in range(n_scenes):
+        if (i + 1) % 100 == 0 or i == 0:
+            print(f"  Generating scene {i+1}/{n_scenes}...")
 
-    try:
-        for i in range(n_scenes):
-            if (i + 1) % 100 == 0 or i == 0:
-                print(f"  Generating scene {i+1}/{n_scenes}...")
+        scene_seed = rng.integers(0, 2**31)
+        scene_rng = np.random.default_rng(scene_seed)
 
-            p.resetSimulation(physicsClientId=pc)
-            scene_seed = rng.integers(0, 2**31)
-            scene_rng = np.random.default_rng(scene_seed)
+        model, data, body_id, qvel_offset, mass, friction, x_accel, shape_cfg, pillar_gray, lighting = \
+            _build_mjspec(scene_rng)
+        all_scene_configs.append([shape_cfg])
+        all_pillar_grays.append(pillar_gray)
+        all_lightings.append(lighting)
 
-            body_ids, masses, frictions, is_occluded, shape_configs, pillar_gray = _create_scene(pc, scene_rng)
-            all_scene_configs.append(shape_configs)
-            all_pillar_grays.append(pillar_gray)
-
-            # Sample lighting once per scene (consistent across all frames)
-            lighting = _sample_lighting(scene_rng)
-            all_lightings.append(lighting)
-
-            _rnd = lambda: _render_scene(pc, lighting=lighting, use_opengl=use_gui)
-
-            # Capture initial state (t=0) before stepping
-            applied_accels = [cfg.get('x_accel', 0.0) for cfg in shape_configs]
+        renderer = mujoco.Renderer(model, height=IMAGE_SIZE, width=IMAGE_SIZE)
+        try:
+            applied_accels = [x_accel]
             initial_physics_labels[i] = _collect_physics_labels(
-                body_ids, masses, frictions, pc, applied_accels=applied_accels,
-            )
-            init_frame = _rnd()
+                body_id, qvel_offset, mass, friction, x_accel, data)
+            init_frame = _render_frame(renderer, model, data, lighting)
             initial_renders[i] = _frame_render_vec(*init_frame)
 
-            # Step physics (with per-scene random x-acceleration as external force).
-            # Capture full RGBA+depth+seg frames at t=PP_EARLY_FRAME and
-            # t=PP_LATE_FRAME (the brain's later observations) and at
-            # t=n_timesteps (the behavioral prediction target, not in brain data).
             early_frame = None
             late_frame = None
             for t in range(n_timesteps):
-                for obj_idx, bid in enumerate(body_ids):
-                    x_accel = shape_configs[obj_idx].get('x_accel', 0.0)
-                    if x_accel != 0.0:
-                        p.applyExternalForce(bid, -1,
-                                             [x_accel * masses[obj_idx], 0, 0],
-                                             [0, 0, 0], p.WORLD_FRAME,
-                                             physicsClientId=pc)
-                p.stepSimulation(physicsClientId=pc)
-                _lock_rotation(body_ids, pc)
+                data.xfrc_applied[body_id, 0] = x_accel * mass
+                mujoco.mj_step(model, data)
+                data.xfrc_applied[body_id, 0] = 0.0
                 if t + 1 == _CFG_PP_EARLY_FRAME:
-                    early_frame = _rnd()
+                    early_frame = _render_frame(renderer, model, data, lighting)
                     early_renders[i] = _frame_render_vec(*early_frame)
                 if t + 1 == _CFG_PP_LATE_FRAME:
-                    late_frame = _rnd()
+                    late_frame = _render_frame(renderer, model, data, lighting)
                     late_renders[i] = _frame_render_vec(*late_frame)
 
-            # Collect final-state analysis labels (NOT used in neural generation)
             physics_labels[i] = _collect_physics_labels(
-                body_ids, masses, frictions, pc, applied_accels=applied_accels,
-            )
-            kinetic_energies[i] = _compute_total_kinetic_energy(body_ids, masses, pc)
+                body_id, qvel_offset, mass, friction, x_accel, data)
+            kinetic_energies[i] = _compute_total_kinetic_energy(qvel_offset, mass, data)
 
-            # Render behavioral target frame at t=n_timesteps (held out from brain)
-            target_frame = _rnd()
+            target_frame = _render_frame(renderer, model, data, lighting)
             target_renders[i] = _frame_render_vec(*target_frame)
 
-            # Build program state from the three brain-input frames.
-            scene_config_vec = _encode_scene_config(shape_configs)
+            scene_config_vec = _encode_scene_config([shape_cfg])
             lighting_vec = _encode_scene_lighting(pillar_gray, lighting)
             program_states[i] = _build_program_state(
                 [init_frame, early_frame, late_frame],
                 physics_labels[i], scene_config_vec, lighting_vec,
             )
-    finally:
-        p.disconnect(pc)
+        finally:
+            del renderer
 
     # Behavior label: median split on total final kinetic energy.
     # KE is directly recoverable from physics labels (mass + lin_vel).
@@ -762,3 +474,142 @@ def generate_scenes(n_scenes, seed, *, n_timesteps=None, use_gui=False):
         'lightings': all_lightings,
         'metadata': metadata,
     }
+
+
+def resimulate_scene(shape_configs, initial_physics_row, *, n_timesteps=None,
+                     return_program_state=False, pillar_gray=0.5, lighting=None,
+                     render_size=None, use_gui=False, physics_client=None):
+    """
+    Rebuild a scene from stored shape configs + initial physics state, step
+    N_TIMESTEPS, and return the rendered result.
+
+    Used for oracle physics-model prediction: given the full initial state
+    (position, velocity, mass, friction, shape, color), the simulation is
+    deterministic.
+
+    Args:
+        shape_configs:       list of dicts (one per object) with keys
+                             'shape' ('sphere'|'box'), 'params', 'color'
+        initial_physics_row: 1-D array of length 16*N_OBJECTS:
+                             per object: pos(3), orn(4), lin_vel(3), ang_vel(3), mass(1), friction(1), x_accel(1)
+        return_program_state: if True, return full program_state float32 vector
+                             (3-frame render buffers + physics labels + scene config + lighting).
+        physics_client:      accepted and silently ignored (backward compat).
+
+    Returns:
+        If return_program_state=False: RGBA uint8 [IMAGE_SIZE, IMAGE_SIZE, 4]
+            of the BEHAVIORAL TARGET frame (rendered at t=n_timesteps).
+        If return_program_state=True: float32 [D] program_state vector with
+            three brain-input frames concatenated (t=0, t=PP_EARLY_FRAME,
+            t=PP_LATE_FRAME).
+    """
+    if n_timesteps is None:
+        n_timesteps = _CFG_N_TIMESTEPS
+    if lighting is None:
+        lighting = _DEFAULT_LIGHTING
+
+    # Extract initial state from physics row (single object, off=0)
+    off = 0
+    pos = initial_physics_row[off:off+3].tolist()
+    lin_vel = initial_physics_row[off+7:off+10].tolist()
+    mass = float(initial_physics_row[off+13])
+    friction = float(initial_physics_row[off+14])
+    x_accel = float(initial_physics_row[off+15])
+    cfg = shape_configs[0]
+
+    # Build spec (same as _build_mjspec but with fixed params from initial_physics_row)
+    spec = mujoco.MjSpec()
+    spec.option.gravity = [0, 0, -9.81]
+
+    g = spec.worldbody.add_geom()
+    g.type = mujoco.mjtGeom.mjGEOM_PLANE
+    g.size = [0, 0, 0.01]
+    g.rgba = [0.6, 0.6, 0.6, 1.0]
+
+    pil = spec.worldbody.add_geom()
+    pil.type = mujoco.mjtGeom.mjGEOM_BOX
+    pil.size = [PILLAR_WIDTH/2, PILLAR_DEPTH/2, PILLAR_HEIGHT/2]
+    pil.pos = [PILLAR_X, PILLAR_Y_CENTER, PILLAR_Z_CENTER]
+    pil.rgba = [pillar_gray, pillar_gray, pillar_gray, 1.0]
+    pil.contype = 0
+    pil.conaffinity = 0
+
+    lt = spec.worldbody.add_light()
+    lt.type = mujoco.mjtLightType.mjLIGHT_DIRECTIONAL
+    lt.dir = [-d for d in lighting['lightDirection']]
+    lt.diffuse = lighting['lightColor']
+    lt.ambient = [lighting['lightAmbientCoeff']] * 3
+    lt.specular = [0.3, 0.3, 0.3]
+    lt.castshadow = False
+
+    jitter = lighting.get('camJitter', [0, 0, 0])
+    tj = lighting.get('camTargetJitter', [0, 0, 0])
+    eye = [jitter[0], -3 + jitter[1], 2 + jitter[2]]
+    target_pt = [tj[0], tj[1], 0.3 + tj[2]]
+    cam = spec.worldbody.add_camera()
+    cam.name = "scene_cam"
+    cam.pos = eye
+    cam.quat = _look_at_quat(eye, target_pt)
+    cam.fovy = _CFG_CAMERA_FOV
+
+    body = spec.worldbody.add_body()
+    body.name = "object"
+    body.pos = pos
+    for name, axis in [("obj_sx", [1,0,0]), ("obj_sy", [0,1,0]), ("obj_sz", [0,0,1])]:
+        jnt = body.add_joint()
+        jnt.name = name
+        jnt.type = mujoco.mjtJoint.mjJNT_SLIDE
+        jnt.axis = axis
+
+    geom = body.add_geom()
+    if cfg['shape'] == 'sphere':
+        geom.type = mujoco.mjtGeom.mjGEOM_SPHERE
+        geom.size = [cfg['params']['radius'], 0, 0]
+    else:
+        geom.type = mujoco.mjtGeom.mjGEOM_BOX
+        geom.size = cfg['params']['half_extents']
+    geom.rgba = cfg['color']
+    geom.friction = [friction, 0.005, 0.0001]
+    geom.mass = mass
+
+    model = spec.compile()
+    data = mujoco.MjData(model)
+    body_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, "object")
+    qvel_offset = int(model.jnt_dofadr[
+        mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, "obj_sx")])
+
+    data.qvel[qvel_offset:qvel_offset+3] = lin_vel
+    mujoco.mj_forward(model, data)
+
+    renderer = mujoco.Renderer(model, height=IMAGE_SIZE, width=IMAGE_SIZE)
+    try:
+        initial_frame = _render_frame(renderer, model, data, lighting) if return_program_state else None
+        early_frame = None
+        late_frame = None
+
+        for t in range(n_timesteps):
+            data.xfrc_applied[body_id, 0] = x_accel * mass
+            mujoco.mj_step(model, data)
+            data.xfrc_applied[body_id, 0] = 0.0
+            if return_program_state and t + 1 == _CFG_PP_EARLY_FRAME:
+                early_frame = _render_frame(renderer, model, data, lighting)
+            if return_program_state and t + 1 == _CFG_PP_LATE_FRAME:
+                late_frame = _render_frame(renderer, model, data, lighting)
+
+        if return_program_state:
+            final_physics = _collect_physics_labels(body_id, qvel_offset, mass, friction, x_accel, data)
+            scene_config_vec = _encode_scene_config(shape_configs)
+            lighting_vec = _encode_scene_lighting(pillar_gray, lighting)
+            del renderer
+            return _build_program_state(
+                [initial_frame, early_frame, late_frame],
+                final_physics, scene_config_vec, lighting_vec,
+            )
+        else:
+            size = render_size if render_size is not None else IMAGE_SIZE
+            rgba_bytes, _, _ = _render_frame(renderer, model, data, lighting)
+            del renderer
+            return np.frombuffer(rgba_bytes, dtype=np.uint8).reshape(size, size, 4)
+    except:
+        del renderer
+        raise
