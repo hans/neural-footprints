@@ -20,6 +20,7 @@ import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import numpy as np
+import torch
 
 from load_config import load_config
 from io_utils import load_scenes
@@ -33,17 +34,24 @@ scenes = load_scenes(snakemake.input.scenes)
 initial_physics = scenes['initial_physics_labels']
 n = len(scenes['initial_renders'])
 
+_raw_device = cfg.get('pp_device', 'cpu')
+device = torch.device(_raw_device)
+if device.type == 'mps' and not torch.backends.mps.is_available():
+    device = torch.device('cpu')
+print(f"  device: {device}")
+
 backbone = cfg.get('pp_inverse_backbone', 'mlp')
 print(f"\nTraining InverseModel ({backbone}) for neural generation on {n} scenes")
 print("=" * 60)
 
 if backbone == 'mlp':
-    inv = make_inverse_model('mlp', pixel_pca_dim=cfg['pp_pixel_pca_dim'])
+    inv = make_inverse_model('mlp', device=device, pixel_pca_dim=cfg['pp_pixel_pca_dim'])
     fit_kwargs = {}
 elif backbone == 'softmax_cnn':
     sm_cfg = cfg.get('pp_softmax', {})
     inv = make_inverse_model(
         'softmax_cnn',
+        device=device,
         n_filters=sm_cfg.get('n_filters', 128),
         learned_temp=sm_cfg.get('learned_temp', True),
         temp_per_channel=sm_cfg.get('temp_per_channel', True),

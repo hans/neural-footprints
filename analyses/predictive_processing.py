@@ -135,10 +135,11 @@ class InverseModel:
     the pp_r2 GT-fill loop.
     """
 
-    def __init__(self, pixel_pca_dim=None, hidden_dim=None, dropout_rate=None):
+    def __init__(self, pixel_pca_dim=None, hidden_dim=None, dropout_rate=None, device=None):
         self.pixel_pca_dim = pixel_pca_dim if pixel_pca_dim is not None else _CFG_PP_PIXEL_PCA_DIM
         self.hidden_dim = hidden_dim
         self.dropout_rate = dropout_rate
+        self.device = device if device is not None else torch.device('cpu')
         self.net_ = None
         self.input_scaler_ = None
         self.phys_scaler_ = None
@@ -195,7 +196,7 @@ class InverseModel:
         self.net_ = InverseMLPNet(
             input_dim, output_dim,
             hidden_dim=self.hidden_dim, dropout_rate=self.dropout_rate,
-        )
+        ).to(self.device)
 
         optimizer = torch.optim.Adam(self.net_.parameters(), lr=lr)
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
@@ -203,10 +204,10 @@ class InverseModel:
         )
         loss_fn = nn.MSELoss()
 
-        X_tr_t = torch.tensor(X_tr, dtype=torch.float32)
-        y_tr_t = torch.tensor(y_tr, dtype=torch.float32)
-        X_val_t = torch.tensor(X_val, dtype=torch.float32)
-        y_val_t = torch.tensor(y_val, dtype=torch.float32)
+        X_tr_t = torch.tensor(X_tr, dtype=torch.float32, device=self.device)
+        y_tr_t = torch.tensor(y_tr, dtype=torch.float32, device=self.device)
+        X_val_t = torch.tensor(X_val, dtype=torch.float32, device=self.device)
+        y_val_t = torch.tensor(y_val, dtype=torch.float32, device=self.device)
 
         loader = DataLoader(TensorDataset(X_tr_t, y_tr_t), batch_size=batch_size, shuffle=True)
 
@@ -242,7 +243,7 @@ class InverseModel:
 
         self.net_.eval()
         with torch.no_grad():
-            y_pred_val = self.net_(X_val_t).numpy()
+            y_pred_val = self.net_(X_val_t).cpu().numpy()
         self.per_dim_r2_ = r2_score(y_val, y_pred_val, multioutput='raw_values')
 
         print(f"    InverseModel val MSE={best_val_loss:.4f}  "
@@ -260,10 +261,11 @@ class InverseModel:
         """Deterministic prediction (dropout off). Returns physics in original units, full dims."""
         self.net_.eval()
         X = torch.tensor(
-            self.input_scaler_.transform(pixel_pca_two_frame), dtype=torch.float32
+            self.input_scaler_.transform(pixel_pca_two_frame), dtype=torch.float32,
+            device=self.device,
         )
         with torch.no_grad():
-            pred_scaled = self.net_(X).numpy()
+            pred_scaled = self.net_(X).cpu().numpy()
         valid_preds = self.phys_scaler_.inverse_transform(pred_scaled)
         return self._expand_to_full(valid_preds)
 
@@ -271,12 +273,13 @@ class InverseModel:
         """MC dropout: stochastic forward passes with dropout active."""
         self.net_.train()
         X = torch.tensor(
-            self.input_scaler_.transform(pixel_pca_two_frame), dtype=torch.float32
+            self.input_scaler_.transform(pixel_pca_two_frame), dtype=torch.float32,
+            device=self.device,
         )
         samples_scaled = []
         with torch.no_grad():
             for _ in range(n_samples):
-                samples_scaled.append(self.net_(X).numpy())
+                samples_scaled.append(self.net_(X).cpu().numpy())
         self.net_.eval()
         return np.stack([
             self._expand_to_full(self.phys_scaler_.inverse_transform(s))
@@ -294,11 +297,12 @@ class InverseModel:
             raise ValueError(f"layer must be 'h1', 'h2', or 'h3'; got {layer!r}")
         self.net_.eval()
         X = torch.tensor(
-            self.input_scaler_.transform(pixel_pca_two_frame), dtype=torch.float32
+            self.input_scaler_.transform(pixel_pca_two_frame), dtype=torch.float32,
+            device=self.device,
         )
         with torch.no_grad():
             _, acts = self.net_.forward_with_activations(X)
-        return acts[layer].numpy()
+        return acts[layer].cpu().numpy()
 
 
 # ---------------------------------------------------------------------------
@@ -325,9 +329,10 @@ class InverseCNN:
     to [0, 1]; float inputs are passed through (assumed pre-normalized).
     """
 
-    def __init__(self, hidden_dim=None, dropout_rate=None):
+    def __init__(self, hidden_dim=None, dropout_rate=None, device=None):
         self.hidden_dim = hidden_dim
         self.dropout_rate = dropout_rate
+        self.device = device if device is not None else torch.device('cpu')
         self.net_ = None
         self.phys_scaler_ = None
         self.per_dim_r2_ = None
@@ -372,15 +377,15 @@ class InverseCNN:
         self.net_ = InverseCNNNet(
             n_frames=n_frames, n_channels=n_channels, output_dim=y.shape[1],
             hidden_dim=self.hidden_dim, dropout_rate=self.dropout_rate,
-        )
+        ).to(self.device)
         opt = torch.optim.Adam(self.net_.parameters(), lr=lr)
         sch = torch.optim.lr_scheduler.ReduceLROnPlateau(opt, factor=0.5, patience=10)
         loss_fn = nn.MSELoss()
 
-        X_tr_t = torch.tensor(frames[idx_tr], dtype=torch.float32)
-        y_tr_t = torch.tensor(y[idx_tr], dtype=torch.float32)
-        X_val_t = torch.tensor(frames[idx_val], dtype=torch.float32)
-        y_val_t = torch.tensor(y[idx_val], dtype=torch.float32)
+        X_tr_t = torch.tensor(frames[idx_tr], dtype=torch.float32, device=self.device)
+        y_tr_t = torch.tensor(y[idx_tr], dtype=torch.float32, device=self.device)
+        X_val_t = torch.tensor(frames[idx_val], dtype=torch.float32, device=self.device)
+        y_val_t = torch.tensor(y[idx_val], dtype=torch.float32, device=self.device)
 
         loader = DataLoader(TensorDataset(X_tr_t, y_tr_t),
                             batch_size=batch_size, shuffle=True)
@@ -418,7 +423,7 @@ class InverseCNN:
         self.net_.load_state_dict(best_state)
         self.net_.eval()
         with torch.no_grad():
-            y_pred_val = self.net_(X_val_t).numpy()
+            y_pred_val = self.net_(X_val_t).cpu().numpy()
         self.per_dim_r2_ = r2_score(y[idx_val], y_pred_val, multioutput='raw_values')
         self.history_ = history
         self.best_epoch_ = best_epoch
@@ -437,7 +442,7 @@ class InverseCNN:
     def _forward_in_batches(self, frames, batch_size=128, return_acts=None):
         """Run the net over frames in batches; return ndarray (or dict of arrays)."""
         self.net_.eval()
-        X = torch.tensor(self._prep_frames(frames), dtype=torch.float32)
+        X = torch.tensor(self._prep_frames(frames), dtype=torch.float32, device=self.device)
         outs = []
         acts = {k: [] for k in (return_acts or [])}
         with torch.no_grad():
@@ -446,10 +451,10 @@ class InverseCNN:
                 if return_acts:
                     out, a = self.net_.forward_with_activations(xb)
                     for k in return_acts:
-                        acts[k].append(a[k].numpy())
+                        acts[k].append(a[k].cpu().numpy())
                 else:
                     out = self.net_(xb)
-                outs.append(out.numpy())
+                outs.append(out.cpu().numpy())
         out = np.concatenate(outs, axis=0)
         if return_acts:
             return out, {k: np.concatenate(acts[k], axis=0) for k in return_acts}
@@ -501,7 +506,7 @@ class InverseSoftmaxCNN:
 
     def __init__(self, *, n_filters=128, learned_temp=True, temp_per_channel=True,
                  include_variance=False, hidden_dim=256, head_depth=3,
-                 dropout_rate=0.0):
+                 dropout_rate=0.0, device=None):
         self.n_filters = n_filters
         self.learned_temp = learned_temp
         self.temp_per_channel = temp_per_channel
@@ -509,6 +514,7 @@ class InverseSoftmaxCNN:
         self.hidden_dim = hidden_dim
         self.head_depth = head_depth
         self.dropout_rate = dropout_rate
+        self.device = device if device is not None else torch.device('cpu')
 
         self.net_ = None
         self.input_scaler_ = None  # raw frames; no scaler.
@@ -574,16 +580,16 @@ class InverseSoftmaxCNN:
             hidden_dim=self.hidden_dim,
             head_depth=self.head_depth,
             dropout_rate=self.dropout_rate,
-        )
+        ).to(self.device)
 
         opt = torch.optim.Adam(self.net_.parameters(), lr=lr)
         sch = torch.optim.lr_scheduler.ReduceLROnPlateau(opt, factor=0.5, patience=10)
         loss_fn = nn.MSELoss()
 
-        X_tr_t = torch.tensor(frames[idx_tr], dtype=torch.float32)
-        y_tr_t = torch.tensor(y[idx_tr], dtype=torch.float32)
-        X_val_t = torch.tensor(frames[idx_val], dtype=torch.float32)
-        y_val_t = torch.tensor(y[idx_val], dtype=torch.float32)
+        X_tr_t = torch.tensor(frames[idx_tr], dtype=torch.float32, device=self.device)
+        y_tr_t = torch.tensor(y[idx_tr], dtype=torch.float32, device=self.device)
+        X_val_t = torch.tensor(frames[idx_val], dtype=torch.float32, device=self.device)
+        y_val_t = torch.tensor(y[idx_val], dtype=torch.float32, device=self.device)
 
         loader = DataLoader(TensorDataset(X_tr_t, y_tr_t),
                             batch_size=batch_size, shuffle=True)
@@ -621,7 +627,7 @@ class InverseSoftmaxCNN:
         self.net_.load_state_dict(best_state)
         self.net_.eval()
         with torch.no_grad():
-            y_pred_val = self.net_(X_val_t).numpy()
+            y_pred_val = self.net_(X_val_t).cpu().numpy()
         self.per_dim_r2_ = r2_score(y[idx_val], y_pred_val, multioutput='raw_values')
         self.history_ = history
         self.best_epoch_ = best_epoch
@@ -649,7 +655,7 @@ class InverseSoftmaxCNN:
             self.net_.conv.eval()
         else:
             self.net_.eval()
-        X = torch.tensor(self._prep_frames(frames), dtype=torch.float32)
+        X = torch.tensor(self._prep_frames(frames), dtype=torch.float32, device=self.device)
         outs = []
         acts = {k: [] for k in (return_acts or [])}
         with torch.no_grad():
@@ -658,10 +664,10 @@ class InverseSoftmaxCNN:
                 if return_acts:
                     out, a = self.net_.forward_with_activations(xb)
                     for k in return_acts:
-                        acts[k].append(a[k].numpy())
+                        acts[k].append(a[k].cpu().numpy())
                 else:
                     out = self.net_(xb)
-                outs.append(out.numpy())
+                outs.append(out.cpu().numpy())
         if stochastic:
             self.net_.eval()
         out = np.concatenate(outs, axis=0)
@@ -703,7 +709,7 @@ class InverseSoftmaxCNN:
 INVERSE_BACKBONES = ('mlp', 'softmax_cnn')
 
 
-def make_inverse_model(backbone='mlp', **kwargs):
+def make_inverse_model(backbone='mlp', *, device=None, **kwargs):
     """Build an inverse-model wrapper for the named backbone.
 
     Currently dispatches:
@@ -715,9 +721,9 @@ def make_inverse_model(backbone='mlp', **kwargs):
     diagnostic in scripts/eval_pp_cnn.py only.
     """
     if backbone == 'mlp':
-        return InverseModel(**kwargs)
+        return InverseModel(device=device, **kwargs)
     if backbone == 'softmax_cnn':
-        return InverseSoftmaxCNN(**kwargs)
+        return InverseSoftmaxCNN(device=device, **kwargs)
     raise ValueError(
         f"unknown pp_inverse_backbone {backbone!r}; expected one of {INVERSE_BACKBONES}"
     )
