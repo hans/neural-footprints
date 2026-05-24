@@ -1,9 +1,9 @@
 [project]
 name = "neural-footprints"
 version = "0.1.0"
-requires-python = ">=3.14"
+requires-python = ">=3.12"
 dependencies = [
-    "pybullet",
+    "mujoco>=3.2",
     "numpy",
     "scipy",
     "scikit-learn",
@@ -23,7 +23,7 @@ dev = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = [
-    "slow: integration tests that boot PyBullet (deselect with -m 'not slow')",
+    "slow: integration tests that boot the physics engine (deselect with -m 'not slow')",
 ]
 addopts = "-m 'not slow'"
 
