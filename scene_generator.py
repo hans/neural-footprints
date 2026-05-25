@@ -50,28 +50,28 @@ SCENE_LIGHTING_DIM = 15
 
 
 _DEFAULT_LIGHTING = {
-    'lightDirection': [1, -1, 2],
+    'lightDirection': [0.5, -1, 3],
     'lightColor': [1.0, 1.0, 1.0],
     'lightDistance': 5.0,
     'camJitter': [0.0, 0.0, 0.0],
     'camTargetJitter': [0.0, 0.0, 0.0],
-    'lightAmbientCoeff': 0.4,
+    'lightAmbientCoeff': 0.3,
 }
 
 
 def _sample_lighting(rng):
     """Sample random lighting and camera parameters for a scene."""
     return {
-        'lightDirection': [float(rng.uniform(-2, 2)),
+        'lightDirection': [float(rng.uniform(-1, 1)),
                            float(rng.uniform(-2, 0)),
-                           float(rng.uniform(1, 3))],
-        'lightColor': [float(c) for c in rng.uniform(0.6, 1.0, size=3)],
+                           float(rng.uniform(2, 4))],
+        'lightColor': [float(c) for c in rng.uniform(0.7, 1.0, size=3)],
         'lightDistance': float(rng.uniform(3.0, 8.0)),
         'camJitter': [float(v) for v in rng.uniform(-0.3, 0.3, size=3)],
         'camTargetJitter': [float(rng.uniform(-0.15, 0.15)),
                             0.0,
                             float(rng.uniform(-0.1, 0.1))],
-        'lightAmbientCoeff': float(rng.uniform(0.2, 0.6)),
+        'lightAmbientCoeff': float(rng.uniform(0.2, 0.4)),
     }
 
 
@@ -98,11 +98,36 @@ def _build_mjspec(rng):
     spec = mujoco.MjSpec()
     spec.option.gravity = [0, 0, -9.81]
 
+    sky_tex = spec.add_texture()
+    sky_tex.name = 'sky'
+    sky_tex.type = mujoco.mjtTexture.mjTEXTURE_SKYBOX
+    sky_tex.builtin = mujoco.mjtBuiltin.mjBUILTIN_GRADIENT
+    sky_tex.rgb1 = [0.3, 0.5, 0.8]
+    sky_tex.rgb2 = [0.65, 0.8, 1.0]
+    sky_tex.width = 512
+    sky_tex.height = 512
+
+    floor_tex = spec.add_texture()
+    floor_tex.name = 'checker'
+    floor_tex.type = mujoco.mjtTexture.mjTEXTURE_2D
+    floor_tex.builtin = mujoco.mjtBuiltin.mjBUILTIN_CHECKER
+    floor_tex.rgb1 = [0.08, 0.08, 0.08]
+    floor_tex.rgb2 = [0.75, 0.70, 0.60]
+    floor_tex.width = 512
+    floor_tex.height = 512
+
+    floor_mat = spec.add_material()
+    floor_mat.name = 'floor_mat'
+    floor_mat.textures[mujoco.mjtTextureRole.mjTEXROLE_RGB.value] = 'checker'
+    floor_mat.texrepeat = [5.0, 5.0]
+    floor_mat.shininess = 0.0
+    floor_mat.specular = 0.0
+
     # Ground plane
     g = spec.worldbody.add_geom()
     g.type = mujoco.mjtGeom.mjGEOM_PLANE
     g.size = [0, 0, 0.01]
-    g.rgba = [0.6, 0.6, 0.6, 1.0]
+    g.material = 'floor_mat'
 
     # Pillar (visual only)
     pil = spec.worldbody.add_geom()
@@ -119,8 +144,8 @@ def _build_mjspec(rng):
     lt.dir = [-d for d in lighting['lightDirection']]
     lt.diffuse = lighting['lightColor']
     lt.ambient = [lighting['lightAmbientCoeff']] * 3
-    lt.specular = [0.3, 0.3, 0.3]
-    lt.castshadow = False
+    lt.specular = [0.5, 0.5, 0.5]
+    lt.castshadow = True
 
     # Camera
     jitter = lighting.get('camJitter', [0, 0, 0])
@@ -535,10 +560,35 @@ def resimulate_scene(shape_configs, initial_physics_row, *, n_timesteps=None,
     spec = mujoco.MjSpec()
     spec.option.gravity = [0, 0, -9.81]
 
+    sky_tex = spec.add_texture()
+    sky_tex.name = 'sky'
+    sky_tex.type = mujoco.mjtTexture.mjTEXTURE_SKYBOX
+    sky_tex.builtin = mujoco.mjtBuiltin.mjBUILTIN_GRADIENT
+    sky_tex.rgb1 = [0.3, 0.5, 0.8]
+    sky_tex.rgb2 = [0.65, 0.8, 1.0]
+    sky_tex.width = 512
+    sky_tex.height = 512
+
+    floor_tex = spec.add_texture()
+    floor_tex.name = 'checker'
+    floor_tex.type = mujoco.mjtTexture.mjTEXTURE_2D
+    floor_tex.builtin = mujoco.mjtBuiltin.mjBUILTIN_CHECKER
+    floor_tex.rgb1 = [0.08, 0.08, 0.08]
+    floor_tex.rgb2 = [0.75, 0.70, 0.60]
+    floor_tex.width = 512
+    floor_tex.height = 512
+
+    floor_mat = spec.add_material()
+    floor_mat.name = 'floor_mat'
+    floor_mat.textures[mujoco.mjtTextureRole.mjTEXROLE_RGB.value] = 'checker'
+    floor_mat.texrepeat = [5.0, 5.0]
+    floor_mat.shininess = 0.0
+    floor_mat.specular = 0.0
+
     g = spec.worldbody.add_geom()
     g.type = mujoco.mjtGeom.mjGEOM_PLANE
     g.size = [0, 0, 0.01]
-    g.rgba = [0.6, 0.6, 0.6, 1.0]
+    g.material = 'floor_mat'
 
     pil = spec.worldbody.add_geom()
     pil.type = mujoco.mjtGeom.mjGEOM_BOX
@@ -553,8 +603,8 @@ def resimulate_scene(shape_configs, initial_physics_row, *, n_timesteps=None,
     lt.dir = [-d for d in lighting['lightDirection']]
     lt.diffuse = lighting['lightColor']
     lt.ambient = [lighting['lightAmbientCoeff']] * 3
-    lt.specular = [0.3, 0.3, 0.3]
-    lt.castshadow = False
+    lt.specular = [0.5, 0.5, 0.5]
+    lt.castshadow = True
 
     jitter = lighting.get('camJitter', [0, 0, 0])
     tj = lighting.get('camTargetJitter', [0, 0, 0])
