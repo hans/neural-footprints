@@ -310,3 +310,37 @@ def test_resimulate_scene_determinism():
         pillar_gray=pillar_gray, lighting=lighting,
     )
     np.testing.assert_array_equal(img_a, img_b)
+
+
+@pytest.mark.slow
+def test_physics_sufficient_for_forward_simulation():
+    """Core oracle claim: initial physics labels alone reproduce the target render.
+
+    The paper's forward dissociation result rests on this: resimulate_scene
+    called with the stored initial_physics_labels must yield pixel-for-pixel
+    identical RGBA to what generate_scenes captured as target_renders.
+
+    This is the ground-truth check that the oracle physics forward model is
+    exact, not approximate.
+    """
+    from scene_generator import generate_scenes, resimulate_scene
+
+    out = generate_scenes(n_scenes=5, seed=17)
+    metadata = out["metadata"]
+    rgba_end = metadata["target_pixel_indices"].stop  # IMAGE_SIZE * IMAGE_SIZE * 4
+
+    for i in range(5):
+        resim_rgba = resimulate_scene(
+            out["scene_configs"][i],
+            out["initial_physics_labels"][i],
+            pillar_gray=out["pillar_grays"][i],
+            lighting=out["lightings"][i],
+        )
+        # resim_rgba: uint8 [H, W, 4].  target_renders: float32 [per_frame];
+        # its leading rgba_end values are the same bytes cast to float32.
+        actual = resim_rgba.flatten().astype(np.float32)
+        expected = out["target_renders"][i, :rgba_end]
+        np.testing.assert_array_equal(
+            actual, expected,
+            err_msg=f"Scene {i}: resimulated RGBA does not match original target_renders",
+        )
