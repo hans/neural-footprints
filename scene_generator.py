@@ -17,7 +17,9 @@ in the random projection.
 """
 
 import os
-os.environ.setdefault("MUJOCO_GL", "osmesa")
+import sys
+if "MUJOCO_GL" not in os.environ:
+    os.environ["MUJOCO_GL"] = "osmesa" if sys.platform != "darwin" else "glfw"
 
 import mujoco
 import numpy as np
