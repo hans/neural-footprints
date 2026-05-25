@@ -16,6 +16,9 @@ Non-render variables are a tiny fraction of the signal — swamped by pixels
 in the random projection.
 """
 
+import os
+os.environ.setdefault("MUJOCO_GL", "osmesa")
+
 import mujoco
 import numpy as np
 from scipy.spatial.transform import Rotation
@@ -371,21 +374,29 @@ def generate_scenes(n_scenes, seed, *, n_timesteps=None, use_gui=False):
     all_pillar_grays = []
     all_lightings = []
 
-    for i in range(n_scenes):
-        if (i + 1) % 100 == 0 or i == 0:
-            print(f"  Generating scene {i+1}/{n_scenes}...")
+    # Create renderer once — OSMesa/EGL context init costs seconds per call.
+    # All scenes share the same model structure (ngeom/nbody/ncam identical),
+    # so we reuse the GL context and swap renderer._model each iteration.
+    renderer = None
+    try:
+        for i in range(n_scenes):
+            if (i + 1) % 100 == 0 or i == 0:
+                print(f"  Generating scene {i+1}/{n_scenes}...")
 
-        scene_seed = rng.integers(0, 2**31)
-        scene_rng = np.random.default_rng(scene_seed)
+            scene_seed = rng.integers(0, 2**31)
+            scene_rng = np.random.default_rng(scene_seed)
 
-        model, data, body_id, qvel_offset, mass, friction, x_accel, shape_cfg, pillar_gray, lighting = \
-            _build_mjspec(scene_rng)
-        all_scene_configs.append([shape_cfg])
-        all_pillar_grays.append(pillar_gray)
-        all_lightings.append(lighting)
+            model, data, body_id, qvel_offset, mass, friction, x_accel, shape_cfg, pillar_gray, lighting = \
+                _build_mjspec(scene_rng)
+            all_scene_configs.append([shape_cfg])
+            all_pillar_grays.append(pillar_gray)
+            all_lightings.append(lighting)
 
-        renderer = mujoco.Renderer(model, height=IMAGE_SIZE, width=IMAGE_SIZE)
-        try:
+            if renderer is None:
+                renderer = mujoco.Renderer(model, height=IMAGE_SIZE, width=IMAGE_SIZE)
+            else:
+                renderer._model = model
+
             applied_accels = [x_accel]
             initial_physics_labels[i] = _collect_physics_labels(
                 body_id, qvel_offset, mass, friction, x_accel, data)
@@ -418,7 +429,8 @@ def generate_scenes(n_scenes, seed, *, n_timesteps=None, use_gui=False):
                 [init_frame, early_frame, late_frame],
                 physics_labels[i], scene_config_vec, lighting_vec,
             )
-        finally:
+    finally:
+        if renderer is not None:
             del renderer
 
     # Behavior label: median split on total final kinetic energy.
@@ -581,7 +593,8 @@ def resimulate_scene(shape_configs, initial_physics_row, *, n_timesteps=None,
     data.qvel[qvel_offset:qvel_offset+3] = lin_vel
     mujoco.mj_forward(model, data)
 
-    renderer = mujoco.Renderer(model, height=IMAGE_SIZE, width=IMAGE_SIZE)
+    render_h = render_w = (render_size if render_size is not None else IMAGE_SIZE)
+    renderer = mujoco.Renderer(model, height=render_h, width=render_w)
     try:
         initial_frame = _render_frame(renderer, model, data, lighting) if return_program_state else None
         early_frame = None
@@ -606,10 +619,9 @@ def resimulate_scene(shape_configs, initial_physics_row, *, n_timesteps=None,
                 final_physics, scene_config_vec, lighting_vec,
             )
         else:
-            size = render_size if render_size is not None else IMAGE_SIZE
             rgba_bytes, _, _ = _render_frame(renderer, model, data, lighting)
             del renderer
-            return np.frombuffer(rgba_bytes, dtype=np.uint8).reshape(size, size, 4)
+            return np.frombuffer(rgba_bytes, dtype=np.uint8).reshape(render_h, render_w, 4)
     except:
         del renderer
         raise

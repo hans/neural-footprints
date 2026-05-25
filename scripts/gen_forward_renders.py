@@ -17,10 +17,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import copy
 import numpy as np
-import pybullet as p
 
 from io_utils import load_scenes
-from scene_generator import resimulate_scene, open_render_client
+from scene_generator import resimulate_scene
 
 scenes = load_scenes(snakemake.input.scenes)
 pp = np.load(snakemake.input.pp_activations)
@@ -38,24 +37,18 @@ n_objects = inferred_physics.shape[1] // 16
 print(f"Generating forward renders for {n_scenes} scenes ({n_objects} object(s))...")
 forward_program_states = np.zeros((n_scenes, D), dtype=np.float32)
 
-pc = open_render_client(use_gui=True)
-try:
-    for i in range(n_scenes):
-        if (i + 1) % 100 == 0 or i == 0:
-            print(f"  Scene {i+1}/{n_scenes}...")
-        cfg_copy = copy.deepcopy(scene_configs[i])
-        for j in range(n_objects):
-            cfg_copy[j]['x_accel'] = float(inferred_physics[i, j * 16 + 15])
-        forward_program_states[i] = resimulate_scene(
-            cfg_copy, inferred_physics[i],
-            return_program_state=True,
-            pillar_gray=pillar_grays[i],
-            lighting=lightings[i],
-            use_gui=True,
-            physics_client=pc,
-        )
-finally:
-    p.disconnect(pc)
+for i in range(n_scenes):
+    if (i + 1) % 100 == 0 or i == 0:
+        print(f"  Scene {i+1}/{n_scenes}...")
+    cfg_copy = copy.deepcopy(scene_configs[i])
+    for j in range(n_objects):
+        cfg_copy[j]['x_accel'] = float(inferred_physics[i, j * 16 + 15])
+    forward_program_states[i] = resimulate_scene(
+        cfg_copy, inferred_physics[i],
+        return_program_state=True,
+        pillar_gray=pillar_grays[i],
+        lighting=lightings[i],
+    )
 
 np.savez_compressed(snakemake.output.forward_renders,
                     forward_program_states=forward_program_states)
