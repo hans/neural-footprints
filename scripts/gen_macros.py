@@ -72,6 +72,28 @@ add("encodingRsqCombined", fmt(np.mean(r2_combined), 4))
 add("encodingDeltaRsq", fmt(np.mean(delta_r2), 4))
 add("controlAccuracy", pct(encoding["control_accuracy"]))
 
+# --- encoding null distribution macros ---
+def _maybe_fmt(value, decimals=4):
+    if value is None:
+        return "N/A"
+    try:
+        if np.isnan(value):
+            return "N/A"
+    except (TypeError, ValueError):
+        pass
+    return fmt(value, decimals)
+
+
+for prefix, latex_name in [
+    ("physics",  "encodingRsqPhysicsNull"),
+    ("combined", "encodingRsqCombinedNull"),
+    ("delta",    "encodingDeltaRsqNull"),
+]:
+    add(f"{latex_name}Lo",      _maybe_fmt(encoding.get(f"null_{prefix}_ci_lo")))
+    add(f"{latex_name}Hi",      _maybe_fmt(encoding.get(f"null_{prefix}_ci_hi")))
+    add(f"{latex_name}Mean",    _maybe_fmt(encoding.get(f"null_{prefix}_mean")))
+    add(f"{latex_name}PValue",  _maybe_fmt(encoding.get(f"null_{prefix}_pvalue"), decimals=3))
+
 # --- RSA ---
 add("rsaCorrNeuralPixel", fmt(rsa["corr_neural_pixel"], 4))
 add("rsaCorrNeuralPhysics", fmt(rsa["corr_neural_physics"], 4))

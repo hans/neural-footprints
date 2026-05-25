@@ -48,7 +48,8 @@ def _partial_spearman(x, y, z):
 
 
 def run_rsa_analysis(neural_activity, scenes, neural_meta,
-                     *, rsa_subsample=None, pixel_pca_dim=None):
+                     *, rsa_subsample=None, pixel_pca_dim=None,
+                     predicted_pixel_pca=None):
     """
     Run RSA analysis on a subsample of scenes.
 
@@ -80,6 +81,7 @@ def run_rsa_analysis(neural_activity, scenes, neural_meta,
     neural_sub = neural_activity[sub_idx]
     pixel_sub = extract_brain_pixels(program_states[sub_idx], metadata)
     physics_sub = physics_labels[sub_idx]
+    predicted_sub = predicted_pixel_pca[sub_idx] if predicted_pixel_pca is not None else None
 
     # PCA-reduce pixel data for tractability
     print(f"\nSubsampled {n_sub} scenes for RSA.")
@@ -103,6 +105,19 @@ def run_rsa_analysis(neural_activity, scenes, neural_meta,
     for rdm in [rdm_neural, rdm_pixel, rdm_physics]:
         rdm[np.isnan(rdm)] = 0.0
 
+    # Predicted-S RDM (forward-model render)
+    rdm_predicted = None
+    corr_neural_predicted = None
+    if predicted_sub is not None:
+        scaler_pred = StandardScaler()
+        predicted_scaled = scaler_pred.fit_transform(predicted_sub)
+        pca_pred = PCA(n_components=min(pixel_pca_dim, predicted_scaled.shape[0] - 1),
+                       random_state=42)
+        predicted_pca_sub = pca_pred.fit_transform(predicted_scaled)
+        rdm_predicted = _compute_rdm(predicted_pca_sub)
+        rdm_predicted[np.isnan(rdm_predicted)] = 0.0
+        corr_neural_predicted, _ = spearmanr(rdm_neural, rdm_predicted)
+
     # Spearman correlations
     corr_neural_pixel, p_nr = spearmanr(rdm_neural, rdm_pixel)
     corr_neural_physics, p_np = spearmanr(rdm_neural, rdm_physics)
@@ -111,12 +126,14 @@ def run_rsa_analysis(neural_activity, scenes, neural_meta,
     print(f"\n  Spearman neural<->pixel:   r={corr_neural_pixel:.4f}  (p={p_nr:.2e})")
     print(f"  Spearman neural<->physics: r={corr_neural_physics:.4f}  (p={p_np:.2e})")
     print(f"  Spearman pixel<->physics:  r={corr_pixel_physics:.4f}  (p={p_rp:.2e})")
+    if corr_neural_predicted is not None:
+        print(f"  Spearman neural<->predicted_S: r={corr_neural_predicted:.4f}")
 
     # Partial correlation: neural<->physics | pixel
     partial_corr, partial_p = _partial_spearman(rdm_neural, rdm_physics, rdm_pixel)
     print(f"  Partial neural<->physics | pixel: r={partial_corr:.4f}  (p={partial_p:.2e})")
 
-    return {
+    result = {
         'corr_neural_pixel': corr_neural_pixel,
         'corr_neural_physics': corr_neural_physics,
         'corr_pixel_physics': corr_pixel_physics,
@@ -126,3 +143,7 @@ def run_rsa_analysis(neural_activity, scenes, neural_meta,
         'rdm_physics': rdm_physics,
         'n_sub': n_sub,
     }
+    if rdm_predicted is not None:
+        result['rdm_predicted'] = rdm_predicted
+        result['corr_neural_predicted'] = corr_neural_predicted
+    return result

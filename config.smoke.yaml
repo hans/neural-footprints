@@ -1,0 +1,41 @@
+n_scenes: 100
+n_objects: 1
+image_size: 64
+n_neurons: 50
+n_timesteps: 120
+noise_level: 0.3
+random_seed: 43
+
+linvel_x_max: 3.0
+x_accel_max: 6.0
+rsa_subsample: 80
+pixel_pca_dim: 50
+behavioral_pca_dim: 0.90
+dynamics_pca_dim: 10
+behavioral_objective: "next_frame_pixels"
+
+camera_fov: 90
+
+pp_hidden_dim: 64
+pp_pixel_pca_dim: 20
+pp_early_frame: 40
+pp_late_frame: 80
+pp_dropout_rate: 0.05
+
+pp_neural_layer: "h2"
+
+pp_inverse_backbone: "softmax_cnn"
+
+pp_softmax:
+  n_filters: 32
+  learned_temp: true
+  temp_per_channel: true
+  include_variance: false
+  hidden_dim: 64
+  head_depth: 2
+  dropout_rate: 0.0
+  n_epochs: 20
+  patience: 10
+  min_epochs: 5
+  lr: 1.0e-3
+  batch_size: 32

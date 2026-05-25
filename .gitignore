@@ -5,8 +5,12 @@ data/
 outputs/
 .snakemake/
 .venv/
+.venv-container/
 
 figures
 
 paper/results_macros.tex
 .DS_Store
+
+.claude/
+.superset/

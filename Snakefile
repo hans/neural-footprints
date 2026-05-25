@@ -13,6 +13,8 @@ rule all:
         "figures/pca_analysis.pdf",
         "figures/pca_variance_decoding.pdf",
         "figures/dynamics_analysis.pdf",
+        "figures/predictive_processing.pdf",
+        "figures/pp_frames.pdf",
         "figures/residual_analysis.pdf",
         "figures/sample_scenes.pdf",
         "paper/results_macros.tex",
@@ -29,6 +31,8 @@ rule figures:
         "figures/pca_analysis.pdf",
         "figures/pca_variance_decoding.pdf",
         "figures/dynamics_analysis.pdf",
+        "figures/predictive_processing.pdf",
+        "figures/pp_frames.pdf",
         "figures/residual_analysis.pdf",
         "figures/sample_scenes.pdf",
 
@@ -44,9 +48,31 @@ rule generate_scenes:
         "scripts/gen_scenes.py"
 
 
+rule train_pp_for_neural:
+    input:
+        scenes="data/scenes.npz",
+    output:
+        model="data/inverse_model.pt",
+        pp_acts="data/pp_activations.npz",
+    script:
+        "scripts/train_pp_for_neural.py"
+
+
+rule forward_render:
+    input:
+        scenes="data/scenes.npz",
+        pp_activations="data/pp_activations.npz",
+    output:
+        forward_renders="data/forward_renders.npz",
+    script:
+        "scripts/gen_forward_renders.py"
+
+
 rule generate_neural:
     input:
         scenes="data/scenes.npz",
+        pp_activations="data/pp_activations.npz",
+        forward_renders="data/forward_renders.npz",
     output:
         neural="data/neural.npz",
     script:
@@ -57,10 +83,24 @@ rule generate_neural:
 # Analysis (computation only — no figures)
 # ---------------------------------------------------------------------------
 
+rule predictive_processing:
+    input:
+        scenes="data/scenes.npz",
+        neural="data/neural.npz",
+        model="data/inverse_model.pt",
+    output:
+        results="outputs/pp_results.json",
+        inferred="data/inferred_physics.npz",
+        plot_data="data/pp_plot_data.npz",
+    script:
+        "scripts/run_pp.py"
+
+
 rule encoding:
     input:
         scenes="data/scenes.npz",
         neural="data/neural.npz",
+        forward_renders="data/forward_renders.npz",
     output:
         results="outputs/encoding_results.json",
         encoder="data/encoder.joblib",
@@ -73,6 +113,7 @@ rule rsa:
     input:
         scenes="data/scenes.npz",
         neural="data/neural.npz",
+        forward_renders="data/forward_renders.npz",
     output:
         results="outputs/rsa_results.json",
         plot_data="data/rsa_plot_data.npz",
@@ -85,6 +126,7 @@ rule dissociation:
         scenes="data/scenes.npz",
         neural="data/neural.npz",
         encoder="data/encoder.joblib",
+        forward_renders="data/forward_renders.npz",
     output:
         results="outputs/dissociation_results.json",
         plot_data="data/dissociation_plot_data.npz",
@@ -109,6 +151,7 @@ rule dynamics:
         neural="data/neural.npz",
         encoding="outputs/encoding_results.json",
         encoder="data/encoder.joblib",
+        inferred="data/inferred_physics.npz",
     output:
         results="outputs/dynamics_results.json",
         plot_data="data/dynamics_plot_data.npz",
@@ -121,6 +164,7 @@ rule residual:
         scenes="data/scenes.npz",
         neural="data/neural.npz",
         encoding="outputs/encoding_results.json",
+        forward_renders="data/forward_renders.npz",
     output:
         results="outputs/residual_results.json",
         plot_data="data/residual_plot_data.npz",
@@ -135,6 +179,7 @@ rule residual:
 rule plot_scenes:
     input:
         scenes="data/scenes.npz",
+        forward_renders="data/forward_renders.npz",
     output:
         figure="figures/sample_scenes.pdf",
     script:
@@ -188,6 +233,18 @@ rule plot_dynamics:
         figure="figures/dynamics_analysis.pdf",
     script:
         "scripts/plot_dynamics.py"
+
+
+rule plot_pp:
+    input:
+        plot_data="data/pp_plot_data.npz",
+        forward_renders="data/forward_renders.npz",
+        scenes="data/scenes.npz",
+    output:
+        figure="figures/predictive_processing.pdf",
+        frames="figures/pp_frames.pdf",
+    script:
+        "scripts/plot_pp.py"
 
 
 rule plot_residual:

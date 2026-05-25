@@ -13,3 +13,17 @@ dependencies = [
     "seaborn>=0.13.2",
     "torch>=2.11.0",
 ]
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "hypothesis>=6",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "slow: integration tests that boot PyBullet (deselect with -m 'not slow')",
+]
+addopts = "-m 'not slow'"
+

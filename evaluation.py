@@ -5,6 +5,9 @@ Defines explicit pass/fail criteria for each analysis and prints
 a colored report.
 """
 
+import numpy as np
+
+
 # ANSI color codes
 GREEN = "\033[92m"
 RED = "\033[91m"
@@ -91,6 +94,24 @@ def evaluate(encoding_results, rsa_results, dissociation_results,
         f"accuracy = {ctrl:.1%}",
         "expect > 90%",
     )
+
+    if encoding_results.get('r2_predicted_pixel') is not None:
+        r2_pred = np.asarray(encoding_results['r2_predicted_pixel']).mean()
+        check(
+            "Predicted-S explains neural activity",
+            r2_pred > 0.20,
+            f"R² = {r2_pred:.4f}",
+            "expect > 0.20",
+        )
+
+    if encoding_results.get('delta_r2_pred') is not None:
+        dr2_pred = np.asarray(encoding_results['delta_r2_pred']).mean()
+        check(
+            "Physics adds negligible variance beyond predicted-S (ΔR²)",
+            dr2_pred < 0.005,
+            f"ΔR² = {dr2_pred:.6f}",
+            "expect < 0.005 — tighter than pixel baseline; predicted-S absorbs physics-correlated variance",
+        )
 
     if encoding_results.get('r2_inferred') is not None:
         dr2_inf = encoding_results['delta_r2_inferred'].mean()
@@ -232,6 +253,25 @@ def evaluate(encoding_results, rsa_results, dissociation_results,
             r2_resid_gt < 0.01,
             f"R² = {r2_resid_gt:.4f}",
             "expect < 0.01",
+        )
+
+    if residual_results is not None and residual_results.get('r2_resid_predicted_pixel') is not None:
+        r2_resid_pred_self = float(np.asarray(residual_results['r2_resid_predicted_pixel']).mean())
+        r2_resid_phys_via_pred = float(np.asarray(
+            residual_results['r2_resid_physics_gt_via_predicted_pixel']).mean())
+
+        lines.append(f"\n{BOLD}Residual Encoding — Predicted-S Stage-1{RESET}")
+        check(
+            "Sanity: predicted-S does not predict its own residual",
+            abs(r2_resid_pred_self) < 0.05,
+            f"R² = {r2_resid_pred_self:.4f}",
+            "expect |R²| < 0.05",
+        )
+        check(
+            "Predicted-S residualization removes GT-physics signal",
+            r2_resid_phys_via_pred < 0.01,
+            f"R² = {r2_resid_phys_via_pred:.4f}",
+            "expect < 0.01 — physics collapses after removing predicted-S variance",
         )
 
     # --- Dynamics (future brain state) ---

@@ -38,9 +38,15 @@ PILLAR_HEIGHT = 1.5   # total height in z
 PILLAR_Y_CENTER = -1.0
 PILLAR_Z_CENTER = 0.75
 
+# Visual-only background spheres (no collision, no physics) for extra pixel variation
+N_BACKGROUND_OBJECTS = 5
+
 
 def _create_ground(physics_client, ground_color):
-    """Infinite collision plane (physics) + solid-color visual box (render)."""
+    """Infinite collision plane (physics) + solid-color visual box (render).
+
+    Returns the visual body ID so callers can apply per-scene styling.
+    """
     ground_col = p.createCollisionShape(p.GEOM_PLANE, planeNormal=[0, 0, 1],
                                         physicsClientId=physics_client)
     p.createMultiBody(baseMass=0, baseCollisionShapeIndex=ground_col,
@@ -49,12 +55,66 @@ def _create_ground(physics_client, ground_color):
                                      rgbaColor=ground_color + [1.0],
                                      specularColor=[0, 0, 0],
                                      physicsClientId=physics_client)
-    p.createMultiBody(baseMass=0, baseCollisionShapeIndex=-1,
-                      baseVisualShapeIndex=ground_vis,
-                      basePosition=[0, 0, 0], physicsClientId=physics_client)
+    ground_body_id = p.createMultiBody(baseMass=0, baseCollisionShapeIndex=-1,
+                                       baseVisualShapeIndex=ground_vis,
+                                       basePosition=[0, 0, 0],
+                                       physicsClientId=physics_client)
+    return ground_body_id
 
 
-def _create_scene(physics_client, rng):
+def _create_background_objects(physics_client, background_objects):
+    """Instantiate visual-only static spheres from pre-sampled specs.
+
+    Returns a list of body IDs (None where radius == 0, i.e. unused slot).
+    """
+    body_ids = []
+    for obj in background_objects:
+        if obj.get('radius', 0.0) <= 0.0:
+            body_ids.append(None)
+            continue
+        specular = obj.get('specular', [0.0, 0.0, 0.0])
+        vis = p.createVisualShape(
+            p.GEOM_SPHERE,
+            radius=obj['radius'],
+            rgbaColor=obj['color'] + [1.0],
+            specularColor=specular,
+            physicsClientId=physics_client,
+        )
+        bid = p.createMultiBody(
+            baseMass=0,
+            baseCollisionShapeIndex=-1,
+            baseVisualShapeIndex=vis,
+            basePosition=[obj['x'], obj['y'], obj['z']],
+            physicsClientId=physics_client,
+        )
+        body_ids.append(bid)
+    return body_ids
+
+
+def _create_backdrop(physics_client, backdrop_color, backdrop_specular):
+    """Large visual-only backdrop wall behind the scene.
+
+    Fills the upper-background region of the camera view with a varying
+    color/specular patch — physics-irrelevant, pixel-relevant.
+    """
+    vis = p.createVisualShape(
+        p.GEOM_BOX,
+        halfExtents=[10.0, 0.05, 3.0],
+        rgbaColor=backdrop_color + [1.0],
+        specularColor=backdrop_specular,
+        physicsClientId=physics_client,
+    )
+    bid = p.createMultiBody(
+        baseMass=0,
+        baseCollisionShapeIndex=-1,
+        baseVisualShapeIndex=vis,
+        basePosition=[0.0, 1.5, 2.0],
+        physicsClientId=physics_client,
+    )
+    return bid
+
+
+def _create_scene(physics_client, rng, lighting):
     """
     Spawn ground plane + central occluding pillar + single rigid body.
 
@@ -62,21 +122,24 @@ def _create_scene(physics_client, rng):
     moves with a random x-only velocity. Depending on direction and speed,
     it may end up behind the pillar in the final frame.
 
-    Varying per scene: shape (sphere/box), color, x-velocity direction,
-    ground color.
+    Varying per scene: shape (sphere/box/cylinder), color, specular,
+    x-velocity direction, ground color (from `lighting`).
     """
     p.setGravity(0, 0, -9.81, physicsClientId=physics_client)
 
-    _create_ground(physics_client, [0.6, 0.6, 0.6])
+    ground_body_id = _create_ground(physics_client,
+                                    lighting.get('groundColor', [0.6, 0.6, 0.6]))
 
     # Central vertical pillar at x=0: VISUAL ONLY (no collision).
     # Objects pass through it freely — physics is unaffected.
     # Camera (at y=-3) cannot see objects behind it when they cross x=0.
     pillar_gray = float(rng.uniform(0.3, 0.8))
+    pillar_specular = [float(v) for v in rng.uniform(0.0, 0.5, size=3)]
     pillar_vis = p.createVisualShape(
         p.GEOM_BOX,
         halfExtents=[PILLAR_WIDTH / 2, PILLAR_DEPTH / 2, PILLAR_HEIGHT / 2],
         rgbaColor=[pillar_gray, pillar_gray, pillar_gray, 1.0],
+        specularColor=pillar_specular,
         physicsClientId=physics_client,
     )
     p.createMultiBody(
@@ -96,26 +159,46 @@ def _create_scene(physics_client, rng):
     mass = rng.uniform(0.5, 5.0)
     friction = rng.uniform(0.1, 1.0)
     color = list(rng.uniform(0.1, 1.0, size=3)) + [1.0]
+    # Per-scene specular for the foreground object: ranges from matte (0) to
+    # glossy+tinted (1); physics-irrelevant, changes highlight appearance.
+    specular = [float(v) for v in rng.uniform(0.0, 1.0, size=3)]
 
-    # Random shape: sphere or box
-    if rng.random() < 0.5:
+    # Random shape: sphere, box, or cylinder (equal probability)
+    shape_roll = rng.random()
+    if shape_roll < 1 / 3:
         radius = float(rng.uniform(0.07, 0.5))
         col_shape = p.createCollisionShape(p.GEOM_SPHERE, radius=radius,
                                            physicsClientId=physics_client)
         vis_shape = p.createVisualShape(p.GEOM_SPHERE, radius=radius,
                                         rgbaColor=color,
-                                        specularColor=[0.4, 0.4, 0.4],
+                                        specularColor=specular,
                                         physicsClientId=physics_client)
-        shape_cfg = {'shape': 'sphere', 'params': {'radius': radius}, 'color': list(color)}
-    else:
+        shape_cfg = {'shape': 'sphere', 'params': {'radius': radius},
+                     'color': list(color), 'specular': specular}
+    elif shape_roll < 2 / 3:
         half_extents = [float(v) for v in rng.uniform(0.07, 0.5, size=3)]
         col_shape = p.createCollisionShape(p.GEOM_BOX, halfExtents=half_extents,
                                            physicsClientId=physics_client)
         vis_shape = p.createVisualShape(p.GEOM_BOX, halfExtents=half_extents,
                                         rgbaColor=color,
-                                        specularColor=[0.4, 0.4, 0.4],
+                                        specularColor=specular,
                                         physicsClientId=physics_client)
-        shape_cfg = {'shape': 'box', 'params': {'half_extents': half_extents}, 'color': list(color)}
+        shape_cfg = {'shape': 'box', 'params': {'half_extents': half_extents},
+                     'color': list(color), 'specular': specular}
+    else:
+        radius = float(rng.uniform(0.07, 0.35))
+        length = float(rng.uniform(0.15, 0.6))
+        col_shape = p.createCollisionShape(p.GEOM_CYLINDER, radius=radius,
+                                           height=length,
+                                           physicsClientId=physics_client)
+        vis_shape = p.createVisualShape(p.GEOM_CYLINDER, radius=radius,
+                                        length=length,
+                                        rgbaColor=color,
+                                        specularColor=specular,
+                                        physicsClientId=physics_client)
+        shape_cfg = {'shape': 'cylinder',
+                     'params': {'radius': radius, 'length': length},
+                     'color': list(color), 'specular': specular}
 
     # Start clearly on one side of the pillar; random y depth and z height
     side = rng.choice([-1, 1])
@@ -123,7 +206,10 @@ def _create_scene(physics_client, rng):
     y = rng.uniform(-1.5, -0.5)
     z = rng.uniform(0.4, 0.8)
     pos = [x, y, z]
-    orn = p.getQuaternionFromEuler([0.0, 0.0, 0.0])
+    # Random initial orientation (varies the t=0 frame; _lock_rotation resets
+    # to identity from t=1 onward, so physics is unaffected).
+    orn_angles = [float(v) for v in rng.uniform(-np.pi, np.pi, size=3)]
+    orn = p.getQuaternionFromEuler(orn_angles)
 
     body_id = p.createMultiBody(
         baseMass=mass,
@@ -153,7 +239,7 @@ def _create_scene(physics_client, rng):
     x_accel = float(rng.uniform(-_CFG_X_ACCEL_MAX, _CFG_X_ACCEL_MAX))
     shape_configs[0]['x_accel'] = x_accel
 
-    return body_ids, masses, frictions, is_occluded, shape_configs, pillar_gray
+    return body_ids, masses, frictions, is_occluded, shape_configs, pillar_gray, ground_body_id
 
 
 def _lock_rotation(body_ids, physics_client):
@@ -228,36 +314,43 @@ def _encode_scene_config(shape_configs):
     """
     Encode scene shape configs into a fixed-length float32 vector.
 
-    Per object: shape_is_box(1), radius(1), half_extents(3), color(4) = 9 floats.
-    Unused fields zeroed (radius=0 for box, half_extents=[0,0,0] for sphere).
+    Per object:
+      shape_is_box(1), shape_is_cylinder(1), radius(1), half_extents(3),
+      color(4), specular(3) = 13 floats.
+    Unused fields zeroed (e.g. radius=0 for box, half_extents=[0,0,0] for sphere).
 
-    Note: x_accel used to live here but moved to physics_labels — it is a
-    kinematic state field (recoverable from three frames), not a render-
-    determining scene parameter.
+    Note: x_accel lives in physics_labels (recoverable from three frames),
+    not here.
     """
     vec = []
     for cfg in shape_configs:
-        if cfg['shape'] == 'box':
-            vec.append(1.0)
-            vec.append(0.0)
-            vec.extend(cfg['params']['half_extents'])
-        else:
-            vec.append(0.0)
+        shape = cfg['shape']
+        vec.append(1.0 if shape == 'box' else 0.0)
+        vec.append(1.0 if shape == 'cylinder' else 0.0)
+        if shape in ('sphere', 'cylinder'):
             vec.append(cfg['params']['radius'])
             vec.extend([0.0, 0.0, 0.0])
+        else:
+            vec.append(0.0)
+            vec.extend(cfg['params']['half_extents'])
         vec.extend(cfg['color'])
+        vec.extend(cfg.get('specular', [0.4, 0.4, 0.4]))
     return np.array(vec, dtype=np.float32)
 
 
-SCENE_CONFIG_DIM = 9  # per object
+SCENE_CONFIG_DIM = 13  # per object
 
 
 def _encode_scene_lighting(pillar_gray, lighting):
     """
-    Encode per-scene lighting and camera parameters into a fixed-length float32 vector.
+    Encode per-scene lighting, camera, ground, and background-object parameters.
 
     pillar_gray(1), lightDirection(3), lightColor(3), lightDistance(1),
-    camJitter(3), camTargetJitter(3), lightAmbientCoeff(1) = 15 floats.
+    camJitter(3), camTargetJitter(3), lightAmbientCoeff(1),
+    groundColor(3), backdropColor(3), backdropSpecular(3),
+    per background sphere: x(1), y(1), z(1), radius(1), color(3), specular(3)
+                           = 10 floats × N_BACKGROUND_OBJECTS.
+    Total = 24 + 10 * N_BACKGROUND_OBJECTS floats.
     """
     vec = [pillar_gray]
     vec.extend(lighting['lightDirection'])
@@ -266,10 +359,25 @@ def _encode_scene_lighting(pillar_gray, lighting):
     vec.extend(lighting.get('camJitter', [0.0, 0.0, 0.0]))
     vec.extend(lighting.get('camTargetJitter', [0.0, 0.0, 0.0]))
     vec.append(lighting.get('lightAmbientCoeff', 0.4))
+    vec.extend(lighting.get('groundColor', [0.6, 0.6, 0.6]))
+    vec.extend(lighting.get('backdropColor', [0.2, 0.2, 0.4]))
+    vec.extend(lighting.get('backdropSpecular', [0.0, 0.0, 0.0]))
+
+    bg_objects = lighting.get('backgroundObjects', [])
+    for i in range(N_BACKGROUND_OBJECTS):
+        if i < len(bg_objects):
+            obj = bg_objects[i]
+            vec.extend([obj['x'], obj['y'], obj['z'], obj['radius']])
+            vec.extend(obj['color'])
+            vec.extend(obj.get('specular', [0.0, 0.0, 0.0]))
+        else:
+            vec.extend([0.0] * 10)
+
     return np.array(vec, dtype=np.float32)
 
 
-SCENE_LIGHTING_DIM = 15
+# 24 base + 10 per background object
+SCENE_LIGHTING_DIM = 24 + 10 * N_BACKGROUND_OBJECTS
 
 
 def _compute_total_kinetic_energy(body_ids, masses, physics_client):
@@ -290,18 +398,43 @@ def _compute_total_kinetic_energy(body_ids, masses, physics_client):
 
 
 def _sample_lighting(rng):
-    """Sample random lighting and camera parameters for a scene."""
+    """
+    Sample random lighting, camera, ground, and background-object parameters.
+
+    Background objects are visual-only static spheres placed around the scene.
+    Their positions and colors are physics-irrelevant but create independent
+    pixel variation, increasing effective pixel-space dimensionality.
+    """
+    # Wider light-color gamut (0.4–1.0) with occasional warm/cool tints
+    light_color = [float(c) for c in rng.uniform(0.4, 1.0, size=3)]
+
+    background_objects = [
+        {
+            'x': float(rng.uniform(-3.0, 3.0)),
+            'y': float(rng.uniform(-2.5, -0.2)),
+            'z': float(rng.uniform(0.05, 0.8)),
+            'radius': float(rng.uniform(0.15, 0.65)),
+            'color': [float(c) for c in rng.uniform(0.05, 1.0, size=3)],
+            'specular': [float(v) for v in rng.uniform(0.0, 0.9, size=3)],
+        }
+        for _ in range(N_BACKGROUND_OBJECTS)
+    ]
+
     return {
-        'lightDirection': [float(rng.uniform(-2, 2)),
-                           float(rng.uniform(-2, 0)),
-                           float(rng.uniform(1, 3))],
-        'lightColor': [float(c) for c in rng.uniform(0.6, 1.0, size=3)],
-        'lightDistance': float(rng.uniform(3.0, 8.0)),
-        'camJitter': [float(v) for v in rng.uniform(-0.3, 0.3, size=3)],
-        'camTargetJitter': [float(rng.uniform(-0.15, 0.15)),
+        'lightDirection': [float(rng.uniform(-2.5, 2.5)),
+                           float(rng.uniform(-2.5, -0.5)),
+                           float(rng.uniform(0.5, 4.0))],
+        'lightColor': light_color,
+        'lightDistance': float(rng.uniform(2.5, 10.0)),
+        'camJitter': [float(v) for v in rng.uniform(-0.35, 0.35, size=3)],
+        'camTargetJitter': [float(rng.uniform(-0.2, 0.2)),
                             0.0,
-                            float(rng.uniform(-0.1, 0.1))],
-        'lightAmbientCoeff': float(rng.uniform(0.2, 0.6)),
+                            float(rng.uniform(-0.15, 0.15))],
+        'lightAmbientCoeff': float(rng.uniform(0.1, 0.7)),
+        'groundColor': [float(c) for c in rng.uniform(0.10, 0.90, size=3)],
+        'backdropColor': [float(c) for c in rng.uniform(0.05, 0.95, size=3)],
+        'backdropSpecular': [float(v) for v in rng.uniform(0.0, 0.4, size=3)],
+        'backgroundObjects': background_objects,
     }
 
 
@@ -312,6 +445,14 @@ _DEFAULT_LIGHTING = {
     'camJitter': [0.0, 0.0, 0.0],
     'camTargetJitter': [0.0, 0.0, 0.0],
     'lightAmbientCoeff': 0.4,
+    'groundColor': [0.6, 0.6, 0.6],
+    'backdropColor': [0.2, 0.2, 0.4],
+    'backdropSpecular': [0.0, 0.0, 0.0],
+    'backgroundObjects': [
+        {'x': 0.0, 'y': -1.0, 'z': 0.0, 'radius': 0.0,
+         'color': [0.0, 0.0, 0.0], 'specular': [0.0, 0.0, 0.0]}
+        for _ in range(N_BACKGROUND_OBJECTS)
+    ],
 }
 
 
@@ -433,6 +574,11 @@ def resimulate_scene(shape_configs, initial_physics_row, *,
         physicsClientId=pc,
     )
 
+    _create_background_objects(pc, _bg.get('backgroundObjects', []))
+    _create_backdrop(pc,
+                     _bg.get('backdropColor', [0.2, 0.2, 0.4]),
+                     _bg.get('backdropSpecular', [0.0, 0.0, 0.0]))
+
     body_ids = []
     masses_list = []
     frictions_list = []
@@ -447,6 +593,7 @@ def resimulate_scene(shape_configs, initial_physics_row, *,
         # off + 15 is x_accel (the per-scene applied acceleration), read from
         # the cfg dict below for consistency with how _create_scene applies it.
         color = cfg['color']
+        specular = cfg.get('specular', [0.4, 0.4, 0.4])
 
         if cfg['shape'] == 'sphere':
             col = p.createCollisionShape(p.GEOM_SPHERE,
@@ -455,7 +602,18 @@ def resimulate_scene(shape_configs, initial_physics_row, *,
             vis = p.createVisualShape(p.GEOM_SPHERE,
                                       radius=cfg['params']['radius'],
                                       rgbaColor=color,
-                                      specularColor=[0.4, 0.4, 0.4],
+                                      specularColor=specular,
+                                      physicsClientId=pc)
+        elif cfg['shape'] == 'cylinder':
+            col = p.createCollisionShape(p.GEOM_CYLINDER,
+                                         radius=cfg['params']['radius'],
+                                         height=cfg['params']['length'],
+                                         physicsClientId=pc)
+            vis = p.createVisualShape(p.GEOM_CYLINDER,
+                                      radius=cfg['params']['radius'],
+                                      length=cfg['params']['length'],
+                                      rgbaColor=color,
+                                      specularColor=specular,
                                       physicsClientId=pc)
         else:
             col = p.createCollisionShape(p.GEOM_BOX,
@@ -464,7 +622,7 @@ def resimulate_scene(shape_configs, initial_physics_row, *,
             vis = p.createVisualShape(p.GEOM_BOX,
                                       halfExtents=cfg['params']['half_extents'],
                                       rgbaColor=color,
-                                      specularColor=[0.4, 0.4, 0.4],
+                                      specularColor=specular,
                                       physicsClientId=pc)
 
         body_id = p.createMultiBody(
@@ -648,13 +806,21 @@ def generate_scenes(n_scenes, seed, *, n_timesteps=None, use_gui=False):
             scene_seed = rng.integers(0, 2**31)
             scene_rng = np.random.default_rng(scene_seed)
 
-            body_ids, masses, frictions, is_occluded, shape_configs, pillar_gray = _create_scene(pc, scene_rng)
+            # Sample lighting first so _create_scene can use groundColor.
+            lighting = _sample_lighting(scene_rng)
+            all_lightings.append(lighting)
+
+            (body_ids, masses, frictions, is_occluded, shape_configs,
+             pillar_gray, _ground_body_id) = _create_scene(pc, scene_rng, lighting)
             all_scene_configs.append(shape_configs)
             all_pillar_grays.append(pillar_gray)
 
-            # Sample lighting once per scene (consistent across all frames)
-            lighting = _sample_lighting(scene_rng)
-            all_lightings.append(lighting)
+            _create_background_objects(pc, lighting.get('backgroundObjects', []))
+            _create_backdrop(
+                pc,
+                lighting.get('backdropColor', [0.2, 0.2, 0.4]),
+                lighting.get('backdropSpecular', [0.0, 0.0, 0.0]),
+            )
 
             _rnd = lambda: _render_scene(pc, lighting=lighting, use_opengl=use_gui)
 

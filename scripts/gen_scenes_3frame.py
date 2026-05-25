@@ -67,7 +67,7 @@ def generate_3frame_scenes(n_scenes, seed, n_timesteps, t_mid, t_late, fov):
     depth_count = IMAGE_SIZE * IMAGE_SIZE * 4
     seg_count = IMAGE_SIZE * IMAGE_SIZE * 4
     render_total = rgba_count + depth_count + seg_count
-    physics_dim = 15 * N_OBJECTS
+    physics_dim = 16 * N_OBJECTS
     config_dim = SCENE_CONFIG_DIM * N_OBJECTS
     D = render_total + physics_dim + config_dim + SCENE_LIGHTING_DIM
 
@@ -88,13 +88,18 @@ def generate_3frame_scenes(n_scenes, seed, n_timesteps, t_mid, t_late, fov):
         scene_seed = rng.integers(0, 2**31)
         scene_rng = np.random.default_rng(scene_seed)
 
-        body_ids, masses, frictions, _, shape_configs, pillar_gray = _create_scene(pc, scene_rng)
-        all_scene_configs.append(shape_configs)
-        all_pillar_grays.append(pillar_gray)
         lighting = _sample_lighting(scene_rng)
         all_lightings.append(lighting)
 
-        initial_physics_labels[i] = _collect_physics_labels(body_ids, masses, frictions, pc)
+        (body_ids, masses, frictions, _, shape_configs,
+         pillar_gray, _ground_body_id) = _create_scene(pc, scene_rng, lighting)
+        all_scene_configs.append(shape_configs)
+        all_pillar_grays.append(pillar_gray)
+
+        applied_accels = [cfg.get('x_accel', 0.0) for cfg in shape_configs]
+        initial_physics_labels[i] = _collect_physics_labels(
+            body_ids, masses, frictions, pc, applied_accels=applied_accels,
+        )
         init_rgba, _, _ = _render_with_fov(pc, lighting, fov)
         initial_renders[i] = np.frombuffer(init_rgba, dtype=np.uint8).astype(np.float32)
 
@@ -114,7 +119,9 @@ def generate_3frame_scenes(n_scenes, seed, n_timesteps, t_mid, t_late, fov):
                 late_rgba, _, _ = _render_with_fov(pc, lighting, fov)
                 late_renders[i] = np.frombuffer(late_rgba, dtype=np.uint8).astype(np.float32)
 
-        physics_labels[i] = _collect_physics_labels(body_ids, masses, frictions, pc)
+        physics_labels[i] = _collect_physics_labels(
+            body_ids, masses, frictions, pc, applied_accels=applied_accels,
+        )
         kinetic_energies[i] = _compute_total_kinetic_energy(body_ids, masses, pc)
 
         rgba_bytes, depth_bytes, seg_bytes = _render_with_fov(pc, lighting, fov)
