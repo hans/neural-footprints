@@ -860,8 +860,7 @@ def run_predictive_processing_analysis(neural_activity, scenes,
     inferred_physics_all array (for downstream encoding/RSA), and
     plot_data with arrays needed by scripts/plot_pp.py.
     """
-    from scene_generator import resimulate_scene, open_render_client
-    import pybullet as p
+    from scene_generator import resimulate_scene
 
     if pixel_pca_dim is None:
         pixel_pca_dim = _CFG_PP_PIXEL_PCA_DIM
@@ -952,40 +951,34 @@ def run_predictive_processing_analysis(neural_activity, scenes,
     # Same pattern as dissociation.py / dynamics.py — share one client across all
     # resim calls in this analysis.
     print(f"\nComputing oracle R² ({n_oracle} test scenes)...")
-    resim_pc = open_render_client(use_gui=True)
-    try:
-        oracle_preds = np.stack([
-            resimulate_scene(scene_configs[i], initial_physics[i],
-                             pillar_gray=pillar_grays[i],
-                             lighting=lightings[i],
-                             use_gui=True, physics_client=resim_pc).reshape(-1).astype(np.float32)
-            for i in oracle_test_idx
-        ])
-        oracle_actual = final_pixels_raw[oracle_test_idx].astype(np.float32)
-        oracle_r2 = _pixel_r2(oracle_preds, oracle_actual)
-        print(f"  Oracle R²: {oracle_r2:.4f}")
+    oracle_preds = np.stack([
+        resimulate_scene(scene_configs[i], initial_physics[i],
+                         pillar_gray=pillar_grays[i],
+                         lighting=lightings[i]).reshape(-1).astype(np.float32)
+        for i in oracle_test_idx
+    ])
+    oracle_actual = final_pixels_raw[oracle_test_idx].astype(np.float32)
+    oracle_r2 = _pixel_r2(oracle_preds, oracle_actual)
+    print(f"  Oracle R²: {oracle_r2:.4f}")
 
-        # --- 7. PP chain (InverseModel mean → PyBullet) ---
-        # Inferred physics supplies observable dims; non-observable dims (mass,
-        # friction, orientation, ang_vel) are pulled from ground truth since
-        # they cannot be recovered from pixels.
-        print(f"\nComputing PP chain R² ({n_oracle} test scenes, MC ensemble mean)...")
-        mc_samples = inv_model.predict_stochastic(inv_input[oracle_test_idx], n_samples=20)
-        inferred_mean_oracle = mc_samples.mean(axis=0)
-        non_observable = ~inv_model.valid_dims_
-        for j in range(n_oracle):
-            gt = initial_physics[oracle_test_idx[j]]
-            inferred_mean_oracle[j, non_observable] = gt[non_observable]
-        pp_preds = np.stack([
-            resimulate_scene(scene_configs[oracle_test_idx[j]], inferred_mean_oracle[j],
-                             pillar_gray=pillar_grays[oracle_test_idx[j]],
-                             lighting=lightings[oracle_test_idx[j]],
-                             use_gui=True, physics_client=resim_pc).reshape(-1).astype(np.float32)
-            for j in range(n_oracle)
-        ])
-        pp_r2 = _pixel_r2(pp_preds, oracle_actual)
-    finally:
-        p.disconnect(resim_pc)
+    # --- 7. PP chain (InverseModel mean → MuJoCo) ---
+    # Inferred physics supplies observable dims; non-observable dims (mass,
+    # friction, orientation, ang_vel) are pulled from ground truth since
+    # they cannot be recovered from pixels.
+    print(f"\nComputing PP chain R² ({n_oracle} test scenes, MC ensemble mean)...")
+    mc_samples = inv_model.predict_stochastic(inv_input[oracle_test_idx], n_samples=20)
+    inferred_mean_oracle = mc_samples.mean(axis=0)
+    non_observable = ~inv_model.valid_dims_
+    for j in range(n_oracle):
+        gt = initial_physics[oracle_test_idx[j]]
+        inferred_mean_oracle[j, non_observable] = gt[non_observable]
+    pp_preds = np.stack([
+        resimulate_scene(scene_configs[oracle_test_idx[j]], inferred_mean_oracle[j],
+                         pillar_gray=pillar_grays[oracle_test_idx[j]],
+                         lighting=lightings[oracle_test_idx[j]]).reshape(-1).astype(np.float32)
+        for j in range(n_oracle)
+    ])
+    pp_r2 = _pixel_r2(pp_preds, oracle_actual)
     print(f"  PP chain R²: {pp_r2:.4f}  (gap from oracle: {oracle_r2 - pp_r2:.4f})")
 
     # --- 8. Render-only R² (same oracle scenes, fair comparison) ---
@@ -1021,17 +1014,12 @@ def run_predictive_processing_analysis(neural_activity, scenes,
     frame_stochastic = inv_model.predict_stochastic(
         inv_input[frame_idx], n_samples=1
     )[0]
-    viz_pc = open_render_client(use_gui=True)
-    try:
-        pp_frame_imgs = np.stack([
-            resimulate_scene(scene_configs[frame_idx[j]], frame_stochastic[j],
-                             pillar_gray=pillar_grays[frame_idx[j]],
-                             lighting=lightings[frame_idx[j]],
-                             use_gui=True, physics_client=viz_pc)
-            for j in range(n_frame_samples)
-        ])
-    finally:
-        p.disconnect(viz_pc)
+    pp_frame_imgs = np.stack([
+        resimulate_scene(scene_configs[frame_idx[j]], frame_stochastic[j],
+                         pillar_gray=pillar_grays[frame_idx[j]],
+                         lighting=lightings[frame_idx[j]])
+        for j in range(n_frame_samples)
+    ])
     _rgba_s = scenes['metadata']['target_pixel_indices']  # RGBA slice within per-frame render vecs
     init_frame_imgs = initial_renders[frame_idx][:, _rgba_s].astype(np.uint8).reshape(
         n_frame_samples, IMAGE_SIZE, IMAGE_SIZE, 4)

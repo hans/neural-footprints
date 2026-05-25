@@ -66,8 +66,7 @@ def run_dynamics_analysis(neural_activity, scenes, neural_meta,
     print("SIMULATION 4: Future Brain State Prediction")
     print("=" * 60)
 
-    from scene_generator import resimulate_scene, open_render_client
-    import pybullet as p
+    from scene_generator import resimulate_scene
 
     program_states = scenes['program_states']
     initial_physics_labels = scenes['initial_physics_labels']
@@ -89,21 +88,15 @@ def run_dynamics_analysis(neural_activity, scenes, neural_meta,
     # ------------------------------------------------------------------
     print("\nPhysics forward model: resimulating scenes from initial state...")
     resim_program_states = np.zeros_like(program_states)
-    pc = open_render_client(use_gui=True)
-    try:
-        for i in range(n_scenes):
-            if (i + 1) % 100 == 0 or i == 0:
-                print(f"  Resimulating scene {i+1}/{n_scenes}...")
-            resim_program_states[i] = resimulate_scene(
-                scene_configs[i], initial_physics_labels[i],
-                return_program_state=True,
-                pillar_gray=pillar_grays[i],
-                lighting=lightings[i],
-                use_gui=True,
-                physics_client=pc,
-            )
-    finally:
-        p.disconnect(pc)
+    for i in range(n_scenes):
+        if (i + 1) % 100 == 0 or i == 0:
+            print(f"  Resimulating scene {i+1}/{n_scenes}...")
+        resim_program_states[i] = resimulate_scene(
+            scene_configs[i], initial_physics_labels[i],
+            return_program_state=True,
+            pillar_gray=pillar_grays[i],
+            lighting=lightings[i],
+        )
 
     pixel_data = extract_brain_pixels(program_states, metadata)
     resim_pixels = extract_brain_pixels(resim_program_states, metadata)
@@ -136,21 +129,15 @@ def run_dynamics_analysis(neural_activity, scenes, neural_meta,
     if inferred_physics is not None:
         print("\nInferred-physics forward model: resimulating from PP estimates...")
         resim_inferred_states = np.zeros_like(program_states)
-        pc_inf = open_render_client(use_gui=True)
-        try:
-            for i in range(n_scenes):
-                if (i + 1) % 100 == 0 or i == 0:
-                    print(f"  Resimulating scene {i+1}/{n_scenes}...")
-                resim_inferred_states[i] = resimulate_scene(
-                    scene_configs[i], inferred_physics[i],
-                    return_program_state=True,
-                    pillar_gray=pillar_grays[i],
-                    lighting=lightings[i],
-                    use_gui=True,
-                    physics_client=pc_inf,
-                )
-        finally:
-            p.disconnect(pc_inf)
+        for i in range(n_scenes):
+            if (i + 1) % 100 == 0 or i == 0:
+                print(f"  Resimulating scene {i+1}/{n_scenes}...")
+            resim_inferred_states[i] = resimulate_scene(
+                scene_configs[i], inferred_physics[i],
+                return_program_state=True,
+                pillar_gray=pillar_grays[i],
+                lighting=lightings[i],
+            )
         resim_inferred_pixels = extract_brain_pixels(resim_inferred_states, metadata)
 
         print("  Cross-validating encoder on inferred-resimulated pixels (5-fold)...")
