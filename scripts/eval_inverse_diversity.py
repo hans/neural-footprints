@@ -33,7 +33,9 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 
 from config import IMAGE_SIZE
-from models import SpatialSoftmaxV2, SpatialSoftmaxTemporalDelta, build_frame_stack
+from models import (SpatialSoftmaxV2, SpatialSoftmaxTemporalDelta,
+                    SpatialSoftmaxDepthGated, SpatialSoftmaxDepthGatedTemporalDelta,
+                    build_frame_stack)
 from scripts.eval_pp import PHYSICS_LABELS, load_scenes_any
 from scripts.eval_pp_cnn_simple import compute_valid_dims, train_one
 from scripts.load_config import load_config
@@ -177,6 +179,24 @@ SWEEP_CONFIGS = {
         'kwargs': dict(n_filters=128, learned_temp=True, hidden_dim=256,
                        head_depth=3, dropout_rate=0.05),
     },
+    'depth_gated': {
+        'model_cls': 'SpatialSoftmaxDepthGated',
+        'n_channels': 5,
+        'kwargs': dict(n_filters=128, learned_temp=True, hidden_dim=256,
+                       head_depth=3, dropout_rate=0.05, depth_gamma_init=2.0),
+    },
+    'depth_gated_strong': {
+        'model_cls': 'SpatialSoftmaxDepthGated',
+        'n_channels': 5,
+        'kwargs': dict(n_filters=256, learned_temp=True, hidden_dim=256,
+                       head_depth=3, dropout_rate=0.05, depth_gamma_init=4.0),
+    },
+    'depth_gated_temporal': {
+        'model_cls': 'SpatialSoftmaxDepthGatedTemporalDelta',
+        'n_channels': 5,
+        'kwargs': dict(n_filters=128, learned_temp=True, hidden_dim=256,
+                       head_depth=3, dropout_rate=0.05, depth_gamma_init=2.0),
+    },
 }
 
 
@@ -301,12 +321,16 @@ def main():
 
         torch.manual_seed(args.seed)
 
-        if model_cls_name == 'SpatialSoftmaxV2':
-            model_cls = SpatialSoftmaxV2
-        elif model_cls_name == 'SpatialSoftmaxTemporalDelta':
-            model_cls = SpatialSoftmaxTemporalDelta
-        else:
-            raise ValueError(f"unknown model_cls: {model_cls_name}")
+        _MODEL_REGISTRY = {
+            'SpatialSoftmaxV2': SpatialSoftmaxV2,
+            'SpatialSoftmaxTemporalDelta': SpatialSoftmaxTemporalDelta,
+            'SpatialSoftmaxDepthGated': SpatialSoftmaxDepthGated,
+            'SpatialSoftmaxDepthGatedTemporalDelta': SpatialSoftmaxDepthGatedTemporalDelta,
+        }
+        if model_cls_name not in _MODEL_REGISTRY:
+            raise ValueError(f"unknown model_cls: {model_cls_name}; "
+                             f"available: {sorted(_MODEL_REGISTRY)}")
+        model_cls = _MODEL_REGISTRY[model_cls_name]
 
         net = model_cls(
             n_frames=3, n_channels=n_channels, image_size=IMAGE_SIZE,

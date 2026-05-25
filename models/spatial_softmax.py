@@ -175,6 +175,82 @@ class SpatialSoftmaxV2(nn.Module):
         return out, {'h1': h_acts[0], 'h2': h_acts[1], 'h3': h_acts[2]}
 
 
+class SpatialSoftmaxDepthGated(SpatialSoftmaxV2):
+    """SpatialSoftmaxV2 with learned depth-gating to suppress background keypoints.
+
+    The conv tower sees only RGBA (4 channels). A learnable gate weights each
+    spatial position by exp(-γ · depth), so foreground (depth≈0) is preserved
+    and background (depth≈1) is suppressed before the softmax.
+
+    n_channels must be 5 (RGBA + depth); depth_gamma is learned in log-space
+    so γ stays positive without clamping.
+    """
+
+    def __init__(self, n_frames, n_channels, image_size, output_dim, *,
+                 depth_gamma_init=2.0, **kwargs):
+        if n_channels != 5:
+            raise ValueError(f"SpatialSoftmaxDepthGated requires n_channels=5, got {n_channels}")
+        super().__init__(n_frames, 4, image_size, output_dim, **kwargs)
+        self.depth_gamma = nn.Parameter(torch.log(torch.tensor(float(depth_gamma_init))))
+
+    def _prepare_inputs(self, x):
+        """Split (B,F,5,H,W) into RGBA (B*F,4,H,W) and depth_flat (B*F,1,H'*W')."""
+        B, F_, _, H, W = x.shape
+        x_rgba = x[:, :, :4].reshape(B * F_, 4, H, W)
+        x_depth = x[:, :, 4:5].reshape(B * F_, 1, H, W)
+        sm_h, sm_w = H // 4, W // 4
+        depth_down = F.adaptive_avg_pool2d(x_depth, (sm_h, sm_w))   # (B*F, 1, H', W')
+        depth_flat = depth_down.reshape(B * F_, 1, sm_h * sm_w)
+        return x_rgba, depth_flat, B, F_
+
+    def _keypoint_features(self, x_rgba, depth_flat, B):
+        """Depth-gated keypoint extraction.
+
+        x_rgba: (B*F, 4, H, W)
+        depth_flat: (B*F, 1, H'*W')
+        Returns: (B, feat_dim)
+        """
+        feats = self.conv(x_rgba)                                    # (B*F, K, H', W')
+        K, Hs, Ws = feats.shape[1], feats.shape[2], feats.shape[3]
+        flat = feats.reshape(feats.shape[0], K, Hs * Ws)
+
+        beta = self.log_beta.exp()
+        gate = torch.exp(-self.depth_gamma.exp() * depth_flat)       # (B*F, 1, H'*W')
+        scaled = flat * (beta.reshape(1, K, 1) if beta.numel() > 1 else beta) * gate
+        attn = F.softmax(scaled, dim=-1)                             # (B*F, K, H'*W')
+
+        ex = (attn * self.grid_x).sum(dim=-1)
+        ey = (attn * self.grid_y).sum(dim=-1)
+        if self.include_variance:
+            ex2 = (attn * self.grid_x.pow(2)).sum(dim=-1)
+            ey2 = (attn * self.grid_y.pow(2)).sum(dim=-1)
+            coords = torch.stack([ex, ey, ex2, ey2], dim=-1)
+        else:
+            coords = torch.stack([ex, ey], dim=-1)
+        return coords.reshape(B, -1)
+
+    def forward(self, x):
+        x_rgba, depth_flat, B, _ = self._prepare_inputs(x)
+        h = self._keypoint_features(x_rgba, depth_flat, B)
+        for block, drop in zip(self.head_hidden, self.head_dropouts):
+            h = drop(block(h))
+        return self.head_out(h)
+
+    def forward_with_activations(self, x):
+        x_rgba, depth_flat, B, _ = self._prepare_inputs(x)
+        h1 = self._keypoint_features(x_rgba, depth_flat, B)
+        h_acts = [h1]
+        h = h1
+        for block, drop in zip(self.head_hidden, self.head_dropouts):
+            h = block(h)
+            h_acts.append(h)
+            h = drop(h)
+        out = self.head_out(h)
+        while len(h_acts) < 3:
+            h_acts.append(h_acts[-1])
+        return out, {'h1': h_acts[0], 'h2': h_acts[1], 'h3': h_acts[2]}
+
+
 class SpatialSoftmaxTemporalDelta(SpatialSoftmaxV2):
     """SpatialSoftmaxV2 with temporal keypoint-delta augmentation.
 
@@ -240,6 +316,79 @@ class SpatialSoftmaxTemporalDelta(SpatialSoftmaxV2):
         h1 is the augmented flat keypoint + delta feature vector.
         """
         h1 = self._augmented_features(x)
+        h_acts = [h1]
+        h = h1
+        for block, drop in zip(self.head_hidden, self.head_dropouts):
+            h = block(h)
+            h_acts.append(h)
+            h = drop(h)
+        out = self.head_out(h)
+        while len(h_acts) < 3:
+            h_acts.append(h_acts[-1])
+        return out, {'h1': h_acts[0], 'h2': h_acts[1], 'h3': h_acts[2]}
+
+
+class SpatialSoftmaxDepthGatedTemporalDelta(SpatialSoftmaxTemporalDelta):
+    """SpatialSoftmaxTemporalDelta with depth-gating.
+
+    Combines per-frame depth-gated keypoint extraction (from SpatialSoftmaxDepthGated)
+    with keypoint-velocity delta augmentation (from SpatialSoftmaxTemporalDelta).
+    n_channels must be 5 (RGBA + depth).
+    """
+
+    def __init__(self, n_frames, n_channels, image_size, output_dim, *,
+                 depth_gamma_init=2.0, **kwargs):
+        if n_channels != 5:
+            raise ValueError(
+                f"SpatialSoftmaxDepthGatedTemporalDelta requires n_channels=5, got {n_channels}")
+        super().__init__(n_frames, 4, image_size, output_dim, **kwargs)
+        self.depth_gamma = nn.Parameter(torch.log(torch.tensor(float(depth_gamma_init))))
+
+    def _prepare_inputs(self, x):
+        B, F_, _, H, W = x.shape
+        x_rgba = x[:, :, :4].reshape(B * F_, 4, H, W)
+        x_depth = x[:, :, 4:5].reshape(B * F_, 1, H, W)
+        sm_h, sm_w = H // 4, W // 4
+        depth_down = F.adaptive_avg_pool2d(x_depth, (sm_h, sm_w))
+        depth_flat = depth_down.reshape(B * F_, 1, sm_h * sm_w)
+        return x_rgba, depth_flat, B, F_
+
+    def _depth_gated_coords_per_frame(self, x_rgba, depth_flat, B, F_):
+        """Depth-gated per-frame keypoint coords: (B, F, K*per_channel_feats)."""
+        feats = self.conv(x_rgba)
+        K, Hs, Ws = feats.shape[1], feats.shape[2], feats.shape[3]
+        flat = feats.reshape(B * F_, K, Hs * Ws)
+
+        beta = self.log_beta.exp()
+        gate = torch.exp(-self.depth_gamma.exp() * depth_flat)
+        scaled = flat * (beta.reshape(1, K, 1) if beta.numel() > 1 else beta) * gate
+        attn = F.softmax(scaled, dim=-1)
+
+        ex = (attn * self.grid_x).sum(dim=-1)
+        ey = (attn * self.grid_y).sum(dim=-1)
+        if self.include_variance:
+            ex2 = (attn * self.grid_x.pow(2)).sum(dim=-1)
+            ey2 = (attn * self.grid_y.pow(2)).sum(dim=-1)
+            coords = torch.stack([ex, ey, ex2, ey2], dim=-1)
+        else:
+            coords = torch.stack([ex, ey], dim=-1)
+        per_channel_feats = coords.shape[-1]
+        return coords.reshape(B, F_, K * per_channel_feats)
+
+    def forward(self, x):
+        x_rgba, depth_flat, B, F_ = self._prepare_inputs(x)
+        coords = self._depth_gated_coords_per_frame(x_rgba, depth_flat, B, F_)
+        deltas = coords[:, 1:] - coords[:, :-1]
+        h = torch.cat([coords, deltas], dim=1).reshape(B, -1)
+        for block, drop in zip(self.head_hidden, self.head_dropouts):
+            h = drop(block(h))
+        return self.head_out(h)
+
+    def forward_with_activations(self, x):
+        x_rgba, depth_flat, B, F_ = self._prepare_inputs(x)
+        coords = self._depth_gated_coords_per_frame(x_rgba, depth_flat, B, F_)
+        deltas = coords[:, 1:] - coords[:, :-1]
+        h1 = torch.cat([coords, deltas], dim=1).reshape(B, -1)
         h_acts = [h1]
         h = h1
         for block, drop in zip(self.head_hidden, self.head_dropouts):
