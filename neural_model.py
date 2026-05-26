@@ -11,8 +11,9 @@ import numpy as np
 from config import N_NEURONS as _CFG_N_NEURONS, NOISE_LEVEL as _CFG_NOISE_LEVEL
 
 
-def generate_neural_activity(program_states, seed, *, n_neurons=None, noise_level=None,
-                              block_sizes=None):
+def generate_neural_activity(
+    program_states, seed, *, n_neurons=None, noise_level=None, block_sizes=None
+):
     """
     Generate neural activity from raw program states via random linear projection.
 
@@ -55,7 +56,7 @@ def generate_neural_activity(program_states, seed, *, n_neurons=None, noise_leve
     block_norms = []
     start = 0
     for size in block_sizes:
-        block = centered[:, start:start + size]
+        block = centered[:, start : start + size]
         if size == 0:
             sigma = 1.0
         elif min(block.shape) <= 1:
@@ -71,7 +72,7 @@ def generate_neural_activity(program_states, seed, *, n_neurons=None, noise_leve
             if sigma == 0.0:
                 sigma = 1.0
         block_norms.append(sigma)
-        centered[:, start:start + size] /= sigma
+        centered[:, start : start + size] /= sigma
         start += size
 
     normalized = centered  # normalized in-place; alias for clarity below
@@ -93,46 +94,55 @@ def generate_neural_activity(program_states, seed, *, n_neurons=None, noise_leve
     total_var = var_per_dim.sum()
 
     metadata = {
-        'W': W,
-        'means': means,
-        'block_norms': np.array(block_norms),
-        'signal_std': signal_std,
-        'var_per_dim': var_per_dim,
-        'total_var': total_var,
+        "W": W,
+        "means": means,
+        "block_norms": np.array(block_norms),
+        "signal_std": signal_std,
+        "var_per_dim": var_per_dim,
+        "total_var": total_var,
     }
 
     return neural_activity, metadata
 
 
-def print_variance_diagnostic(scene_metadata, neural_metadata, block_sizes, block_names=None):
+def print_variance_diagnostic(
+    scene_metadata, neural_metadata, block_sizes, block_names=None
+):
     """
     Print the key diagnostic: how much variance comes from render vs physics slices.
 
     This ratio is NOT set by a parameter — it is printed as a finding.
     """
-    D_render = scene_metadata['D_render_bytes']
-    D_physics = (scene_metadata['D_physics_labels'] + scene_metadata['D_scene_config']
-                 + scene_metadata.get('D_scene_lighting', 0))
+    D_render = scene_metadata["D_render_bytes"]
+    D_physics = (
+        scene_metadata["D_physics_labels"]
+        + scene_metadata["D_scene_config"]
+        + scene_metadata.get("D_scene_lighting", 0)
+    )
 
-    var_per_dim = neural_metadata['var_per_dim']
-    block_norms = neural_metadata['block_norms']
+    var_per_dim = neural_metadata["var_per_dim"]
+    block_norms = neural_metadata["block_norms"]
 
     render_var = var_per_dim[:D_render].sum()
     physics_var = var_per_dim[D_render:].sum()
-    total_var = neural_metadata['total_var']
+    total_var = neural_metadata["total_var"]
 
     render_frac = render_var / total_var * 100
     physics_frac = physics_var / total_var * 100
     ratio = D_render / D_physics
 
     if block_names is None:
-        block_names = [f'block_{i}' for i in range(len(block_sizes))]
-    norm_strs = '  '.join(f'{name}={norm:.3g}' for name, norm in zip(block_names, block_norms))
+        block_names = [f"block_{i}" for i in range(len(block_sizes))]
+    norm_strs = "  ".join(
+        f"{name}={norm:.3g}" for name, norm in zip(block_names, block_norms)
+    )
 
     print("\n" + "=" * 60)
     print("VARIANCE DIAGNOSTIC (key result)")
     print("=" * 60)
-    print(f"Program state: D_render={D_render}, D_physics={D_physics}, ratio={ratio:.1f}x")
+    print(
+        f"Program state: D_render={D_render}, D_physics={D_physics}, ratio={ratio:.1f}x"
+    )
     print(f"Block operator norms: {norm_strs}")
     print(f"Variance fraction from render slice:  {render_frac:.1f}%")
     print(f"Variance fraction from physics slice: {physics_frac:.1f}%")

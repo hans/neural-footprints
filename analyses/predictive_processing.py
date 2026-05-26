@@ -41,9 +41,13 @@ from config import (
     PP_DROPOUT_RATE as _CFG_PP_DROPOUT_RATE,
 )
 from models import (
-    InverseMLPNet, InverseCNNNet, SpatialSoftmaxV2, build_frame_stack,
+    InverseMLPNet,
+    InverseCNNNet,
+    SpatialSoftmaxV2,
+    SpatialSoftmaxDepthGatedTemporalDelta,
+    build_frame_stack,
+    build_frame_stack_with_depth,
 )
-
 
 # ---------------------------------------------------------------------------
 # Neural R² helper (RidgeCV per neuron, cross-validated)
@@ -87,6 +91,7 @@ def _mean_neural_r2(features, neural_activity):
 # ---------------------------------------------------------------------------
 # InverseModel (MLP backbone)
 # ---------------------------------------------------------------------------
+
 
 class InverseModel:
     """
@@ -135,11 +140,15 @@ class InverseModel:
     the pp_r2 GT-fill loop.
     """
 
-    def __init__(self, pixel_pca_dim=None, hidden_dim=None, dropout_rate=None, device=None):
-        self.pixel_pca_dim = pixel_pca_dim if pixel_pca_dim is not None else _CFG_PP_PIXEL_PCA_DIM
+    def __init__(
+        self, pixel_pca_dim=None, hidden_dim=None, dropout_rate=None, device=None
+    ):
+        self.pixel_pca_dim = (
+            pixel_pca_dim if pixel_pca_dim is not None else _CFG_PP_PIXEL_PCA_DIM
+        )
         self.hidden_dim = hidden_dim
         self.dropout_rate = dropout_rate
-        self.device = device if device is not None else torch.device('cpu')
+        self.device = device if device is not None else torch.device("cpu")
         self.net_ = None
         self.input_scaler_ = None
         self.phys_scaler_ = None
@@ -150,10 +159,20 @@ class InverseModel:
 
     def prepare_input(self, scenes):
         """Three-frame whitened pixel-PCA concatenation — the InverseModel input."""
-        return build_pp_features(scenes, pixel_pca_dim=self.pixel_pca_dim)['pixel_pca_concat']
+        return build_pp_features(scenes, pixel_pca_dim=self.pixel_pca_dim)[
+            "pixel_pca_concat"
+        ]
 
-    def fit(self, pixel_pca_two_frame, physics_labels,
-            n_epochs=300, batch_size=64, lr=1e-3, val_frac=0.15, patience=50):
+    def fit(
+        self,
+        pixel_pca_two_frame,
+        physics_labels,
+        n_epochs=300,
+        batch_size=64,
+        lr=1e-3,
+        val_frac=0.15,
+        patience=50,
+    ):
         self.full_physics_dim_ = physics_labels.shape[1]
 
         # Stride of 16 per object: pos(0:3), orn(3:7), lin_vel(7:10),
@@ -177,8 +196,10 @@ class InverseModel:
         self.const_values_ = physics_labels.mean(axis=0)
         n_valid = self.valid_dims_.sum()
         n_observable = observable_mask.sum()
-        print(f"    InverseModel: {n_valid}/{n_observable} observable physics dims have variance "
-              f"({self.full_physics_dim_} total)")
+        print(
+            f"    InverseModel: {n_valid}/{n_observable} observable physics dims have variance "
+            f"({self.full_physics_dim_} total)"
+        )
 
         physics_valid = physics_labels[:, self.valid_dims_]
 
@@ -194,8 +215,10 @@ class InverseModel:
         input_dim = X.shape[1]
         output_dim = y.shape[1]
         self.net_ = InverseMLPNet(
-            input_dim, output_dim,
-            hidden_dim=self.hidden_dim, dropout_rate=self.dropout_rate,
+            input_dim,
+            output_dim,
+            hidden_dim=self.hidden_dim,
+            dropout_rate=self.dropout_rate,
         ).to(self.device)
 
         optimizer = torch.optim.Adam(self.net_.parameters(), lr=lr)
@@ -209,9 +232,11 @@ class InverseModel:
         X_val_t = torch.tensor(X_val, dtype=torch.float32, device=self.device)
         y_val_t = torch.tensor(y_val, dtype=torch.float32, device=self.device)
 
-        loader = DataLoader(TensorDataset(X_tr_t, y_tr_t), batch_size=batch_size, shuffle=True)
+        loader = DataLoader(
+            TensorDataset(X_tr_t, y_tr_t), batch_size=batch_size, shuffle=True
+        )
 
-        best_val_loss = float('inf')
+        best_val_loss = float("inf")
         patience_count = 0
         best_state = None
 
@@ -235,7 +260,9 @@ class InverseModel:
             else:
                 patience_count += 1
                 if patience_count >= patience:
-                    print(f"    InverseModel early stop at epoch {epoch+1} (val loss={best_val_loss:.4f})")
+                    print(
+                        f"    InverseModel early stop at epoch {epoch+1} (val loss={best_val_loss:.4f})"
+                    )
                     break
 
         if best_state is not None:
@@ -244,11 +271,13 @@ class InverseModel:
         self.net_.eval()
         with torch.no_grad():
             y_pred_val = self.net_(X_val_t).cpu().numpy()
-        self.per_dim_r2_ = r2_score(y_val, y_pred_val, multioutput='raw_values')
+        self.per_dim_r2_ = r2_score(y_val, y_pred_val, multioutput="raw_values")
 
-        print(f"    InverseModel val MSE={best_val_loss:.4f}  "
-              f"mean per-dim R²={self.per_dim_r2_.mean():.4f}  "
-              f"max={self.per_dim_r2_.max():.4f}")
+        print(
+            f"    InverseModel val MSE={best_val_loss:.4f}  "
+            f"mean per-dim R²={self.per_dim_r2_.mean():.4f}  "
+            f"max={self.per_dim_r2_.max():.4f}"
+        )
         return self
 
     def _expand_to_full(self, valid_predictions):
@@ -261,7 +290,8 @@ class InverseModel:
         """Deterministic prediction (dropout off). Returns physics in original units, full dims."""
         self.net_.eval()
         X = torch.tensor(
-            self.input_scaler_.transform(pixel_pca_two_frame), dtype=torch.float32,
+            self.input_scaler_.transform(pixel_pca_two_frame),
+            dtype=torch.float32,
             device=self.device,
         )
         with torch.no_grad():
@@ -273,7 +303,8 @@ class InverseModel:
         """MC dropout: stochastic forward passes with dropout active."""
         self.net_.train()
         X = torch.tensor(
-            self.input_scaler_.transform(pixel_pca_two_frame), dtype=torch.float32,
+            self.input_scaler_.transform(pixel_pca_two_frame),
+            dtype=torch.float32,
             device=self.device,
         )
         samples_scaled = []
@@ -281,23 +312,26 @@ class InverseModel:
             for _ in range(n_samples):
                 samples_scaled.append(self.net_(X).cpu().numpy())
         self.net_.eval()
-        return np.stack([
-            self._expand_to_full(self.phys_scaler_.inverse_transform(s))
-            for s in samples_scaled
-        ])
+        return np.stack(
+            [
+                self._expand_to_full(self.phys_scaler_.inverse_transform(s))
+                for s in samples_scaled
+            ]
+        )
 
-    def extract_activations(self, pixel_pca_two_frame, layer='h2'):
+    def extract_activations(self, pixel_pca_two_frame, layer="h2"):
         """Deterministic post-ReLU activations of one hidden layer.
 
         layer: 'h1' | 'h2' | 'h3'. Dropout is off (eval mode), so the returned
         activations are the deterministic representation the net would use at
         inference time, not an MC sample.
         """
-        if layer not in ('h1', 'h2', 'h3'):
+        if layer not in ("h1", "h2", "h3"):
             raise ValueError(f"layer must be 'h1', 'h2', or 'h3'; got {layer!r}")
         self.net_.eval()
         X = torch.tensor(
-            self.input_scaler_.transform(pixel_pca_two_frame), dtype=torch.float32,
+            self.input_scaler_.transform(pixel_pca_two_frame),
+            dtype=torch.float32,
             device=self.device,
         )
         with torch.no_grad():
@@ -332,7 +366,7 @@ class InverseCNN:
     def __init__(self, hidden_dim=None, dropout_rate=None, device=None):
         self.hidden_dim = hidden_dim
         self.dropout_rate = dropout_rate
-        self.device = device if device is not None else torch.device('cpu')
+        self.device = device if device is not None else torch.device("cpu")
         self.net_ = None
         self.phys_scaler_ = None
         self.per_dim_r2_ = None
@@ -348,9 +382,17 @@ class InverseCNN:
             return frames.astype(np.float32) / 255.0
         return frames.astype(np.float32)
 
-    def fit(self, frames, physics_labels,
-            n_epochs=300, batch_size=64, lr=1e-3, val_frac=0.15, patience=50,
-            verbose=True):
+    def fit(
+        self,
+        frames,
+        physics_labels,
+        n_epochs=300,
+        batch_size=64,
+        lr=1e-3,
+        val_frac=0.15,
+        patience=50,
+        verbose=True,
+    ):
         frames = self._prep_frames(frames)
         self.full_physics_dim_ = physics_labels.shape[1]
 
@@ -375,8 +417,11 @@ class InverseCNN:
 
         n_frames, n_channels = frames.shape[1], frames.shape[2]
         self.net_ = InverseCNNNet(
-            n_frames=n_frames, n_channels=n_channels, output_dim=y.shape[1],
-            hidden_dim=self.hidden_dim, dropout_rate=self.dropout_rate,
+            n_frames=n_frames,
+            n_channels=n_channels,
+            output_dim=y.shape[1],
+            hidden_dim=self.hidden_dim,
+            dropout_rate=self.dropout_rate,
         ).to(self.device)
         opt = torch.optim.Adam(self.net_.parameters(), lr=lr)
         sch = torch.optim.lr_scheduler.ReduceLROnPlateau(opt, factor=0.5, patience=10)
@@ -387,10 +432,11 @@ class InverseCNN:
         X_val_t = torch.tensor(frames[idx_val], dtype=torch.float32, device=self.device)
         y_val_t = torch.tensor(y[idx_val], dtype=torch.float32, device=self.device)
 
-        loader = DataLoader(TensorDataset(X_tr_t, y_tr_t),
-                            batch_size=batch_size, shuffle=True)
+        loader = DataLoader(
+            TensorDataset(X_tr_t, y_tr_t), batch_size=batch_size, shuffle=True
+        )
 
-        best_val = float('inf')
+        best_val = float("inf")
         best_state = None
         best_epoch = 0
         bad_epochs = 0
@@ -405,7 +451,7 @@ class InverseCNN:
             with torch.no_grad():
                 vl = loss_fn(self.net_(X_val_t), y_val_t).item()
                 tl = loss_fn(self.net_(X_tr_t), y_tr_t).item()
-            history.append({'epoch': epoch + 1, 'train_loss': tl, 'val_loss': vl})
+            history.append({"epoch": epoch + 1, "train_loss": tl, "val_loss": vl})
             sch.step(vl)
             if vl < best_val - 1e-5:
                 best_val = vl
@@ -416,21 +462,25 @@ class InverseCNN:
                 bad_epochs += 1
                 if bad_epochs >= patience:
                     if verbose:
-                        print(f"    InverseCNN early stop at epoch {epoch+1} "
-                              f"(best val={best_val:.4f} @ epoch {best_epoch})")
+                        print(
+                            f"    InverseCNN early stop at epoch {epoch+1} "
+                            f"(best val={best_val:.4f} @ epoch {best_epoch})"
+                        )
                     break
 
         self.net_.load_state_dict(best_state)
         self.net_.eval()
         with torch.no_grad():
             y_pred_val = self.net_(X_val_t).cpu().numpy()
-        self.per_dim_r2_ = r2_score(y[idx_val], y_pred_val, multioutput='raw_values')
+        self.per_dim_r2_ = r2_score(y[idx_val], y_pred_val, multioutput="raw_values")
         self.history_ = history
         self.best_epoch_ = best_epoch
         if verbose:
-            print(f"    InverseCNN val MSE={best_val:.4f}  "
-                  f"mean per-dim R²={self.per_dim_r2_.mean():.4f}  "
-                  f"max={self.per_dim_r2_.max():.4f}")
+            print(
+                f"    InverseCNN val MSE={best_val:.4f}  "
+                f"mean per-dim R²={self.per_dim_r2_.mean():.4f}  "
+                f"max={self.per_dim_r2_.max():.4f}"
+            )
         return self
 
     def _expand_to_full(self, valid_predictions):
@@ -442,12 +492,14 @@ class InverseCNN:
     def _forward_in_batches(self, frames, batch_size=128, return_acts=None):
         """Run the net over frames in batches; return ndarray (or dict of arrays)."""
         self.net_.eval()
-        X = torch.tensor(self._prep_frames(frames), dtype=torch.float32, device=self.device)
+        X = torch.tensor(
+            self._prep_frames(frames), dtype=torch.float32, device=self.device
+        )
         outs = []
         acts = {k: [] for k in (return_acts or [])}
         with torch.no_grad():
             for i in range(0, X.shape[0], batch_size):
-                xb = X[i:i + batch_size]
+                xb = X[i : i + batch_size]
                 if return_acts:
                     out, a = self.net_.forward_with_activations(xb)
                     for k in return_acts:
@@ -468,9 +520,9 @@ class InverseCNN:
         pred_scaled = self._forward_in_batches(frames)
         return self._expand_to_full(self.phys_scaler_.inverse_transform(pred_scaled))
 
-    def extract_activations(self, frames, layer='h2'):
+    def extract_activations(self, frames, layer="h2"):
         """Deterministic post-ReLU activations of one hidden layer (h1/h2/h3)."""
-        if layer not in ('h1', 'h2', 'h3'):
+        if layer not in ("h1", "h2", "h3"):
             raise ValueError(f"layer must be 'h1', 'h2', or 'h3'; got {layer!r}")
         _, acts = self._forward_in_batches(frames, return_acts=[layer])
         return acts[layer]
@@ -484,6 +536,7 @@ class InverseCNN:
 # it into a small helper is a separate refactor — explicitly out of scope for
 # the current pluggable-backbone change.
 # ---------------------------------------------------------------------------
+
 
 class InverseSoftmaxCNN:
     """Spatial-softmax keypoint inverse model: raw 3-frame stack → physics.
@@ -504,9 +557,18 @@ class InverseSoftmaxCNN:
     uncertainty bands.
     """
 
-    def __init__(self, *, n_filters=128, learned_temp=True, temp_per_channel=True,
-                 include_variance=False, hidden_dim=256, head_depth=3,
-                 dropout_rate=0.0, device=None):
+    def __init__(
+        self,
+        *,
+        n_filters=128,
+        learned_temp=True,
+        temp_per_channel=True,
+        include_variance=False,
+        hidden_dim=256,
+        head_depth=3,
+        dropout_rate=0.0,
+        device=None,
+    ):
         self.n_filters = n_filters
         self.learned_temp = learned_temp
         self.temp_per_channel = temp_per_channel
@@ -514,7 +576,7 @@ class InverseSoftmaxCNN:
         self.hidden_dim = hidden_dim
         self.head_depth = head_depth
         self.dropout_rate = dropout_rate
-        self.device = device if device is not None else torch.device('cpu')
+        self.device = device if device is not None else torch.device("cpu")
 
         self.net_ = None
         self.input_scaler_ = None  # raw frames; no scaler.
@@ -536,9 +598,33 @@ class InverseSoftmaxCNN:
         """Stacked 3-frame uint8 tensor — same convention as InverseCNN."""
         return build_frame_stack(scenes)
 
-    def fit(self, frames, physics_labels,
-            n_epochs=200, batch_size=64, lr=1e-3, val_frac=0.15,
-            patience=30, min_epochs=60, verbose=True):
+    def _make_net(self, n_frames, n_channels, output_dim):
+        return SpatialSoftmaxV2(
+            n_frames=n_frames,
+            n_channels=n_channels,
+            image_size=IMAGE_SIZE,
+            output_dim=output_dim,
+            n_filters=self.n_filters,
+            learned_temp=self.learned_temp,
+            temp_per_channel=self.temp_per_channel,
+            include_variance=self.include_variance,
+            hidden_dim=self.hidden_dim,
+            head_depth=self.head_depth,
+            dropout_rate=self.dropout_rate,
+        )
+
+    def fit(
+        self,
+        frames,
+        physics_labels,
+        n_epochs=200,
+        batch_size=64,
+        lr=1e-3,
+        val_frac=0.15,
+        patience=30,
+        min_epochs=60,
+        verbose=True,
+    ):
         frames = self._prep_frames(frames)
         self.full_physics_dim_ = physics_labels.shape[1]
 
@@ -556,8 +642,10 @@ class InverseSoftmaxCNN:
         n_valid = int(self.valid_dims_.sum())
         n_observable = int(observable_mask.sum())
         if verbose:
-            print(f"    InverseSoftmaxCNN: {n_valid}/{n_observable} observable physics dims have variance "
-                  f"({self.full_physics_dim_} total)")
+            print(
+                f"    InverseSoftmaxCNN: {n_valid}/{n_observable} observable physics dims have variance "
+                f"({self.full_physics_dim_} total)"
+            )
 
         physics_valid = physics_labels[:, self.valid_dims_]
         self.phys_scaler_ = StandardScaler()
@@ -570,17 +658,7 @@ class InverseSoftmaxCNN:
         # in scripts/eval_pp_cnn_softmax_sweep.py reproducible inside the pipeline.
         torch.manual_seed(42)
         n_frames, n_channels = frames.shape[1], frames.shape[2]
-        self.net_ = SpatialSoftmaxV2(
-            n_frames=n_frames, n_channels=n_channels, image_size=IMAGE_SIZE,
-            output_dim=y.shape[1],
-            n_filters=self.n_filters,
-            learned_temp=self.learned_temp,
-            temp_per_channel=self.temp_per_channel,
-            include_variance=self.include_variance,
-            hidden_dim=self.hidden_dim,
-            head_depth=self.head_depth,
-            dropout_rate=self.dropout_rate,
-        ).to(self.device)
+        self.net_ = self._make_net(n_frames, n_channels, y.shape[1]).to(self.device)
 
         opt = torch.optim.Adam(self.net_.parameters(), lr=lr)
         sch = torch.optim.lr_scheduler.ReduceLROnPlateau(opt, factor=0.5, patience=10)
@@ -591,10 +669,11 @@ class InverseSoftmaxCNN:
         X_val_t = torch.tensor(frames[idx_val], dtype=torch.float32, device=self.device)
         y_val_t = torch.tensor(y[idx_val], dtype=torch.float32, device=self.device)
 
-        loader = DataLoader(TensorDataset(X_tr_t, y_tr_t),
-                            batch_size=batch_size, shuffle=True)
+        loader = DataLoader(
+            TensorDataset(X_tr_t, y_tr_t), batch_size=batch_size, shuffle=True
+        )
 
-        best_val = float('inf')
+        best_val = float("inf")
         best_state = None
         best_epoch = 0
         bad_epochs = 0
@@ -609,7 +688,7 @@ class InverseSoftmaxCNN:
             with torch.no_grad():
                 vl = loss_fn(self.net_(X_val_t), y_val_t).item()
                 tl = loss_fn(self.net_(X_tr_t), y_tr_t).item()
-            history.append({'epoch': epoch + 1, 'train_loss': tl, 'val_loss': vl})
+            history.append({"epoch": epoch + 1, "train_loss": tl, "val_loss": vl})
             sch.step(vl)
             if vl < best_val - 1e-5:
                 best_val = vl
@@ -620,21 +699,25 @@ class InverseSoftmaxCNN:
                 bad_epochs += 1
                 if bad_epochs >= patience and (epoch + 1) >= min_epochs:
                     if verbose:
-                        print(f"    InverseSoftmaxCNN early stop at epoch {epoch+1} "
-                              f"(best val={best_val:.4f} @ epoch {best_epoch})")
+                        print(
+                            f"    InverseSoftmaxCNN early stop at epoch {epoch+1} "
+                            f"(best val={best_val:.4f} @ epoch {best_epoch})"
+                        )
                     break
 
         self.net_.load_state_dict(best_state)
         self.net_.eval()
         with torch.no_grad():
             y_pred_val = self.net_(X_val_t).cpu().numpy()
-        self.per_dim_r2_ = r2_score(y[idx_val], y_pred_val, multioutput='raw_values')
+        self.per_dim_r2_ = r2_score(y[idx_val], y_pred_val, multioutput="raw_values")
         self.history_ = history
         self.best_epoch_ = best_epoch
         if verbose:
-            print(f"    InverseSoftmaxCNN val MSE={best_val:.4f}  "
-                  f"mean per-dim R²={self.per_dim_r2_.mean():.4f}  "
-                  f"max={self.per_dim_r2_.max():.4f}")
+            print(
+                f"    InverseSoftmaxCNN val MSE={best_val:.4f}  "
+                f"mean per-dim R²={self.per_dim_r2_.mean():.4f}  "
+                f"max={self.per_dim_r2_.max():.4f}"
+            )
         return self
 
     def _expand_to_full(self, valid_predictions):
@@ -643,8 +726,9 @@ class InverseSoftmaxCNN:
         full[:, self.valid_dims_] = valid_predictions
         return full
 
-    def _forward_in_batches(self, frames, batch_size=128, return_acts=None,
-                            stochastic=False):
+    def _forward_in_batches(
+        self, frames, batch_size=128, return_acts=None, stochastic=False
+    ):
         """Run the net over frames in batches; return ndarray (or dict of arrays).
 
         ``stochastic`` toggles the head's dropout on (whole net is set to
@@ -655,12 +739,14 @@ class InverseSoftmaxCNN:
             self.net_.conv.eval()
         else:
             self.net_.eval()
-        X = torch.tensor(self._prep_frames(frames), dtype=torch.float32, device=self.device)
+        X = torch.tensor(
+            self._prep_frames(frames), dtype=torch.float32, device=self.device
+        )
         outs = []
         acts = {k: [] for k in (return_acts or [])}
         with torch.no_grad():
             for i in range(0, X.shape[0], batch_size):
-                xb = X[i:i + batch_size]
+                xb = X[i : i + batch_size]
                 if return_acts:
                     out, a = self.net_.forward_with_activations(xb)
                     for k in return_acts:
@@ -684,19 +770,19 @@ class InverseSoftmaxCNN:
         samples = []
         for _ in range(n_samples):
             pred_scaled = self._forward_in_batches(frames, stochastic=True)
-            samples.append(self._expand_to_full(
-                self.phys_scaler_.inverse_transform(pred_scaled)
-            ))
+            samples.append(
+                self._expand_to_full(self.phys_scaler_.inverse_transform(pred_scaled))
+            )
         return np.stack(samples)
 
-    def extract_activations(self, frames, layer='h2'):
+    def extract_activations(self, frames, layer="h2"):
         """Deterministic post-ReLU activations of one head layer (h1/h2/h3).
 
         Layer aliasing follows :class:`models.spatial_softmax.SpatialSoftmaxV2`:
         when ``head_depth < 3``, ``h3`` aliases to ``h2``; when
         ``head_depth < 2``, both ``h2`` and ``h3`` alias to ``h1``.
         """
-        if layer not in ('h1', 'h2', 'h3'):
+        if layer not in ("h1", "h2", "h3"):
             raise ValueError(f"layer must be 'h1', 'h2', or 'h3'; got {layer!r}")
         _, acts = self._forward_in_batches(frames, return_acts=[layer])
         return acts[layer]
@@ -706,24 +792,61 @@ class InverseSoftmaxCNN:
 # Backbone factory
 # ---------------------------------------------------------------------------
 
-INVERSE_BACKBONES = ('mlp', 'softmax_cnn')
+class InverseDepthGatedTemporalCNN(InverseSoftmaxCNN):
+    """Depth-gated temporal-delta softmax backbone (best on diverse multi-object scenes).
+
+    Uses :class:`models.spatial_softmax.SpatialSoftmaxDepthGatedTemporalDelta`:
+    depth-weighted softmax attention focuses keypoints on the foreground object,
+    and per-frame keypoint-velocity deltas give the head explicit motion cues.
+
+    Input requires the depth channel: ``prepare_input`` calls
+    ``build_frame_stack_with_depth`` returning (N, 3, 5, H, W) float32.
+    """
+
+    def __init__(self, *, depth_gamma_init=2.0, **kwargs):
+        super().__init__(**kwargs)
+        self.depth_gamma_init = depth_gamma_init
+
+    def prepare_input(self, scenes):
+        return build_frame_stack_with_depth(scenes)
+
+    def _make_net(self, n_frames, n_channels, output_dim):
+        return SpatialSoftmaxDepthGatedTemporalDelta(
+            n_frames=n_frames,
+            n_channels=n_channels,
+            image_size=IMAGE_SIZE,
+            output_dim=output_dim,
+            n_filters=self.n_filters,
+            learned_temp=self.learned_temp,
+            temp_per_channel=self.temp_per_channel,
+            include_variance=self.include_variance,
+            hidden_dim=self.hidden_dim,
+            head_depth=self.head_depth,
+            dropout_rate=self.dropout_rate,
+            depth_gamma_init=self.depth_gamma_init,
+        )
 
 
-def make_inverse_model(backbone='mlp', *, device=None, **kwargs):
+INVERSE_BACKBONES = ("mlp", "softmax_cnn", "depth_gated_temporal")
+
+
+def make_inverse_model(backbone="mlp", *, device=None, **kwargs):
     """Build an inverse-model wrapper for the named backbone.
 
-    Currently dispatches:
-        'mlp'         → :class:`InverseModel`
-        'softmax_cnn' → :class:`InverseSoftmaxCNN`
+    Dispatches:
+        'mlp'                  → :class:`InverseModel`
+        'softmax_cnn'          → :class:`InverseSoftmaxCNN`
+        'depth_gated_temporal' → :class:`InverseDepthGatedTemporalCNN`
 
     The 'cnn' backbone (:class:`InverseCNN`) is intentionally excluded from
-    the dispatch — it is kept available as a class for the off-pipeline
-    diagnostic in scripts/eval_pp_cnn.py only.
+    the dispatch — it is kept available for the off-pipeline diagnostic only.
     """
-    if backbone == 'mlp':
+    if backbone == "mlp":
         return InverseModel(device=device, **kwargs)
-    if backbone == 'softmax_cnn':
+    if backbone == "softmax_cnn":
         return InverseSoftmaxCNN(device=device, **kwargs)
+    if backbone == "depth_gated_temporal":
+        return InverseDepthGatedTemporalCNN(device=device, **kwargs)
     raise ValueError(
         f"unknown pp_inverse_backbone {backbone!r}; expected one of {INVERSE_BACKBONES}"
     )
@@ -733,14 +856,18 @@ def make_inverse_model(backbone='mlp', *, device=None, **kwargs):
 # Helper MLPs and pixel R²
 # ---------------------------------------------------------------------------
 
+
 def _make_prior_mlp():
     return make_pipeline(
         StandardScaler(),
         MLPRegressor(
             hidden_layer_sizes=(_CFG_PP_HIDDEN_DIM, _CFG_PP_HIDDEN_DIM),
-            activation='relu', max_iter=500, random_state=42,
-            early_stopping=True, validation_fraction=0.1,
-        )
+            activation="relu",
+            max_iter=500,
+            random_state=42,
+            early_stopping=True,
+            validation_fraction=0.1,
+        ),
     )
 
 
@@ -749,16 +876,24 @@ def _make_render_mlp():
         StandardScaler(),
         MLPRegressor(
             hidden_layer_sizes=(_CFG_PP_HIDDEN_DIM, _CFG_PP_HIDDEN_DIM),
-            activation='relu', max_iter=500, random_state=42,
-            early_stopping=True, validation_fraction=0.1,
-        )
+            activation="relu",
+            max_iter=500,
+            random_state=42,
+            early_stopping=True,
+            validation_fraction=0.1,
+        ),
     )
 
 
-def _eval_physics_to_pixel_mlp(physics_labels, final_pixel_pca,
-                               train_idx, test_idx,
-                               pca_final, scaler_pix,
-                               actual_final_pixels_test):
+def _eval_physics_to_pixel_mlp(
+    physics_labels,
+    final_pixel_pca,
+    train_idx,
+    test_idx,
+    pca_final,
+    scaler_pix,
+    actual_final_pixels_test,
+):
     mlp = _make_prior_mlp()
     mlp.fit(physics_labels[train_idx], final_pixel_pca[train_idx])
     pred_pca = mlp.predict(physics_labels[test_idx])
@@ -782,13 +917,13 @@ def _pixel_r2(predicted_rgba, actual_raw_pixels):
 def physics_groups():
     """Maps semantic label type → list of dimension indices (stride 16 per object)."""
     return {
-        'Position':    [i * 16 + j for i in range(N_OBJECTS) for j in range(3)],
-        'Orientation': [i * 16 + j for i in range(N_OBJECTS) for j in range(3, 7)],
-        'Lin. Vel.':   [i * 16 + j for i in range(N_OBJECTS) for j in range(7, 10)],
-        'Ang. Vel.':   [i * 16 + j for i in range(N_OBJECTS) for j in range(10, 13)],
-        'Mass':        [i * 16 + 13 for i in range(N_OBJECTS)],
-        'Friction':    [i * 16 + 14 for i in range(N_OBJECTS)],
-        'Accel':       [i * 16 + 15 for i in range(N_OBJECTS)],
+        "Position": [i * 16 + j for i in range(N_OBJECTS) for j in range(3)],
+        "Orientation": [i * 16 + j for i in range(N_OBJECTS) for j in range(3, 7)],
+        "Lin. Vel.": [i * 16 + j for i in range(N_OBJECTS) for j in range(7, 10)],
+        "Ang. Vel.": [i * 16 + j for i in range(N_OBJECTS) for j in range(10, 13)],
+        "Mass": [i * 16 + 13 for i in range(N_OBJECTS)],
+        "Friction": [i * 16 + 14 for i in range(N_OBJECTS)],
+        "Accel": [i * 16 + 15 for i in range(N_OBJECTS)],
     }
 
 
@@ -813,24 +948,24 @@ def build_pp_features(scenes, pixel_pca_dim=None):
     if pixel_pca_dim is None:
         pixel_pca_dim = _CFG_PP_PIXEL_PCA_DIM
 
-    initial_renders = scenes['initial_renders']
-    early_renders   = scenes['early_renders']
-    late_renders    = scenes['late_renders']
+    initial_renders = scenes["initial_renders"]
+    early_renders = scenes["early_renders"]
+    late_renders = scenes["late_renders"]
 
     def _whitened_pca(x):
         scaler = StandardScaler()
         pca = PCA(n_components=pixel_pca_dim, whiten=True, random_state=42)
         return pca.fit_transform(scaler.fit_transform(x))
 
-    pixel_pca_t0    = _whitened_pca(initial_renders)
+    pixel_pca_t0 = _whitened_pca(initial_renders)
     pixel_pca_early = _whitened_pca(early_renders)
-    pixel_pca_late  = _whitened_pca(late_renders)
+    pixel_pca_late = _whitened_pca(late_renders)
 
     return {
-        'pixel_pca_t0': pixel_pca_t0,
-        'pixel_pca_early': pixel_pca_early,
-        'pixel_pca_late': pixel_pca_late,
-        'pixel_pca_concat': np.concatenate(
+        "pixel_pca_t0": pixel_pca_t0,
+        "pixel_pca_early": pixel_pca_early,
+        "pixel_pca_late": pixel_pca_late,
+        "pixel_pca_concat": np.concatenate(
             [pixel_pca_t0, pixel_pca_early, pixel_pca_late], axis=1
         ),
     }
@@ -840,9 +975,10 @@ def build_pp_features(scenes, pixel_pca_dim=None):
 # Main analysis
 # ---------------------------------------------------------------------------
 
-def run_predictive_processing_analysis(neural_activity, scenes,
-                                       *, pixel_pca_dim=None, n_oracle=200,
-                                       inv_model=None):
+
+def run_predictive_processing_analysis(
+    neural_activity, scenes, *, pixel_pca_dim=None, n_oracle=200, inv_model=None
+):
     """
     Evaluate the predictive-processing pipeline against neural activity.
 
@@ -869,17 +1005,17 @@ def run_predictive_processing_analysis(neural_activity, scenes,
     print("SIMULATION 4: Predictive Processing Model")
     print("=" * 60)
 
-    pixel_indices        = scenes['metadata']['pixel_indices']
-    target_pixel_indices = scenes['metadata']['target_pixel_indices']
-    initial_renders = scenes['initial_renders']
-    early_renders   = scenes['early_renders']
-    late_renders    = scenes['late_renders']
-    target_renders  = scenes['target_renders']
-    initial_physics = scenes['initial_physics_labels']
-    scene_configs   = scenes['scene_configs']
-    program_states  = scenes['program_states']
-    pillar_grays    = scenes['pillar_grays']
-    lightings       = scenes['lightings']
+    pixel_indices = scenes["metadata"]["pixel_indices"]
+    target_pixel_indices = scenes["metadata"]["target_pixel_indices"]
+    initial_renders = scenes["initial_renders"]
+    early_renders = scenes["early_renders"]
+    late_renders = scenes["late_renders"]
+    target_renders = scenes["target_renders"]
+    initial_physics = scenes["initial_physics_labels"]
+    scene_configs = scenes["scene_configs"]
+    program_states = scenes["program_states"]
+    pillar_grays = scenes["pillar_grays"]
+    lightings = scenes["lightings"]
     n = len(initial_renders)
 
     # --- 1. Shared pixel PCAs ---
@@ -899,16 +1035,16 @@ def run_predictive_processing_analysis(neural_activity, scenes,
     # below — the MLP backbone re-uses ``pixel_pca_concat``; raw-pixel backbones
     # ignore these PCA features and consume the 3-frame stack instead.
     feats = build_pp_features(scenes, pixel_pca_dim=pixel_pca_dim)
-    pixel_pca_t0       = feats['pixel_pca_t0']
-    pixel_pca_early    = feats['pixel_pca_early']
-    pixel_pca_late     = feats['pixel_pca_late']
-    pixel_pca_two_frame = feats['pixel_pca_concat']
+    pixel_pca_t0 = feats["pixel_pca_t0"]
+    pixel_pca_early = feats["pixel_pca_early"]
+    pixel_pca_late = feats["pixel_pca_late"]
+    pixel_pca_two_frame = feats["pixel_pca_concat"]
 
     # --- 2. Train / test split ---
     rng = np.random.default_rng(42)
     idx = rng.permutation(n)
     n_test = int(n * 0.2)
-    test_idx  = idx[:n_test]
+    test_idx = idx[:n_test]
     train_idx = idx[n_test:]
 
     actual_test_raw = final_pixels_raw[test_idx].astype(np.float32)
@@ -918,9 +1054,12 @@ def run_predictive_processing_analysis(neural_activity, scenes,
     # --- 3. Prior eval: true physics → pixels (architecture ceiling) ---
     print("\nPrior evaluation: MLP(true physics → pixels)...")
     prior_r2 = _eval_physics_to_pixel_mlp(
-        initial_physics, final_pixel_pca,
-        train_idx, test_idx,
-        pca_final, scaler_pix,
+        initial_physics,
+        final_pixel_pca,
+        train_idx,
+        test_idx,
+        pca_final,
+        scaler_pix,
         actual_test_raw,
     )
     print(f"  Prior MLP R²: {prior_r2:.4f}")
@@ -934,9 +1073,13 @@ def run_predictive_processing_analysis(neural_activity, scenes,
         inv_model = InverseModel(pixel_pca_dim=pixel_pca_dim)
         inv_model.fit(pixel_pca_two_frame[train_idx], initial_physics[train_idx])
     else:
-        print("\nReusing pretrained InverseModel (same checkpoint used for neural projection).")
-        print(f"    InverseModel val per-dim R²: mean={inv_model.per_dim_r2_.mean():.4f}  "
-              f"max={inv_model.per_dim_r2_.max():.4f}")
+        print(
+            "\nReusing pretrained InverseModel (same checkpoint used for neural projection)."
+        )
+        print(
+            f"    InverseModel val per-dim R²: mean={inv_model.per_dim_r2_.mean():.4f}  "
+            f"max={inv_model.per_dim_r2_.max():.4f}"
+        )
 
     # Backbone-specific input array for all subsequent inv_model.predict* calls.
     inv_input = inv_model.prepare_input(scenes)
@@ -951,12 +1094,19 @@ def run_predictive_processing_analysis(neural_activity, scenes,
     # Same pattern as dissociation.py / dynamics.py — share one client across all
     # resim calls in this analysis.
     print(f"\nComputing oracle R² ({n_oracle} test scenes)...")
-    oracle_preds = np.stack([
-        resimulate_scene(scene_configs[i], initial_physics[i],
-                         pillar_gray=pillar_grays[i],
-                         lighting=lightings[i]).reshape(-1).astype(np.float32)
-        for i in oracle_test_idx
-    ])
+    oracle_preds = np.stack(
+        [
+            resimulate_scene(
+                scene_configs[i],
+                initial_physics[i],
+                pillar_gray=pillar_grays[i],
+                lighting=lightings[i],
+            )
+            .reshape(-1)
+            .astype(np.float32)
+            for i in oracle_test_idx
+        ]
+    )
     oracle_actual = final_pixels_raw[oracle_test_idx].astype(np.float32)
     oracle_r2 = _pixel_r2(oracle_preds, oracle_actual)
     print(f"  Oracle R²: {oracle_r2:.4f}")
@@ -972,12 +1122,19 @@ def run_predictive_processing_analysis(neural_activity, scenes,
     for j in range(n_oracle):
         gt = initial_physics[oracle_test_idx[j]]
         inferred_mean_oracle[j, non_observable] = gt[non_observable]
-    pp_preds = np.stack([
-        resimulate_scene(scene_configs[oracle_test_idx[j]], inferred_mean_oracle[j],
-                         pillar_gray=pillar_grays[oracle_test_idx[j]],
-                         lighting=lightings[oracle_test_idx[j]]).reshape(-1).astype(np.float32)
-        for j in range(n_oracle)
-    ])
+    pp_preds = np.stack(
+        [
+            resimulate_scene(
+                scene_configs[oracle_test_idx[j]],
+                inferred_mean_oracle[j],
+                pillar_gray=pillar_grays[oracle_test_idx[j]],
+                lighting=lightings[oracle_test_idx[j]],
+            )
+            .reshape(-1)
+            .astype(np.float32)
+            for j in range(n_oracle)
+        ]
+    )
     pp_r2 = _pixel_r2(pp_preds, oracle_actual)
     print(f"  PP chain R²: {pp_r2:.4f}  (gap from oracle: {oracle_r2 - pp_r2:.4f})")
 
@@ -985,7 +1142,9 @@ def run_predictive_processing_analysis(neural_activity, scenes,
     print(f"\nComputing render-only R² ({n_oracle} oracle scenes)...")
     render_pred_pca = render_mlp.predict(pixel_pca_two_frame[oracle_test_idx])
     render_pred_raw = np.clip(
-        scaler_pix.inverse_transform(pca_final.inverse_transform(render_pred_pca)), 0, 255
+        scaler_pix.inverse_transform(pca_final.inverse_transform(render_pred_pca)),
+        0,
+        255,
     ).astype(np.float32)
     render_r2 = _pixel_r2(render_pred_raw, oracle_actual)
     print(f"  Render-only R²: {render_r2:.4f}")
@@ -1000,42 +1159,64 @@ def run_predictive_processing_analysis(neural_activity, scenes,
     print("\nComputing neural R² for PP representations...")
     inferred_physics_all = inv_model.predict(inv_input)
 
-    neural_r2_t0, _          = _mean_neural_r2(pixel_pca_t0, neural_activity)
-    neural_r2_two_frame, _   = _mean_neural_r2(pixel_pca_two_frame, neural_activity)
+    neural_r2_t0, _ = _mean_neural_r2(pixel_pca_t0, neural_activity)
+    neural_r2_two_frame, _ = _mean_neural_r2(pixel_pca_two_frame, neural_activity)
     neural_r2_inv_physics, _ = _mean_neural_r2(inferred_physics_all, neural_activity)
 
     print(f"  Neural R²  t=0 pixel PCA:     {neural_r2_t0:.4f}")
     print(f"  Neural R²  two-frame PCA:     {neural_r2_two_frame:.4f}")
-    print(f"  Neural R²  inferred physics:  {neural_r2_inv_physics:.4f}  ← should be low")
+    print(
+        f"  Neural R²  inferred physics:  {neural_r2_inv_physics:.4f}  ← should be low"
+    )
 
     # --- 10. Frame visualization data (PP chain MC dropout sample) ---
     n_frame_samples = min(8, n_oracle)
     frame_idx = oracle_test_idx[:n_frame_samples]
-    frame_stochastic = inv_model.predict_stochastic(
-        inv_input[frame_idx], n_samples=1
-    )[0]
-    pp_frame_imgs = np.stack([
-        resimulate_scene(scene_configs[frame_idx[j]], frame_stochastic[j],
-                         pillar_gray=pillar_grays[frame_idx[j]],
-                         lighting=lightings[frame_idx[j]])
-        for j in range(n_frame_samples)
-    ])
-    _rgba_s = scenes['metadata']['target_pixel_indices']  # RGBA slice within per-frame render vecs
-    init_frame_imgs = initial_renders[frame_idx][:, _rgba_s].astype(np.uint8).reshape(
-        n_frame_samples, IMAGE_SIZE, IMAGE_SIZE, 4)
-    early_frame_imgs = early_renders[frame_idx][:, _rgba_s].astype(np.uint8).reshape(
-        n_frame_samples, IMAGE_SIZE, IMAGE_SIZE, 4)
-    final_frame_imgs = target_renders[frame_idx][:, target_pixel_indices].astype(np.uint8).reshape(
-        n_frame_samples, IMAGE_SIZE, IMAGE_SIZE, 4)
+    frame_stochastic = inv_model.predict_stochastic(inv_input[frame_idx], n_samples=1)[
+        0
+    ]
+    pp_frame_imgs = np.stack(
+        [
+            resimulate_scene(
+                scene_configs[frame_idx[j]],
+                frame_stochastic[j],
+                pillar_gray=pillar_grays[frame_idx[j]],
+                lighting=lightings[frame_idx[j]],
+            )
+            for j in range(n_frame_samples)
+        ]
+    )
+    _rgba_s = scenes["metadata"][
+        "target_pixel_indices"
+    ]  # RGBA slice within per-frame render vecs
+    init_frame_imgs = (
+        initial_renders[frame_idx][:, _rgba_s]
+        .astype(np.uint8)
+        .reshape(n_frame_samples, IMAGE_SIZE, IMAGE_SIZE, 4)
+    )
+    early_frame_imgs = (
+        early_renders[frame_idx][:, _rgba_s]
+        .astype(np.uint8)
+        .reshape(n_frame_samples, IMAGE_SIZE, IMAGE_SIZE, 4)
+    )
+    final_frame_imgs = (
+        target_renders[frame_idx][:, target_pixel_indices]
+        .astype(np.uint8)
+        .reshape(n_frame_samples, IMAGE_SIZE, IMAGE_SIZE, 4)
+    )
 
     # Render-only baseline frames for the same scenes (two-frame MLP, no physics).
     render_frame_pred_pca = render_mlp.predict(pixel_pca_two_frame[frame_idx])
     render_frame_pred_raw = np.clip(
-        scaler_pix.inverse_transform(pca_final.inverse_transform(render_frame_pred_pca)),
-        0, 255,
+        scaler_pix.inverse_transform(
+            pca_final.inverse_transform(render_frame_pred_pca)
+        ),
+        0,
+        255,
     ).astype(np.uint8)
     render_frame_imgs = render_frame_pred_raw.reshape(
-        n_frame_samples, IMAGE_SIZE, IMAGE_SIZE, 4)
+        n_frame_samples, IMAGE_SIZE, IMAGE_SIZE, 4
+    )
 
     # --- 11. Per-dim InverseModel quality (full physics dim) ---
     full_per_dim_r2 = np.zeros(inv_model.full_physics_dim_)
@@ -1043,34 +1224,32 @@ def run_predictive_processing_analysis(neural_activity, scenes,
 
     return {
         # scalar metrics (also persisted to outputs/pp_results.json)
-        'prior_r2': prior_r2,
-        'oracle_r2': oracle_r2,
-        'pp_r2': pp_r2,
-        'render_r2': render_r2,
-        'neural_r2_t0': neural_r2_t0,
-        'neural_r2_two_frame': neural_r2_two_frame,
-        'neural_r2_inferred_physics': neural_r2_inv_physics,
-        'inverse_mean_r2': float(inv_model.per_dim_r2_.mean()),
-        'inverse_per_dim_r2': inv_model.per_dim_r2_,
-
+        "prior_r2": prior_r2,
+        "oracle_r2": oracle_r2,
+        "pp_r2": pp_r2,
+        "render_r2": render_r2,
+        "neural_r2_t0": neural_r2_t0,
+        "neural_r2_two_frame": neural_r2_two_frame,
+        "neural_r2_inferred_physics": neural_r2_inv_physics,
+        "inverse_mean_r2": float(inv_model.per_dim_r2_.mean()),
+        "inverse_per_dim_r2": inv_model.per_dim_r2_,
         # downstream artifact (consumed by encoding/rsa)
-        'inferred_physics_all': inferred_physics_all,
-
+        "inferred_physics_all": inferred_physics_all,
         # plot_data: arrays needed by scripts/plot_pp.py
-        'plot_data': {
-            'prior_r2': prior_r2,
-            'oracle_r2': oracle_r2,
-            'pp_r2': pp_r2,
-            'render_r2': render_r2,
-            'neural_r2_t0': neural_r2_t0,
-            'neural_r2_two_frame': neural_r2_two_frame,
-            'neural_r2_inferred_physics': neural_r2_inv_physics,
-            'full_per_dim_r2': full_per_dim_r2,
-            'init_frame_imgs': init_frame_imgs,
-            'early_frame_imgs': early_frame_imgs,
-            'pp_frame_imgs': pp_frame_imgs,
-            'render_frame_imgs': render_frame_imgs,
-            'final_frame_imgs': final_frame_imgs,
-            'frame_idx': frame_idx,
+        "plot_data": {
+            "prior_r2": prior_r2,
+            "oracle_r2": oracle_r2,
+            "pp_r2": pp_r2,
+            "render_r2": render_r2,
+            "neural_r2_t0": neural_r2_t0,
+            "neural_r2_two_frame": neural_r2_two_frame,
+            "neural_r2_inferred_physics": neural_r2_inv_physics,
+            "full_per_dim_r2": full_per_dim_r2,
+            "init_frame_imgs": init_frame_imgs,
+            "early_frame_imgs": early_frame_imgs,
+            "pp_frame_imgs": pp_frame_imgs,
+            "render_frame_imgs": render_frame_imgs,
+            "final_frame_imgs": final_frame_imgs,
+            "frame_idx": frame_idx,
         },
     }

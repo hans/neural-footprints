@@ -1,4 +1,5 @@
 import sys, os, json
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import numpy as np
@@ -11,26 +12,45 @@ dissociation = load_results(snakemake.input.dissociation)
 dynamics = load_results(snakemake.input.dynamics)
 
 # Convert lists back to arrays where evaluate() expects them
-for key in ['r2_pixel_only', 'r2_physics_only', 'r2_combined', 'delta_r2',
-            'r2_predicted_pixel', 'r2_combined_pred', 'delta_r2_pred']:
+for key in [
+    "r2_pixel_only",
+    "r2_physics_only",
+    "r2_combined",
+    "delta_r2",
+    "r2_predicted_pixel",
+    "r2_combined_pred",
+    "delta_r2_pred",
+]:
     if key in encoding:
         encoding[key] = np.array(encoding[key])
 
 residual_results = None
-if hasattr(snakemake.input, 'residual'):
+if hasattr(snakemake.input, "residual"):
     residual_results = load_results(snakemake.input.residual)
-    for key in ['r2_raw_pixel', 'r2_raw_physics_gt',
-                'r2_resid_pixel', 'r2_resid_physics_gt',
-                'r2_resid_predicted_pixel', 'r2_resid_physics_gt_via_predicted_pixel']:
+    for key in [
+        "r2_raw_pixel",
+        "r2_raw_physics_gt",
+        "r2_resid_pixel",
+        "r2_resid_physics_gt",
+        "r2_resid_predicted_pixel",
+        "r2_resid_physics_gt_via_predicted_pixel",
+    ]:
         if key in residual_results and residual_results[key] is not None:
             residual_results[key] = np.array(residual_results[key])
 
-n_passed, n_total, checks = evaluate(encoding, rsa, dissociation,
-                                     dynamics_results=dynamics,
-                                     residual_results=residual_results)
+n_passed, n_total, checks = evaluate(
+    encoding,
+    rsa,
+    dissociation,
+    dynamics_results=dynamics,
+    residual_results=residual_results,
+)
 
-save_results({
-    'n_passed': n_passed,
-    'n_total': n_total,
-    'checks': checks,
-}, snakemake.output[0])
+save_results(
+    {
+        "n_passed": n_passed,
+        "n_total": n_total,
+        "checks": checks,
+    },
+    snakemake.output[0],
+)

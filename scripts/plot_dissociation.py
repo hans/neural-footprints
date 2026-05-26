@@ -1,8 +1,14 @@
 import sys, os
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import numpy as np
-from analyses.plot_figures import plot_dissociation, plot_dissociation_combined, plot_predicted_frames, plot_predicted_frames_compact
+from analyses.plot_figures import (
+    plot_dissociation,
+    plot_dissociation_combined,
+    plot_predicted_frames,
+    plot_predicted_frames_compact,
+)
 
 fig_dir = os.path.dirname(snakemake.output.figure)
 os.makedirs(fig_dir, exist_ok=True)
