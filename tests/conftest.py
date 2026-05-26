@@ -38,12 +38,14 @@ def tiny_shape_configs() -> list[dict]:
             "shape": "sphere",
             "params": {"radius": 0.25},
             "color": [0.5, 0.2, 0.8, 1.0],
+            "specular": 0.3,
             "x_accel": 1.5,
         },
         {
             "shape": "box",
             "params": {"half_extents": [0.2, 0.15, 0.3]},
             "color": [0.1, 0.7, 0.4, 1.0],
+            "specular": 0.6,
             "x_accel": -2.0,
         },
     ]
