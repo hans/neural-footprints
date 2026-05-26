@@ -187,11 +187,29 @@ class SpatialSoftmaxDepthGated(SpatialSoftmaxV2):
     """
 
     def __init__(self, n_frames, n_channels, image_size, output_dim, *,
-                 depth_gamma_init=2.0, **kwargs):
+                 depth_gamma_init=2.0, include_edepth=False, **kwargs):
         if n_channels != 5:
             raise ValueError(f"SpatialSoftmaxDepthGated requires n_channels=5, got {n_channels}")
         super().__init__(n_frames, 4, image_size, output_dim, **kwargs)
         self.depth_gamma = nn.Parameter(torch.log(torch.tensor(float(depth_gamma_init))))
+        self.include_edepth = include_edepth
+        if include_edepth:
+            # Rebuild head: per-channel features gain one E[depth] slot.
+            # Base is 4 (with variance) or 2 (without), +1 for E[depth].
+            per_ch = (4 if self.include_variance else 2) + 1
+            edepth_feat_dim = n_frames * self.n_filters * per_ch
+            hidden_layers = max(0, self.head_depth - 1)
+            self.head_hidden = nn.ModuleList()
+            d = edepth_feat_dim
+            for _ in range(hidden_layers):
+                self.head_hidden.append(nn.Sequential(
+                    nn.Linear(d, self.hidden_dim), nn.ReLU(inplace=True)
+                ))
+                d = self.hidden_dim
+            self.head_dropouts = nn.ModuleList(
+                [nn.Dropout(self.dropout_rate) for _ in range(hidden_layers)]
+            )
+            self.head_out = nn.Linear(d, output_dim)
 
     def _prepare_inputs(self, x):
         """Split (B,F,5,H,W) into RGBA (B*F,4,H,W) and depth_flat (B*F,1,H'*W')."""
@@ -221,12 +239,15 @@ class SpatialSoftmaxDepthGated(SpatialSoftmaxV2):
 
         ex = (attn * self.grid_x).sum(dim=-1)
         ey = (attn * self.grid_y).sum(dim=-1)
+        parts = [ex, ey]
         if self.include_variance:
-            ex2 = (attn * self.grid_x.pow(2)).sum(dim=-1)
-            ey2 = (attn * self.grid_y.pow(2)).sum(dim=-1)
-            coords = torch.stack([ex, ey, ex2, ey2], dim=-1)
-        else:
-            coords = torch.stack([ex, ey], dim=-1)
+            parts.append((attn * self.grid_x.pow(2)).sum(dim=-1))
+            parts.append((attn * self.grid_y.pow(2)).sum(dim=-1))
+        if self.include_edepth:
+            # E[depth] under the attention distribution: (B*F, K)
+            # depth_flat is (B*F, 1, H'*W') — broadcasts with attn (B*F, K, H'*W')
+            parts.append((attn * depth_flat).sum(dim=-1))
+        coords = torch.stack(parts, dim=-1)
         return coords.reshape(B, -1)
 
     def forward(self, x):

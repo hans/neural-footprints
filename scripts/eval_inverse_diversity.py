@@ -197,6 +197,13 @@ SWEEP_CONFIGS = {
         'kwargs': dict(n_filters=128, learned_temp=True, hidden_dim=256,
                        head_depth=3, dropout_rate=0.05, depth_gamma_init=2.0),
     },
+    'depth_gated_edepth': {
+        'model_cls': 'SpatialSoftmaxDepthGated',
+        'n_channels': 5,
+        'kwargs': dict(n_filters=128, learned_temp=True, hidden_dim=256,
+                       head_depth=3, dropout_rate=0.05, depth_gamma_init=2.0,
+                       include_variance=True, include_edepth=True),
+    },
 }
 
 
