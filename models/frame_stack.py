@@ -50,9 +50,9 @@ def build_frame_stack_with_depth(scenes):
 
     def _extract(frame_data):
         rgba = frame_data[:, :rgba_n].astype(np.float32) / 255.0
-        rgba = rgba.reshape(N, H, W, 4).transpose(0, 3, 1, 2)   # (N,4,H,W)
-        raw = frame_data[:, rgba_n:rgba_n + depth_n_bytes]
-        depth = raw.astype(np.uint8).view(np.float32)            # (N, H*W)
+        rgba = rgba.reshape(N, H, W, 4).transpose(0, 3, 1, 2)  # (N,4,H,W)
+        raw = frame_data[:, rgba_n : rgba_n + depth_n_bytes]
+        depth = raw.astype(np.uint8).view(np.float32)  # (N, H*W)
         return rgba, depth
 
     rgba_i, d_i = _extract(init)
@@ -66,6 +66,8 @@ def build_frame_stack_with_depth(scenes):
         return ((np.clip(d, None, 10.0) - d_min) / d_range).reshape(N, 1, H, W)
 
     def _make5(rgba, d):
-        return np.concatenate([rgba, _norm(d)], axis=1)          # (N,5,H,W)
+        return np.concatenate([rgba, _norm(d)], axis=1)  # (N,5,H,W)
 
-    return np.stack([_make5(rgba_i, d_i), _make5(rgba_m, d_m), _make5(rgba_l, d_l)], axis=1)
+    return np.stack(
+        [_make5(rgba_i, d_i), _make5(rgba_m, d_m), _make5(rgba_l, d_l)], axis=1
+    )

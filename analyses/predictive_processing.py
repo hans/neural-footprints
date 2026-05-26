@@ -792,6 +792,7 @@ class InverseSoftmaxCNN:
 # Backbone factory
 # ---------------------------------------------------------------------------
 
+
 class InverseDepthGatedTemporalCNN(InverseSoftmaxCNN):
     """Depth-gated temporal-delta softmax backbone (best on diverse multi-object scenes).
 
