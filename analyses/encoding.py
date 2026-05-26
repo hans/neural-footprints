@@ -60,22 +60,22 @@ def ridge_r2_per_neuron_fast(X, Y, alphas=None, cv=5):
     for train_idx, test_idx in KFold(n_splits=cv, shuffle=False).split(X):
         X_tr, X_te, Y_tr = X[train_idx], X[test_idx], Y[train_idx]
         U, S, Vt = np.linalg.svd(X_tr, full_matrices=False)
-        S2 = S ** 2
-        UtY = U.T @ Y_tr                              # [k, n_targets]
-        U2 = U ** 2                                   # [n_tr, k]
+        S2 = S**2
+        UtY = U.T @ Y_tr  # [k, n_targets]
+        U2 = U**2  # [n_tr, k]
 
         # LOO MSE per (alpha, target). Loop over α to keep memory in MB-range.
         loo_mse = np.empty((alphas.size, n_targets))
         for a, alpha in enumerate(alphas):
-            gain = S2 / (S2 + alpha)                  # [k]
-            Yhat = U @ (gain[:, None] * UtY)          # [n_tr, n_targets]
-            H_diag = U2 @ gain                        # [n_tr]
+            gain = S2 / (S2 + alpha)  # [k]
+            Yhat = U @ (gain[:, None] * UtY)  # [n_tr, n_targets]
+            H_diag = U2 @ gain  # [n_tr]
             resid = (Y_tr - Yhat) / (1.0 - H_diag)[:, None]
-            loo_mse[a] = (resid ** 2).mean(axis=0)
+            loo_mse[a] = (resid**2).mean(axis=0)
 
-        best_alpha = alphas[np.argmin(loo_mse, axis=0)]      # [n_targets]
+        best_alpha = alphas[np.argmin(loo_mse, axis=0)]  # [n_targets]
         factor = S[:, None] / (S2[:, None] + best_alpha[None, :])  # [k, n_targets]
-        beta = Vt.T @ (factor * UtY)                              # [p, n_targets]
+        beta = Vt.T @ (factor * UtY)  # [p, n_targets]
         Y_oof[test_idx] = X_te @ beta
 
     ss_res = ((Y - Y_oof) ** 2).sum(axis=0)
@@ -83,11 +83,17 @@ def ridge_r2_per_neuron_fast(X, Y, alphas=None, cv=5):
     return 1 - ss_res / ss_tot
 
 
-def run_encoding_analysis(neural_activity, scenes, neural_meta,
-                          *, pixel_pca_dim=None,
-                          predicted_pixel_pca=None,
-                          compute_null=True, n_null_permutations=50,
-                          null_seed=0):
+def run_encoding_analysis(
+    neural_activity,
+    scenes,
+    neural_meta,
+    *,
+    pixel_pca_dim=None,
+    predicted_pixel_pca=None,
+    compute_null=True,
+    n_null_permutations=50,
+    null_seed=0,
+):
     """
     Run encoding model analysis.
 
@@ -109,15 +115,17 @@ def run_encoding_analysis(neural_activity, scenes, neural_meta,
     print("SIMULATION 1: Encoding Model False Negatives")
     print("=" * 60)
 
-    program_states = scenes['program_states']
-    physics_labels = scenes['physics_labels']
-    behavior_labels = scenes['behavior_labels']
-    metadata = scenes['metadata']
+    program_states = scenes["program_states"]
+    physics_labels = scenes["physics_labels"]
+    behavior_labels = scenes["behavior_labels"]
+    metadata = scenes["metadata"]
 
     n_scenes, n_neurons = neural_activity.shape
 
     # --- Extract and PCA-reduce 3-frame brain pixels (RGBA only) ---
-    print(f"\nExtracting brain pixels and reducing to {pixel_pca_dim} PCA components...")
+    print(
+        f"\nExtracting brain pixels and reducing to {pixel_pca_dim} PCA components..."
+    )
     pixel_data = extract_brain_pixels(program_states, metadata)
     pixel_pca, pca, pixel_scaler = pca_reduce_pixels(pixel_data, pixel_pca_dim)
     print(f"  PCA explained variance: {pca.explained_variance_ratio_.sum():.2%}")
@@ -164,10 +172,14 @@ def run_encoding_analysis(neural_activity, scenes, neural_meta,
     delta_r2_pred = None
     if predicted_pixel_pca is not None:
         print("Fitting encoding model: neural ~ predicted_pixel_PCA (Predicted S) ...")
-        r2_predicted_pixel = ridge_r2_per_neuron_fast(predicted_pixel_pca, neural_activity)
+        r2_predicted_pixel = ridge_r2_per_neuron_fast(
+            predicted_pixel_pca, neural_activity
+        )
         mean_r2_predicted_pixel = r2_predicted_pixel.mean()
         print(f"  Mean R² (predicted S):        {mean_r2_predicted_pixel:.4f}")
-        print("Fitting encoding model: neural ~ predicted_pixel_PCA + physics_labels ...")
+        print(
+            "Fitting encoding model: neural ~ predicted_pixel_PCA + physics_labels ..."
+        )
         combined_pred = np.hstack([predicted_pixel_pca, physics_scaled])
         r2_combined_pred = ridge_r2_per_neuron_fast(combined_pred, neural_activity)
         delta_r2_pred = r2_combined_pred - r2_predicted_pixel
@@ -177,13 +189,19 @@ def run_encoding_analysis(neural_activity, scenes, neural_meta,
     # --- Control: physics_labels -> behavior_label ---
     # MLP because KE = 0.5*m*v² is nonlinear in the physics label features.
     print("\nControl: MLP physics_labels -> behavior_label ...")
-    mlp_clf = MLPClassifier(hidden_layer_sizes=(64,), max_iter=500,
-                            random_state=42, early_stopping=True)
-    log_scores = cross_val_score(mlp_clf, physics_scaled, behavior_labels, cv=5,
-                                 scoring='accuracy')
+    mlp_clf = MLPClassifier(
+        hidden_layer_sizes=(64,), max_iter=500, random_state=42, early_stopping=True
+    )
+    log_scores = cross_val_score(
+        mlp_clf, physics_scaled, behavior_labels, cv=5, scoring="accuracy"
+    )
     control_acc = log_scores.mean()
-    print(f"  Behavior prediction accuracy: {control_acc:.2%} (±{log_scores.std():.2%})")
-    print("  (High accuracy expected: KE label is a deterministic function of physics labels)")
+    print(
+        f"  Behavior prediction accuracy: {control_acc:.2%} (±{log_scores.std():.2%})"
+    )
+    print(
+        "  (High accuracy expected: KE label is a deterministic function of physics labels)"
+    )
 
     # --- Subsampling curve ---
     print("\nComputing subsampling curve...")
@@ -211,9 +229,15 @@ def run_encoding_analysis(neural_activity, scenes, neural_meta,
     # --- Permutation null: shuffle scene→physics association ---
     if compute_null:
         null_results = _compute_null_distribution(
-            pixel_pca, physics_scaled, neural_activity, r2_pixel_only,
-            r2_physics_only, r2_combined, delta_r2,
-            n_permutations=n_null_permutations, seed=null_seed,
+            pixel_pca,
+            physics_scaled,
+            neural_activity,
+            r2_pixel_only,
+            r2_physics_only,
+            r2_combined,
+            delta_r2,
+            n_permutations=n_null_permutations,
+            seed=null_seed,
         )
     else:
         null_results = _empty_null_results(neural_activity.shape[1])
@@ -225,34 +249,43 @@ def run_encoding_analysis(neural_activity, scenes, neural_meta,
     encoder_ridge.fit(pixel_pca, neural_activity)
 
     result = {
-        'r2_pixel_only': r2_pixel_only,
-        'r2_physics_only': r2_physics_only,
-        'r2_combined': r2_combined,
-        'delta_r2': delta_r2,
-        'control_accuracy': control_acc,
-        'control_accuracy_std': log_scores.std(),
-        'subsample_means': subsample_means,
-        'subsample_sems': subsample_sems,
-        'subsample_neuron_counts': neuron_counts,
+        "r2_pixel_only": r2_pixel_only,
+        "r2_physics_only": r2_physics_only,
+        "r2_combined": r2_combined,
+        "delta_r2": delta_r2,
+        "control_accuracy": control_acc,
+        "control_accuracy_std": log_scores.std(),
+        "subsample_means": subsample_means,
+        "subsample_sems": subsample_sems,
+        "subsample_neuron_counts": neuron_counts,
         **null_results,
-        'encoder': {
-            'scaler': pixel_scaler,
-            'pca': pca,
-            'ridge': encoder_ridge,
-            'scaler_phys': scaler_phys,
+        "encoder": {
+            "scaler": pixel_scaler,
+            "pca": pca,
+            "ridge": encoder_ridge,
+            "scaler_phys": scaler_phys,
         },
     }
     if r2_predicted_pixel is not None:
-        result['r2_predicted_pixel'] = r2_predicted_pixel
+        result["r2_predicted_pixel"] = r2_predicted_pixel
     if r2_combined_pred is not None:
-        result['r2_combined_pred'] = r2_combined_pred
-        result['delta_r2_pred'] = delta_r2_pred
+        result["r2_combined_pred"] = r2_combined_pred
+        result["delta_r2_pred"] = delta_r2_pred
     return result
 
 
-def _compute_null_distribution(pixel_pca, physics_scaled, neural_activity,
-                                r2_pixel_only, r2_physics_only, r2_combined,
-                                delta_r2, *, n_permutations, seed):
+def _compute_null_distribution(
+    pixel_pca,
+    physics_scaled,
+    neural_activity,
+    r2_pixel_only,
+    r2_physics_only,
+    r2_combined,
+    delta_r2,
+    *,
+    n_permutations,
+    seed,
+):
     """
     Run n_permutations row-shuffles of physics_scaled. For each shuffle, fit
     physics-only and combined ridge encoders. Returns null arrays + summary
@@ -274,51 +307,55 @@ def _compute_null_distribution(pixel_pca, physics_scaled, neural_activity,
         combined_perm = np.hstack([pixel_pca, physics_perm])
         r2_comb_null[p] = ridge_r2_per_neuron_fast(combined_perm, neural_activity)
         if (p + 1) % 10 == 0 or p == 0:
-            print(f"  perm {p + 1}/{n_permutations}: "
-                  f"physics_null mean R² = {r2_phys_null[p].mean():.4f}, "
-                  f"combined_null mean R² = {r2_comb_null[p].mean():.4f}")
+            print(
+                f"  perm {p + 1}/{n_permutations}: "
+                f"physics_null mean R² = {r2_phys_null[p].mean():.4f}, "
+                f"combined_null mean R² = {r2_comb_null[p].mean():.4f}"
+            )
     delta_null = r2_comb_null - r2_pixel_only[None, :]
     return {
-        'r2_physics_only_null': r2_phys_null,
-        'r2_combined_null': r2_comb_null,
-        'delta_r2_null': delta_null,
-        **_null_summary('physics', r2_phys_null, observed=r2_physics_only.mean()),
-        **_null_summary('combined', r2_comb_null, observed=r2_combined.mean()),
-        **_null_summary('delta', delta_null, observed=delta_r2.mean()),
+        "r2_physics_only_null": r2_phys_null,
+        "r2_combined_null": r2_comb_null,
+        "delta_r2_null": delta_null,
+        **_null_summary("physics", r2_phys_null, observed=r2_physics_only.mean()),
+        **_null_summary("combined", r2_comb_null, observed=r2_combined.mean()),
+        **_null_summary("delta", delta_null, observed=delta_r2.mean()),
     }
 
 
 def _null_summary(prefix, null_array, observed):
     """Per-perm mean across neurons → 95% CI + one-sided p-value vs observed mean."""
-    perm_means = null_array.mean(axis=1)              # [n_permutations]
+    perm_means = null_array.mean(axis=1)  # [n_permutations]
     lo, hi = np.percentile(perm_means, [2.5, 97.5])
     pvalue = float((perm_means >= observed).mean())
     return {
-        f'null_{prefix}_perm_means': perm_means,
-        f'null_{prefix}_ci_lo': float(lo),
-        f'null_{prefix}_ci_hi': float(hi),
-        f'null_{prefix}_mean': float(perm_means.mean()),
-        f'null_{prefix}_pvalue': pvalue,
-        f'null_{prefix}_observed': float(observed),
+        f"null_{prefix}_perm_means": perm_means,
+        f"null_{prefix}_ci_lo": float(lo),
+        f"null_{prefix}_ci_hi": float(hi),
+        f"null_{prefix}_mean": float(perm_means.mean()),
+        f"null_{prefix}_pvalue": pvalue,
+        f"null_{prefix}_observed": float(observed),
     }
 
 
 def _empty_null_results(n_neurons):
     empty = np.empty((0, n_neurons))
     empty_means = np.empty(0)
-    nan = float('nan')
+    nan = float("nan")
     base = {
-        'r2_physics_only_null': empty,
-        'r2_combined_null': empty,
-        'delta_r2_null': empty,
+        "r2_physics_only_null": empty,
+        "r2_combined_null": empty,
+        "delta_r2_null": empty,
     }
-    for prefix in ('physics', 'combined', 'delta'):
-        base.update({
-            f'null_{prefix}_perm_means': empty_means,
-            f'null_{prefix}_ci_lo': nan,
-            f'null_{prefix}_ci_hi': nan,
-            f'null_{prefix}_mean': nan,
-            f'null_{prefix}_pvalue': nan,
-            f'null_{prefix}_observed': nan,
-        })
+    for prefix in ("physics", "combined", "delta"):
+        base.update(
+            {
+                f"null_{prefix}_perm_means": empty_means,
+                f"null_{prefix}_ci_lo": nan,
+                f"null_{prefix}_ci_hi": nan,
+                f"null_{prefix}_mean": nan,
+                f"null_{prefix}_pvalue": nan,
+                f"null_{prefix}_observed": nan,
+            }
+        )
     return base

@@ -1,5 +1,7 @@
 """Read pipeline result JSONs and emit LaTeX macros for the paper."""
+
 import sys, os, json
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import numpy as np
@@ -13,12 +15,15 @@ config = snakemake.config
 
 # --- helpers ---
 
+
 def fmt(value, decimals=2):
     """Format a number, stripping trailing zeros."""
     return f"{value:.{decimals}f}"
 
+
 def pct(value):
     return f"{value * 100:.1f}"
+
 
 def latex_int(n):
     """Format integer with LaTeX thousands separators: 49152 -> '49{,}152'."""
@@ -30,10 +35,13 @@ def latex_int(n):
     parts.append(s)
     return "{,}".join(reversed(parts))
 
+
 macros = {}
+
 
 def add(name, value):
     macros[name] = value
+
 
 # --- config ---
 add("nScenes", str(config["n_scenes"]))
@@ -47,9 +55,13 @@ add("rsaSubsample", str(config["rsa_subsample"]))
 image_size = config["image_size"]
 n_objects = config["n_objects"]
 n_brain_frames = 3  # initial / early / late, all full RGBA+depth+seg
-d_render = n_brain_frames * image_size * image_size * 12  # 3 frames × (RGBA(4) + depth(4) + seg(4)) raw bytes, each cast to float32
-d_physics_per_obj = 16  # pos(3) + orn(4) + lin_vel(3) + ang_vel(3) + mass(1) + friction(1) + x_accel(1)
-d_config_per_obj = 9    # shape_is_box(1) + radius(1) + half_extents(3) + color(4)
+d_render = (
+    n_brain_frames * image_size * image_size * 12
+)  # 3 frames × (RGBA(4) + depth(4) + seg(4)) raw bytes, each cast to float32
+d_physics_per_obj = (
+    16  # pos(3) + orn(4) + lin_vel(3) + ang_vel(3) + mass(1) + friction(1) + x_accel(1)
+)
+d_config_per_obj = 9  # shape_is_box(1) + radius(1) + half_extents(3) + color(4)
 d_physics = d_physics_per_obj * n_objects
 d_config = d_config_per_obj * n_objects
 d_total = d_render + d_physics + d_config
@@ -72,6 +84,7 @@ add("encodingRsqCombined", fmt(np.mean(r2_combined), 4))
 add("encodingDeltaRsq", fmt(np.mean(delta_r2), 4))
 add("controlAccuracy", pct(encoding["control_accuracy"]))
 
+
 # --- encoding null distribution macros ---
 def _maybe_fmt(value, decimals=4):
     if value is None:
@@ -85,21 +98,26 @@ def _maybe_fmt(value, decimals=4):
 
 
 for prefix, latex_name in [
-    ("physics",  "encodingRsqPhysicsNull"),
+    ("physics", "encodingRsqPhysicsNull"),
     ("combined", "encodingRsqCombinedNull"),
-    ("delta",    "encodingDeltaRsqNull"),
+    ("delta", "encodingDeltaRsqNull"),
 ]:
-    add(f"{latex_name}Lo",      _maybe_fmt(encoding.get(f"null_{prefix}_ci_lo")))
-    add(f"{latex_name}Hi",      _maybe_fmt(encoding.get(f"null_{prefix}_ci_hi")))
-    add(f"{latex_name}Mean",    _maybe_fmt(encoding.get(f"null_{prefix}_mean")))
-    add(f"{latex_name}PValue",  _maybe_fmt(encoding.get(f"null_{prefix}_pvalue"), decimals=3))
+    add(f"{latex_name}Lo", _maybe_fmt(encoding.get(f"null_{prefix}_ci_lo")))
+    add(f"{latex_name}Hi", _maybe_fmt(encoding.get(f"null_{prefix}_ci_hi")))
+    add(f"{latex_name}Mean", _maybe_fmt(encoding.get(f"null_{prefix}_mean")))
+    add(
+        f"{latex_name}PValue",
+        _maybe_fmt(encoding.get(f"null_{prefix}_pvalue"), decimals=3),
+    )
 
 # --- RSA ---
 add("rsaCorrNeuralPixel", fmt(rsa["corr_neural_pixel"], 4))
 add("rsaCorrNeuralPhysics", fmt(rsa["corr_neural_physics"], 4))
 add("rsaCorrPixelPhysics", fmt(rsa["corr_pixel_physics"], 4))
 add("rsaPartialNeuralPhysics", fmt(rsa["partial_neural_physics"], 4))
-add("rsaRatio", fmt(rsa["corr_neural_pixel"] / max(rsa["corr_neural_physics"], 1e-9), 1))
+add(
+    "rsaRatio", fmt(rsa["corr_neural_pixel"] / max(rsa["corr_neural_physics"], 1e-9), 1)
+)
 
 # --- dynamics ---
 r2_phys_fwd = np.array(dynamics["r2_physics_forward"])

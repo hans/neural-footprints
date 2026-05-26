@@ -34,10 +34,21 @@ class SpatialSoftmaxV2(nn.Module):
         ``head_depth == 2`` (and to ``h1`` when ``head_depth == 1``).
     """
 
-    def __init__(self, n_frames, n_channels, image_size, output_dim, *,
-                 n_filters=64, learned_temp=True, temp_per_channel=True,
-                 include_variance=False, hidden_dim=128, head_depth=2,
-                 dropout_rate=0.0):
+    def __init__(
+        self,
+        n_frames,
+        n_channels,
+        image_size,
+        output_dim,
+        *,
+        n_filters=64,
+        learned_temp=True,
+        temp_per_channel=True,
+        include_variance=False,
+        hidden_dim=128,
+        head_depth=2,
+        dropout_rate=0.0,
+    ):
         super().__init__()
         self.n_frames = n_frames
         self.n_channels = n_channels
@@ -63,9 +74,9 @@ class SpatialSoftmaxV2(nn.Module):
         sm_size = image_size // 4
         ys = torch.linspace(-1.0, 1.0, sm_size)
         xs = torch.linspace(-1.0, 1.0, sm_size)
-        gy, gx = torch.meshgrid(ys, xs, indexing='ij')
-        self.register_buffer('grid_x', gx.reshape(-1), persistent=False)
-        self.register_buffer('grid_y', gy.reshape(-1), persistent=False)
+        gy, gx = torch.meshgrid(ys, xs, indexing="ij")
+        self.register_buffer("grid_x", gx.reshape(-1), persistent=False)
+        self.register_buffer("grid_y", gy.reshape(-1), persistent=False)
 
         # Inverse temperature β so β=1 reproduces a standard softmax.
         # Parameterise as log_β so β stays positive without a clamp.
@@ -73,7 +84,7 @@ class SpatialSoftmaxV2(nn.Module):
             shape = (n_filters,) if temp_per_channel else (1,)
             self.log_beta = nn.Parameter(torch.zeros(shape))
         else:
-            self.register_buffer('log_beta', torch.zeros(1), persistent=False)
+            self.register_buffer("log_beta", torch.zeros(1), persistent=False)
 
         per_channel_feats = 4 if include_variance else 2
         feat_dim = n_frames * n_filters * per_channel_feats
@@ -86,9 +97,9 @@ class SpatialSoftmaxV2(nn.Module):
         self.head_hidden = nn.ModuleList()
         d = feat_dim
         for _ in range(hidden_layers):
-            self.head_hidden.append(nn.Sequential(
-                nn.Linear(d, hidden_dim), nn.ReLU(inplace=True)
-            ))
+            self.head_hidden.append(
+                nn.Sequential(nn.Linear(d, hidden_dim), nn.ReLU(inplace=True))
+            )
             d = hidden_dim
         self.head_dropouts = nn.ModuleList(
             [nn.Dropout(dropout_rate) for _ in range(hidden_layers)]
@@ -97,7 +108,7 @@ class SpatialSoftmaxV2(nn.Module):
 
     def _keypoint_features(self, x):
         B, F_, C, H, W = x.shape
-        feats = self.conv(x.reshape(B * F_, C, H, W))      # (B*F, K, H', W')
+        feats = self.conv(x.reshape(B * F_, C, H, W))  # (B*F, K, H', W')
         K, Hs, Ws = feats.shape[1], feats.shape[2], feats.shape[3]
         flat = feats.reshape(B * F_, K, Hs * Ws)
 
@@ -106,9 +117,9 @@ class SpatialSoftmaxV2(nn.Module):
             scaled = flat * beta
         else:
             scaled = flat * beta.reshape(1, K, 1)
-        attn = F.softmax(scaled, dim=-1)                   # (B*F, K, H'*W')
+        attn = F.softmax(scaled, dim=-1)  # (B*F, K, H'*W')
 
-        ex = (attn * self.grid_x).sum(dim=-1)              # (B*F, K)
+        ex = (attn * self.grid_x).sum(dim=-1)  # (B*F, K)
         ey = (attn * self.grid_y).sum(dim=-1)
         if self.include_variance:
             ex2 = (attn * self.grid_x.pow(2)).sum(dim=-1)
@@ -125,7 +136,7 @@ class SpatialSoftmaxV2(nn.Module):
         across frames, so the caller can compute temporal deltas.
         """
         B, F_, C, H, W = x.shape
-        feats = self.conv(x.reshape(B * F_, C, H, W))      # (B*F, K, H', W')
+        feats = self.conv(x.reshape(B * F_, C, H, W))  # (B*F, K, H', W')
         K, Hs, Ws = feats.shape[1], feats.shape[2], feats.shape[3]
         flat = feats.reshape(B * F_, K, Hs * Ws)
 
@@ -134,18 +145,18 @@ class SpatialSoftmaxV2(nn.Module):
             scaled = flat * beta
         else:
             scaled = flat * beta.reshape(1, K, 1)
-        attn = F.softmax(scaled, dim=-1)                   # (B*F, K, H'*W')
+        attn = F.softmax(scaled, dim=-1)  # (B*F, K, H'*W')
 
-        ex = (attn * self.grid_x).sum(dim=-1)              # (B*F, K)
+        ex = (attn * self.grid_x).sum(dim=-1)  # (B*F, K)
         ey = (attn * self.grid_y).sum(dim=-1)
         if self.include_variance:
             ex2 = (attn * self.grid_x.pow(2)).sum(dim=-1)
             ey2 = (attn * self.grid_y.pow(2)).sum(dim=-1)
             coords = torch.stack([ex, ey, ex2, ey2], dim=-1)  # (B*F, K, 4)
         else:
-            coords = torch.stack([ex, ey], dim=-1)             # (B*F, K, 2)
+            coords = torch.stack([ex, ey], dim=-1)  # (B*F, K, 2)
         per_channel_feats = coords.shape[-1]
-        return coords.reshape(B, F_, K * per_channel_feats)    # (B, F, K*pcf)
+        return coords.reshape(B, F_, K * per_channel_feats)  # (B, F, K*pcf)
 
     def forward(self, x):
         h = self._keypoint_features(x)
@@ -172,7 +183,7 @@ class SpatialSoftmaxV2(nn.Module):
         # Pad up to length 3 by aliasing.
         while len(h_acts) < 3:
             h_acts.append(h_acts[-1])
-        return out, {'h1': h_acts[0], 'h2': h_acts[1], 'h3': h_acts[2]}
+        return out, {"h1": h_acts[0], "h2": h_acts[1], "h3": h_acts[2]}
 
 
 class SpatialSoftmaxDepthGated(SpatialSoftmaxV2):
@@ -186,12 +197,25 @@ class SpatialSoftmaxDepthGated(SpatialSoftmaxV2):
     so γ stays positive without clamping.
     """
 
-    def __init__(self, n_frames, n_channels, image_size, output_dim, *,
-                 depth_gamma_init=2.0, include_edepth=False, **kwargs):
+    def __init__(
+        self,
+        n_frames,
+        n_channels,
+        image_size,
+        output_dim,
+        *,
+        depth_gamma_init=2.0,
+        include_edepth=False,
+        **kwargs,
+    ):
         if n_channels != 5:
-            raise ValueError(f"SpatialSoftmaxDepthGated requires n_channels=5, got {n_channels}")
+            raise ValueError(
+                f"SpatialSoftmaxDepthGated requires n_channels=5, got {n_channels}"
+            )
         super().__init__(n_frames, 4, image_size, output_dim, **kwargs)
-        self.depth_gamma = nn.Parameter(torch.log(torch.tensor(float(depth_gamma_init))))
+        self.depth_gamma = nn.Parameter(
+            torch.log(torch.tensor(float(depth_gamma_init)))
+        )
         self.include_edepth = include_edepth
         if include_edepth:
             # Rebuild head: per-channel features gain one E[depth] slot.
@@ -202,9 +226,9 @@ class SpatialSoftmaxDepthGated(SpatialSoftmaxV2):
             self.head_hidden = nn.ModuleList()
             d = edepth_feat_dim
             for _ in range(hidden_layers):
-                self.head_hidden.append(nn.Sequential(
-                    nn.Linear(d, self.hidden_dim), nn.ReLU(inplace=True)
-                ))
+                self.head_hidden.append(
+                    nn.Sequential(nn.Linear(d, self.hidden_dim), nn.ReLU(inplace=True))
+                )
                 d = self.hidden_dim
             self.head_dropouts = nn.ModuleList(
                 [nn.Dropout(self.dropout_rate) for _ in range(hidden_layers)]
@@ -217,7 +241,7 @@ class SpatialSoftmaxDepthGated(SpatialSoftmaxV2):
         x_rgba = x[:, :, :4].reshape(B * F_, 4, H, W)
         x_depth = x[:, :, 4:5].reshape(B * F_, 1, H, W)
         sm_h, sm_w = H // 4, W // 4
-        depth_down = F.adaptive_avg_pool2d(x_depth, (sm_h, sm_w))   # (B*F, 1, H', W')
+        depth_down = F.adaptive_avg_pool2d(x_depth, (sm_h, sm_w))  # (B*F, 1, H', W')
         depth_flat = depth_down.reshape(B * F_, 1, sm_h * sm_w)
         return x_rgba, depth_flat, B, F_
 
@@ -228,14 +252,14 @@ class SpatialSoftmaxDepthGated(SpatialSoftmaxV2):
         depth_flat: (B*F, 1, H'*W')
         Returns: (B, feat_dim)
         """
-        feats = self.conv(x_rgba)                                    # (B*F, K, H', W')
+        feats = self.conv(x_rgba)  # (B*F, K, H', W')
         K, Hs, Ws = feats.shape[1], feats.shape[2], feats.shape[3]
         flat = feats.reshape(feats.shape[0], K, Hs * Ws)
 
         beta = self.log_beta.exp()
-        gate = torch.exp(-self.depth_gamma.exp() * depth_flat)       # (B*F, 1, H'*W')
+        gate = torch.exp(-self.depth_gamma.exp() * depth_flat)  # (B*F, 1, H'*W')
         scaled = flat * (beta.reshape(1, K, 1) if beta.numel() > 1 else beta) * gate
-        attn = F.softmax(scaled, dim=-1)                             # (B*F, K, H'*W')
+        attn = F.softmax(scaled, dim=-1)  # (B*F, K, H'*W')
 
         ex = (attn * self.grid_x).sum(dim=-1)
         ey = (attn * self.grid_y).sum(dim=-1)
@@ -269,7 +293,7 @@ class SpatialSoftmaxDepthGated(SpatialSoftmaxV2):
         out = self.head_out(h)
         while len(h_acts) < 3:
             h_acts.append(h_acts[-1])
-        return out, {'h1': h_acts[0], 'h2': h_acts[1], 'h3': h_acts[2]}
+        return out, {"h1": h_acts[0], "h2": h_acts[1], "h3": h_acts[2]}
 
 
 class SpatialSoftmaxTemporalDelta(SpatialSoftmaxV2):
@@ -305,9 +329,9 @@ class SpatialSoftmaxTemporalDelta(SpatialSoftmaxV2):
         self.head_hidden = nn.ModuleList()
         d = aug_feat_dim
         for _ in range(hidden_layers):
-            self.head_hidden.append(nn.Sequential(
-                nn.Linear(d, hidden_dim), nn.ReLU(inplace=True)
-            ))
+            self.head_hidden.append(
+                nn.Sequential(nn.Linear(d, hidden_dim), nn.ReLU(inplace=True))
+            )
             d = hidden_dim
         self.head_dropouts = nn.ModuleList(
             [nn.Dropout(dropout_rate) for _ in range(hidden_layers)]
@@ -321,7 +345,7 @@ class SpatialSoftmaxTemporalDelta(SpatialSoftmaxV2):
         """Returns augmented feature vector [coords | deltas] as (B, aug_feat_dim)."""
         # coords: (B, F, K*per_channel_feats)
         coords = self._keypoint_coords_per_frame(x)
-        deltas = coords[:, 1:] - coords[:, :-1]      # (B, F-1, K*per_channel_feats)
+        deltas = coords[:, 1:] - coords[:, :-1]  # (B, F-1, K*per_channel_feats)
         B = coords.shape[0]
         return torch.cat([coords, deltas], dim=1).reshape(B, -1)
 
@@ -346,7 +370,7 @@ class SpatialSoftmaxTemporalDelta(SpatialSoftmaxV2):
         out = self.head_out(h)
         while len(h_acts) < 3:
             h_acts.append(h_acts[-1])
-        return out, {'h1': h_acts[0], 'h2': h_acts[1], 'h3': h_acts[2]}
+        return out, {"h1": h_acts[0], "h2": h_acts[1], "h3": h_acts[2]}
 
 
 class SpatialSoftmaxDepthGatedTemporalDelta(SpatialSoftmaxTemporalDelta):
@@ -357,13 +381,24 @@ class SpatialSoftmaxDepthGatedTemporalDelta(SpatialSoftmaxTemporalDelta):
     n_channels must be 5 (RGBA + depth).
     """
 
-    def __init__(self, n_frames, n_channels, image_size, output_dim, *,
-                 depth_gamma_init=2.0, **kwargs):
+    def __init__(
+        self,
+        n_frames,
+        n_channels,
+        image_size,
+        output_dim,
+        *,
+        depth_gamma_init=2.0,
+        **kwargs,
+    ):
         if n_channels != 5:
             raise ValueError(
-                f"SpatialSoftmaxDepthGatedTemporalDelta requires n_channels=5, got {n_channels}")
+                f"SpatialSoftmaxDepthGatedTemporalDelta requires n_channels=5, got {n_channels}"
+            )
         super().__init__(n_frames, 4, image_size, output_dim, **kwargs)
-        self.depth_gamma = nn.Parameter(torch.log(torch.tensor(float(depth_gamma_init))))
+        self.depth_gamma = nn.Parameter(
+            torch.log(torch.tensor(float(depth_gamma_init)))
+        )
 
     def _prepare_inputs(self, x):
         B, F_, _, H, W = x.shape
@@ -419,4 +454,4 @@ class SpatialSoftmaxDepthGatedTemporalDelta(SpatialSoftmaxTemporalDelta):
         out = self.head_out(h)
         while len(h_acts) < 3:
             h_acts.append(h_acts[-1])
-        return out, {'h1': h_acts[0], 'h2': h_acts[1], 'h3': h_acts[2]}
+        return out, {"h1": h_acts[0], "h2": h_acts[1], "h3": h_acts[2]}

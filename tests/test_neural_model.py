@@ -13,7 +13,6 @@ from hypothesis import strategies as st
 
 from neural_model import generate_neural_activity
 
-
 # --- Unit tests ---------------------------------------------------------
 
 
@@ -45,8 +44,12 @@ def test_determinism_same_seed(tiny_program_states, rng_seed):
 
 
 def test_different_seeds_differ(tiny_program_states):
-    a1, _ = generate_neural_activity(tiny_program_states, 1, n_neurons=8, noise_level=0.1)
-    a2, _ = generate_neural_activity(tiny_program_states, 2, n_neurons=8, noise_level=0.1)
+    a1, _ = generate_neural_activity(
+        tiny_program_states, 1, n_neurons=8, noise_level=0.1
+    )
+    a2, _ = generate_neural_activity(
+        tiny_program_states, 2, n_neurons=8, noise_level=0.1
+    )
     assert not np.allclose(a1, a2)
 
 
@@ -78,7 +81,9 @@ def test_noise_level_zero_matches_signal(tiny_program_states, rng_seed):
     means = tiny_program_states.mean(axis=0)
     centered = tiny_program_states - means
     n, d = centered.shape
-    gram = (centered @ centered.T if n <= d else centered.T @ centered).astype(np.float64)
+    gram = (centered @ centered.T if n <= d else centered.T @ centered).astype(
+        np.float64
+    )
     sigma = float(np.sqrt(np.linalg.eigvalsh(gram).max()))
     if sigma == 0.0:
         sigma = 1.0
@@ -92,8 +97,9 @@ def test_translation_invariance_noise_zero(tiny_program_states, rng_seed):
     a1, _ = generate_neural_activity(
         tiny_program_states, rng_seed, n_neurons=6, noise_level=0.0
     )
-    shifted = tiny_program_states + np.array([3.0] * tiny_program_states.shape[1],
-                                              dtype=tiny_program_states.dtype)
+    shifted = tiny_program_states + np.array(
+        [3.0] * tiny_program_states.shape[1], dtype=tiny_program_states.dtype
+    )
     a2, _ = generate_neural_activity(shifted, rng_seed, n_neurons=6, noise_level=0.0)
     # Centering removes the constant offset; outputs should match within float
     # tolerance (subtraction of a large constant introduces small rounding error).
@@ -162,9 +168,13 @@ def test_property_determinism(n_scenes, D, n_neurons, seed):
     D=st.integers(min_value=4, max_value=30),
     n_neurons=st.integers(min_value=2, max_value=20),
     seed=st.integers(min_value=0, max_value=10_000),
-    scale=st.floats(min_value=0.5, max_value=10.0, allow_nan=False, allow_infinity=False),
+    scale=st.floats(
+        min_value=0.5, max_value=10.0, allow_nan=False, allow_infinity=False
+    ),
 )
-def test_property_positive_scale_invariance_noise_zero(n_scenes, D, n_neurons, seed, scale):
+def test_property_positive_scale_invariance_noise_zero(
+    n_scenes, D, n_neurons, seed, scale
+):
     rng = np.random.default_rng(seed)
     x = rng.normal(size=(n_scenes, D)).astype(np.float32)
     a1, _ = generate_neural_activity(x, seed, n_neurons=n_neurons, noise_level=0.0)

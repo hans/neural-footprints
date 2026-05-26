@@ -11,11 +11,11 @@ def build_frame_stack(scenes):
     Returns uint8. Float-normalize at the call site (typically
     ``frames.astype(np.float32) / 255.0``).
     """
-    init = scenes['initial_renders']
-    if 'mid_renders' in scenes and 'late_renders' in scenes:
-        f1, f2 = scenes['mid_renders'], scenes['late_renders']
-    elif 'early_renders' in scenes and 'late_renders' in scenes:
-        f1, f2 = scenes['early_renders'], scenes['late_renders']
+    init = scenes["initial_renders"]
+    if "mid_renders" in scenes and "late_renders" in scenes:
+        f1, f2 = scenes["mid_renders"], scenes["late_renders"]
+    elif "early_renders" in scenes and "late_renders" in scenes:
+        f1, f2 = scenes["early_renders"], scenes["late_renders"]
     else:
         raise ValueError("scenes lacks 3 frames")
     n = init.shape[0]
