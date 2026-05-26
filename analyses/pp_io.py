@@ -14,7 +14,11 @@ from analyses.predictive_processing import (
     InverseDepthGatedTemporalCNN,
     INVERSE_BACKBONES,
 )
-from models import InverseMLPNet, SpatialSoftmaxV2, SpatialSoftmaxDepthGatedTemporalDelta
+from models import (
+    InverseMLPNet,
+    SpatialSoftmaxV2,
+    SpatialSoftmaxDepthGatedTemporalDelta,
+)
 
 
 def _arch_kwargs_mlp(inv: InverseModel):
