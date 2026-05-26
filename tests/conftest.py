@@ -7,7 +7,6 @@ data/ or outputs/ directories — they must be runnable on a fresh checkout.
 import numpy as np
 import pytest
 
-
 SEED = 12345
 
 

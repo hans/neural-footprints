@@ -7,7 +7,21 @@ the ``pp_inverse_backbone`` config flag.
 
 from .inverse_mlp_net import InverseMLPNet
 from .inverse_cnn_net import InverseCNNNet
-from .spatial_softmax import SpatialSoftmaxV2
-from .frame_stack import build_frame_stack
+from .spatial_softmax import (
+    SpatialSoftmaxV2,
+    SpatialSoftmaxTemporalDelta,
+    SpatialSoftmaxDepthGated,
+    SpatialSoftmaxDepthGatedTemporalDelta,
+)
+from .frame_stack import build_frame_stack, build_frame_stack_with_depth
 
-__all__ = ['InverseMLPNet', 'InverseCNNNet', 'SpatialSoftmaxV2', 'build_frame_stack']
+__all__ = [
+    "InverseMLPNet",
+    "InverseCNNNet",
+    "SpatialSoftmaxV2",
+    "SpatialSoftmaxTemporalDelta",
+    "SpatialSoftmaxDepthGated",
+    "SpatialSoftmaxDepthGatedTemporalDelta",
+    "build_frame_stack",
+    "build_frame_stack_with_depth",
+]

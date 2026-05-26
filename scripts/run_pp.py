@@ -1,4 +1,5 @@
 import sys, os
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import numpy as np
@@ -18,17 +19,19 @@ neural, _ = load_neural(snakemake.input.neural)
 inv_model = load_inverse_model(snakemake.input.model)
 
 results = run_predictive_processing_analysis(
-    neural, scenes,
-    pixel_pca_dim=cfg['pp_pixel_pca_dim'],
+    neural,
+    scenes,
+    pixel_pca_dim=cfg["pp_pixel_pca_dim"],
     inv_model=inv_model,
 )
 
-inferred_physics_all = results.pop('inferred_physics_all')
-plot_data = results.pop('plot_data')
+inferred_physics_all = results.pop("inferred_physics_all")
+plot_data = results.pop("plot_data")
 
 save_results(results, snakemake.output.results)
 
-np.savez_compressed(snakemake.output.inferred,
-                    inferred_physics_all=inferred_physics_all)
+np.savez_compressed(
+    snakemake.output.inferred, inferred_physics_all=inferred_physics_all
+)
 
 np.savez_compressed(snakemake.output.plot_data, **plot_data)

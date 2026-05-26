@@ -12,13 +12,16 @@ from scipy.spatial.distance import pdist, squareform
 from scipy.stats import spearmanr
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
-from config import RSA_SUBSAMPLE as _CFG_RSA_SUBSAMPLE, PIXEL_PCA_DIM as _CFG_PIXEL_PCA_DIM
+from config import (
+    RSA_SUBSAMPLE as _CFG_RSA_SUBSAMPLE,
+    PIXEL_PCA_DIM as _CFG_PIXEL_PCA_DIM,
+)
 from scene_generator import extract_brain_pixels
 
 
 def _compute_rdm(data):
     """Compute representational dissimilarity matrix using correlation distance."""
-    return pdist(data, metric='correlation')
+    return pdist(data, metric="correlation")
 
 
 def _partial_spearman(x, y, z):
@@ -47,9 +50,15 @@ def _partial_spearman(x, y, z):
     return corr, pval
 
 
-def run_rsa_analysis(neural_activity, scenes, neural_meta,
-                     *, rsa_subsample=None, pixel_pca_dim=None,
-                     predicted_pixel_pca=None):
+def run_rsa_analysis(
+    neural_activity,
+    scenes,
+    neural_meta,
+    *,
+    rsa_subsample=None,
+    pixel_pca_dim=None,
+    predicted_pixel_pca=None,
+):
     """
     Run RSA analysis on a subsample of scenes.
 
@@ -66,9 +75,9 @@ def run_rsa_analysis(neural_activity, scenes, neural_meta,
     print("SIMULATION 2: RSA Dominated by Pixel Structure")
     print("=" * 60)
 
-    program_states = scenes['program_states']
-    physics_labels = scenes['physics_labels']
-    metadata = scenes['metadata']
+    program_states = scenes["program_states"]
+    physics_labels = scenes["physics_labels"]
+    metadata = scenes["metadata"]
 
     n_scenes = program_states.shape[0]
     n_sub = min(rsa_subsample, n_scenes)
@@ -81,14 +90,18 @@ def run_rsa_analysis(neural_activity, scenes, neural_meta,
     neural_sub = neural_activity[sub_idx]
     pixel_sub = extract_brain_pixels(program_states[sub_idx], metadata)
     physics_sub = physics_labels[sub_idx]
-    predicted_sub = predicted_pixel_pca[sub_idx] if predicted_pixel_pca is not None else None
+    predicted_sub = (
+        predicted_pixel_pca[sub_idx] if predicted_pixel_pca is not None else None
+    )
 
     # PCA-reduce pixel data for tractability
     print(f"\nSubsampled {n_sub} scenes for RSA.")
     print(f"PCA-reducing pixel data to {pixel_pca_dim} components...")
     scaler = StandardScaler()
     pixel_scaled = scaler.fit_transform(pixel_sub)
-    pca = PCA(n_components=min(pixel_pca_dim, pixel_scaled.shape[0] - 1), random_state=42)
+    pca = PCA(
+        n_components=min(pixel_pca_dim, pixel_scaled.shape[0] - 1), random_state=42
+    )
     pixel_pca = pca.fit_transform(pixel_scaled)
 
     # Standardize physics
@@ -111,8 +124,10 @@ def run_rsa_analysis(neural_activity, scenes, neural_meta,
     if predicted_sub is not None:
         scaler_pred = StandardScaler()
         predicted_scaled = scaler_pred.fit_transform(predicted_sub)
-        pca_pred = PCA(n_components=min(pixel_pca_dim, predicted_scaled.shape[0] - 1),
-                       random_state=42)
+        pca_pred = PCA(
+            n_components=min(pixel_pca_dim, predicted_scaled.shape[0] - 1),
+            random_state=42,
+        )
         predicted_pca_sub = pca_pred.fit_transform(predicted_scaled)
         rdm_predicted = _compute_rdm(predicted_pca_sub)
         rdm_predicted[np.isnan(rdm_predicted)] = 0.0
@@ -131,19 +146,21 @@ def run_rsa_analysis(neural_activity, scenes, neural_meta,
 
     # Partial correlation: neural<->physics | pixel
     partial_corr, partial_p = _partial_spearman(rdm_neural, rdm_physics, rdm_pixel)
-    print(f"  Partial neural<->physics | pixel: r={partial_corr:.4f}  (p={partial_p:.2e})")
+    print(
+        f"  Partial neural<->physics | pixel: r={partial_corr:.4f}  (p={partial_p:.2e})"
+    )
 
     result = {
-        'corr_neural_pixel': corr_neural_pixel,
-        'corr_neural_physics': corr_neural_physics,
-        'corr_pixel_physics': corr_pixel_physics,
-        'partial_neural_physics': partial_corr,
-        'rdm_neural': rdm_neural,
-        'rdm_pixel': rdm_pixel,
-        'rdm_physics': rdm_physics,
-        'n_sub': n_sub,
+        "corr_neural_pixel": corr_neural_pixel,
+        "corr_neural_physics": corr_neural_physics,
+        "corr_pixel_physics": corr_pixel_physics,
+        "partial_neural_physics": partial_corr,
+        "rdm_neural": rdm_neural,
+        "rdm_pixel": rdm_pixel,
+        "rdm_physics": rdm_physics,
+        "n_sub": n_sub,
     }
     if rdm_predicted is not None:
-        result['rdm_predicted'] = rdm_predicted
-        result['corr_neural_predicted'] = corr_neural_predicted
+        result["rdm_predicted"] = rdm_predicted
+        result["corr_neural_predicted"] = corr_neural_predicted
     return result

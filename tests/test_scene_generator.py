@@ -19,7 +19,6 @@ from scene_generator import (
     _encode_scene_lighting,
 )
 
-
 # --- Constants ----------------------------------------------------------
 
 
@@ -33,15 +32,20 @@ def test_dim_constants():
 
 
 def test_encode_scene_config_sphere():
-    cfg = {"shape": "sphere", "params": {"radius": 0.3},
-           "color": [0.1, 0.2, 0.3, 1.0], "specular": 0.5, "x_accel": 4.0}
+    cfg = {
+        "shape": "sphere",
+        "params": {"radius": 0.3},
+        "color": [0.1, 0.2, 0.3, 1.0],
+        "specular": 0.5,
+        "x_accel": 4.0,
+    }
     vec = _encode_scene_config([cfg])
     assert vec.dtype == np.float32
     assert vec.shape == (SCENE_CONFIG_DIM,)
     # Layout: [shape_is_box(1), shape_is_cylinder(1), radius(1), *half_extents(3), *color(4), specular(1)]
     # x_accel is no longer in scene_config — it is now in physics_labels.
-    assert vec[0] == 0.0   # not box
-    assert vec[1] == 0.0   # not cylinder
+    assert vec[0] == 0.0  # not box
+    assert vec[1] == 0.0  # not cylinder
     assert vec[2] == pytest.approx(0.3)
     np.testing.assert_array_equal(vec[3:6], [0.0, 0.0, 0.0])
     np.testing.assert_allclose(vec[6:10], [0.1, 0.2, 0.3, 1.0])
@@ -49,25 +53,34 @@ def test_encode_scene_config_sphere():
 
 
 def test_encode_scene_config_box():
-    cfg = {"shape": "box", "params": {"half_extents": [0.2, 0.15, 0.3]},
-           "color": [0.7, 0.7, 0.0, 1.0], "specular": 0.3, "x_accel": -2.0}
+    cfg = {
+        "shape": "box",
+        "params": {"half_extents": [0.2, 0.15, 0.3]},
+        "color": [0.7, 0.7, 0.0, 1.0],
+        "specular": 0.3,
+        "x_accel": -2.0,
+    }
     vec = _encode_scene_config([cfg])
     assert vec.shape == (SCENE_CONFIG_DIM,)
-    assert vec[0] == 1.0   # is box
-    assert vec[1] == 0.0   # not cylinder
-    assert vec[2] == 0.0   # radius=0 for box
+    assert vec[0] == 1.0  # is box
+    assert vec[1] == 0.0  # not cylinder
+    assert vec[2] == 0.0  # radius=0 for box
     np.testing.assert_allclose(vec[3:6], [0.2, 0.15, 0.3])
     np.testing.assert_allclose(vec[6:10], [0.7, 0.7, 0.0, 1.0])
     assert vec[10] == pytest.approx(0.3)
 
 
 def test_encode_scene_config_cylinder():
-    cfg = {"shape": "cylinder", "params": {"radius": 0.2, "half_length": 0.15},
-           "color": [0.4, 0.6, 0.8, 1.0], "specular": 0.6}
+    cfg = {
+        "shape": "cylinder",
+        "params": {"radius": 0.2, "half_length": 0.15},
+        "color": [0.4, 0.6, 0.8, 1.0],
+        "specular": 0.6,
+    }
     vec = _encode_scene_config([cfg])
     assert vec.shape == (SCENE_CONFIG_DIM,)
-    assert vec[0] == 0.0   # not box
-    assert vec[1] == 1.0   # is cylinder
+    assert vec[0] == 0.0  # not box
+    assert vec[1] == 1.0  # is cylinder
     assert vec[2] == pytest.approx(0.2)
     np.testing.assert_array_equal(vec[3:6], [0.0, 0.0, 0.0])
     np.testing.assert_allclose(vec[6:10], [0.4, 0.6, 0.8, 1.0])
@@ -84,10 +97,19 @@ def test_encode_scene_config_two_objects(tiny_shape_configs):
 
 def test_encode_scene_config_ignores_x_accel():
     # x_accel must not affect the encoded vec — it now lives in physics_labels.
-    with_accel = {"shape": "sphere", "params": {"radius": 0.2},
-                  "color": [0.0, 0.0, 0.0, 1.0], "specular": 0.4, "x_accel": 7.5}
-    without = {"shape": "sphere", "params": {"radius": 0.2},
-               "color": [0.0, 0.0, 0.0, 1.0], "specular": 0.4}
+    with_accel = {
+        "shape": "sphere",
+        "params": {"radius": 0.2},
+        "color": [0.0, 0.0, 0.0, 1.0],
+        "specular": 0.4,
+        "x_accel": 7.5,
+    }
+    without = {
+        "shape": "sphere",
+        "params": {"radius": 0.2},
+        "color": [0.0, 0.0, 0.0, 1.0],
+        "specular": 0.4,
+    }
     np.testing.assert_array_equal(
         _encode_scene_config([with_accel]),
         _encode_scene_config([without]),
@@ -113,9 +135,9 @@ def test_encode_scene_lighting(tiny_lighting):
     np.testing.assert_allclose(vec[11:14], tiny_lighting["camTargetJitter"])
     assert vec[14] == pytest.approx(tiny_lighting["lightAmbientCoeff"])
     # Indices 15–21: groundColor(3) + backdropColor(3) + backdropSpecular(1) — defaults
-    np.testing.assert_allclose(vec[15:18], [0.6, 0.6, 0.6])   # groundColor default
-    np.testing.assert_allclose(vec[18:21], [0.2, 0.2, 0.4])   # backdropColor default
-    assert vec[21] == pytest.approx(0.0)                        # backdropSpecular default mean
+    np.testing.assert_allclose(vec[15:18], [0.6, 0.6, 0.6])  # groundColor default
+    np.testing.assert_allclose(vec[18:21], [0.2, 0.2, 0.4])  # backdropColor default
+    assert vec[21] == pytest.approx(0.0)  # backdropSpecular default mean
     # Indices 22–56: 5 background spheres × 7 floats, all zero (no backgroundObjects in fixture)
     np.testing.assert_array_equal(vec[22:57], np.zeros(35, dtype=np.float32))
 
@@ -124,9 +146,9 @@ def test_encode_scene_lighting(tiny_lighting):
 
 
 def test_build_program_state_length_and_dtype():
-    rgba_bytes = bytes(range(256)) * 4    # 1024 uint8 bytes per frame
+    rgba_bytes = bytes(range(256)) * 4  # 1024 uint8 bytes per frame
     depth_bytes = (np.arange(16, dtype=np.float32)).tobytes()  # 64 bytes
-    seg_bytes = (np.arange(8, dtype=np.int32)).tobytes()       # 32 bytes
+    seg_bytes = (np.arange(8, dtype=np.int32)).tobytes()  # 32 bytes
     physics = np.array([1.0, 2.0, 3.0], dtype=np.float32)
     config = np.array([0.5, 0.6], dtype=np.float32)
     lighting = np.array([0.1, 0.2, 0.3], dtype=np.float32)
@@ -136,9 +158,7 @@ def test_build_program_state_length_and_dtype():
     ps = _build_program_state(frames, physics, config, lighting)
 
     per_frame_render = len(rgba_bytes) + len(depth_bytes) + len(seg_bytes)
-    expected_len = (
-        3 * per_frame_render + len(physics) + len(config) + len(lighting)
-    )
+    expected_len = 3 * per_frame_render + len(physics) + len(config) + len(lighting)
     assert ps.dtype == np.float32
     assert ps.shape == (expected_len,)
     # Each frame's leading RGBA bytes appear at the start of its slice,
@@ -146,12 +166,12 @@ def test_build_program_state_length_and_dtype():
     for i in range(3):
         offset = i * per_frame_render
         np.testing.assert_array_equal(
-            ps[offset:offset + 256],
+            ps[offset : offset + 256],
             np.arange(256, dtype=np.float32),
         )
     # Physics labels appear right after the 3-frame render block.
     render_total = 3 * per_frame_render
-    np.testing.assert_array_equal(ps[render_total:render_total + 3], physics)
+    np.testing.assert_array_equal(ps[render_total : render_total + 3], physics)
 
 
 # --- Property-based -----------------------------------------------------
@@ -159,16 +179,19 @@ def test_build_program_state_length_and_dtype():
 
 # Values are cast to float32 in the encoders, so generate float32-representable
 # numbers to keep round-trip comparisons exact (no subnormal-underflow flake).
-unit_floats = st.floats(min_value=0.0, max_value=1.0, allow_nan=False,
-                        allow_infinity=False, width=32)
-finite_floats = st.floats(min_value=-10.0, max_value=10.0, allow_nan=False,
-                          allow_infinity=False, width=32)
+unit_floats = st.floats(
+    min_value=0.0, max_value=1.0, allow_nan=False, allow_infinity=False, width=32
+)
+finite_floats = st.floats(
+    min_value=-10.0, max_value=10.0, allow_nan=False, allow_infinity=False, width=32
+)
 color_strategy = st.lists(unit_floats, min_size=4, max_size=4)
 
 
 # 1/16 and 1/2 are both exactly representable in float32 — keeps hypothesis happy.
-small_dim = st.floats(min_value=0.0625, max_value=0.5, allow_nan=False,
-                      allow_infinity=False, width=32)
+small_dim = st.floats(
+    min_value=0.0625, max_value=0.5, allow_nan=False, allow_infinity=False, width=32
+)
 
 
 @settings(max_examples=30, deadline=None)
@@ -180,11 +203,9 @@ small_dim = st.floats(min_value=0.0625, max_value=0.5, allow_nan=False,
 )
 def test_property_encode_scene_config(is_box, radius, half_extents, color):
     if is_box:
-        cfg = {"shape": "box", "params": {"half_extents": half_extents},
-               "color": color}
+        cfg = {"shape": "box", "params": {"half_extents": half_extents}, "color": color}
     else:
-        cfg = {"shape": "sphere", "params": {"radius": radius},
-               "color": color}
+        cfg = {"shape": "sphere", "params": {"radius": radius}, "color": color}
     vec = _encode_scene_config([cfg])
     assert vec.dtype == np.float32
     assert vec.shape == (SCENE_CONFIG_DIM,)
@@ -201,8 +222,15 @@ def test_property_encode_scene_config(is_box, radius, half_extents, color):
     cam_target_jitter=st.lists(finite_floats, min_size=3, max_size=3),
     ambient_coeff=unit_floats,
 )
-def test_property_encode_scene_lighting(pillar_gray, direction, color, distance,
-                                        cam_jitter, cam_target_jitter, ambient_coeff):
+def test_property_encode_scene_lighting(
+    pillar_gray,
+    direction,
+    color,
+    distance,
+    cam_jitter,
+    cam_target_jitter,
+    ambient_coeff,
+):
     lighting = {
         "lightDirection": direction,
         "lightColor": color,
@@ -233,10 +261,19 @@ def test_generate_scenes_smoke():
     out = generate_scenes(n_scenes=3, seed=42)
 
     expected_keys = {
-        "program_states", "physics_labels", "initial_physics_labels",
-        "initial_renders", "early_renders", "late_renders", "target_renders",
-        "behavior_labels", "kinetic_energies", "scene_configs",
-        "pillar_grays", "lightings", "metadata",
+        "program_states",
+        "physics_labels",
+        "initial_physics_labels",
+        "initial_renders",
+        "early_renders",
+        "late_renders",
+        "target_renders",
+        "behavior_labels",
+        "kinetic_energies",
+        "scene_configs",
+        "pillar_grays",
+        "lightings",
+        "metadata",
     }
     assert expected_keys.issubset(out.keys())
 
@@ -258,8 +295,7 @@ def test_generate_scenes_smoke():
     # Render layout: three brain-input frames + a held-out behavioral target.
     per_frame = meta["D_render_per_frame"]
     assert meta["D_render_bytes"] == 3 * per_frame
-    for key in ("initial_renders", "early_renders", "late_renders",
-                "target_renders"):
+    for key in ("initial_renders", "early_renders", "late_renders", "target_renders"):
         assert out[key].shape == (3, per_frame)
 
     # frame_render_indices must partition render_indices exactly.
@@ -270,8 +306,7 @@ def test_generate_scenes_smoke():
     assert meta["render_indices"] == slice(0, 3 * per_frame)
 
     # pixel_indices points at the LATE frame's RGBA inside program_state.
-    rgba_bytes = (meta["target_pixel_indices"].stop
-                  - meta["target_pixel_indices"].start)
+    rgba_bytes = meta["target_pixel_indices"].stop - meta["target_pixel_indices"].start
     assert meta["pixel_indices"].start == fri["late"].start
     assert meta["pixel_indices"].stop == fri["late"].start + rgba_bytes
     # target_pixel_indices must lie within the target_renders width.
@@ -301,18 +336,22 @@ def test_physics_labels_include_x_accel():
 
     out = generate_scenes(n_scenes=4, seed=123)
     expected = np.array(
-        [[cfg.get('x_accel', 0.0) for cfg in scene_cfgs]
-         for scene_cfgs in out['scene_configs']],
+        [
+            [cfg.get("x_accel", 0.0) for cfg in scene_cfgs]
+            for scene_cfgs in out["scene_configs"]
+        ],
         dtype=np.float32,
     )  # (n_scenes, N_OBJECTS)
 
     for i in range(N_OBJECTS):
         col = i * 16 + 15
-        np.testing.assert_allclose(out['physics_labels'][:, col], expected[:, i])
-        np.testing.assert_allclose(out['initial_physics_labels'][:, col], expected[:, i])
+        np.testing.assert_allclose(out["physics_labels"][:, col], expected[:, i])
+        np.testing.assert_allclose(
+            out["initial_physics_labels"][:, col], expected[:, i]
+        )
 
     # And the layout: stride 16 per object.
-    assert out['physics_labels'].shape[1] == 16 * N_OBJECTS
+    assert out["physics_labels"].shape[1] == 16 * N_OBJECTS
 
 
 @pytest.mark.slow
@@ -327,12 +366,16 @@ def test_resimulate_scene_determinism():
     lighting = out["lightings"][0]
 
     img_a = resimulate_scene(
-        shape_configs, initial_physics,
-        pillar_gray=pillar_gray, lighting=lighting,
+        shape_configs,
+        initial_physics,
+        pillar_gray=pillar_gray,
+        lighting=lighting,
     )
     img_b = resimulate_scene(
-        shape_configs, initial_physics,
-        pillar_gray=pillar_gray, lighting=lighting,
+        shape_configs,
+        initial_physics,
+        pillar_gray=pillar_gray,
+        lighting=lighting,
     )
     np.testing.assert_array_equal(img_a, img_b)
 
@@ -366,6 +409,7 @@ def test_physics_sufficient_for_forward_simulation():
         actual = resim_rgba.flatten().astype(np.float32)
         expected = out["target_renders"][i, :rgba_end]
         np.testing.assert_array_equal(
-            actual, expected,
+            actual,
+            expected,
             err_msg=f"Scene {i}: resimulated RGBA does not match original target_renders",
         )

@@ -71,8 +71,10 @@ def compute_valid_dims(physics_labels):
 # Architectures
 # ---------------------------------------------------------------------------
 
+
 class LinearProbe(nn.Module):
     """Flatten 3-frame stack → single Linear → output. No nonlinearity."""
+
     def __init__(self, n_frames, n_channels, image_size, output_dim):
         super().__init__()
         in_dim = n_frames * n_channels * image_size * image_size
@@ -84,15 +86,18 @@ class LinearProbe(nn.Module):
 
 class DownsampleMLP(nn.Module):
     """AvgPool2d(8) per frame → flatten → MLP. No learned conv features."""
-    def __init__(self, n_frames, n_channels, image_size, output_dim,
-                 pool=8, hidden_dim=256):
+
+    def __init__(
+        self, n_frames, n_channels, image_size, output_dim, pool=8, hidden_dim=256
+    ):
         super().__init__()
         ds = image_size // pool
         feat_dim = n_frames * n_channels * ds * ds
         self.pool = nn.AvgPool2d(kernel_size=pool)
         self.head = nn.Sequential(
             nn.Flatten(),
-            nn.Linear(feat_dim, hidden_dim), nn.ReLU(inplace=True),
+            nn.Linear(feat_dim, hidden_dim),
+            nn.ReLU(inplace=True),
             nn.Linear(hidden_dim, output_dim),
         )
 
@@ -109,8 +114,8 @@ class GridPoolCNN(nn.Module):
     grid_size=1 reproduces the original InverseCNNNet (without BN). grid_size>1
     preserves spatial layout at the cost of a wider head input.
     """
-    def __init__(self, n_frames, n_channels, output_dim,
-                 grid_size=4, hidden_dim=256):
+
+    def __init__(self, n_frames, n_channels, output_dim, grid_size=4, hidden_dim=256):
         super().__init__()
         self.n_frames = n_frames
         self.conv_feat_dim = 128
@@ -129,8 +134,10 @@ class GridPoolCNN(nn.Module):
         per_frame = self.conv_feat_dim * grid_size * grid_size
         feat_dim = per_frame * n_frames
         self.head = nn.Sequential(
-            nn.Linear(feat_dim, hidden_dim), nn.ReLU(inplace=True),
-            nn.Linear(hidden_dim, hidden_dim // 2), nn.ReLU(inplace=True),
+            nn.Linear(feat_dim, hidden_dim),
+            nn.ReLU(inplace=True),
+            nn.Linear(hidden_dim, hidden_dim // 2),
+            nn.ReLU(inplace=True),
             nn.Linear(hidden_dim // 2, output_dim),
         )
 
@@ -149,8 +156,10 @@ class SpatialSoftmaxCNN(nn.Module):
     operates on a 16×16 grid — sharp enough for localization, ~16× cheaper
     on CPU than the no-stride variant.
     """
-    def __init__(self, n_frames, n_channels, image_size, output_dim,
-                 n_filters=32, hidden_dim=64):
+
+    def __init__(
+        self, n_frames, n_channels, image_size, output_dim, n_filters=32, hidden_dim=64
+    ):
         super().__init__()
         self.n_filters = n_filters
 
@@ -165,13 +174,14 @@ class SpatialSoftmaxCNN(nn.Module):
         sm_size = image_size // 4
         ys = torch.linspace(-1.0, 1.0, sm_size)
         xs = torch.linspace(-1.0, 1.0, sm_size)
-        gy, gx = torch.meshgrid(ys, xs, indexing='ij')
-        self.register_buffer('grid_x', gx.reshape(-1), persistent=False)
-        self.register_buffer('grid_y', gy.reshape(-1), persistent=False)
+        gy, gx = torch.meshgrid(ys, xs, indexing="ij")
+        self.register_buffer("grid_x", gx.reshape(-1), persistent=False)
+        self.register_buffer("grid_y", gy.reshape(-1), persistent=False)
 
         feat_dim = n_frames * n_filters * 2
         self.head = nn.Sequential(
-            nn.Linear(feat_dim, hidden_dim), nn.ReLU(inplace=True),
+            nn.Linear(feat_dim, hidden_dim),
+            nn.ReLU(inplace=True),
             nn.Linear(hidden_dim, output_dim),
         )
 
@@ -187,24 +197,38 @@ class SpatialSoftmaxCNN(nn.Module):
         return self.head(coords)
 
 
-VARIANTS = ['linear', 'downsample_mlp', 'gridpool', 'spatial_softmax']
+VARIANTS = ["linear", "downsample_mlp", "gridpool", "spatial_softmax"]
 
 
 def make_net(variant, n_frames, n_channels, image_size, output_dim, *, args):
-    if variant == 'linear':
+    if variant == "linear":
         return LinearProbe(n_frames, n_channels, image_size, output_dim)
-    if variant == 'downsample_mlp':
-        return DownsampleMLP(n_frames, n_channels, image_size, output_dim,
-                             pool=args.downsample_pool,
-                             hidden_dim=args.hidden_dim)
-    if variant == 'gridpool':
-        return GridPoolCNN(n_frames, n_channels, output_dim,
-                           grid_size=args.grid_size,
-                           hidden_dim=args.hidden_dim)
-    if variant == 'spatial_softmax':
-        return SpatialSoftmaxCNN(n_frames, n_channels, image_size, output_dim,
-                                 n_filters=args.softmax_filters,
-                                 hidden_dim=args.hidden_dim_small)
+    if variant == "downsample_mlp":
+        return DownsampleMLP(
+            n_frames,
+            n_channels,
+            image_size,
+            output_dim,
+            pool=args.downsample_pool,
+            hidden_dim=args.hidden_dim,
+        )
+    if variant == "gridpool":
+        return GridPoolCNN(
+            n_frames,
+            n_channels,
+            output_dim,
+            grid_size=args.grid_size,
+            hidden_dim=args.hidden_dim,
+        )
+    if variant == "spatial_softmax":
+        return SpatialSoftmaxCNN(
+            n_frames,
+            n_channels,
+            image_size,
+            output_dim,
+            n_filters=args.softmax_filters,
+            hidden_dim=args.hidden_dim_small,
+        )
     raise ValueError(f"unknown variant {variant!r}")
 
 
@@ -212,9 +236,23 @@ def make_net(variant, n_frames, n_channels, image_size, output_dim, *, args):
 # Training (mirrors eval_pp_cnn_gpu.train_cnn but slimmer, no BN, no curves)
 # ---------------------------------------------------------------------------
 
-def train_one(net, frames_f32, y, idx_tr, idx_val, *, device,
-              n_epochs, batch_size, lr, patience, log_every, label,
-              min_epochs=0):
+
+def train_one(
+    net,
+    frames_f32,
+    y,
+    idx_tr,
+    idx_val,
+    *,
+    device,
+    n_epochs,
+    batch_size,
+    lr,
+    patience,
+    log_every,
+    label,
+    min_epochs=0,
+):
     X_tr = torch.tensor(frames_f32[idx_tr], dtype=torch.float32, device=device)
     y_tr = torch.tensor(y[idx_tr], dtype=torch.float32, device=device)
     X_val = torch.tensor(frames_f32[idx_val], dtype=torch.float32, device=device)
@@ -224,16 +262,18 @@ def train_one(net, frames_f32, y, idx_tr, idx_val, *, device,
     opt = torch.optim.Adam(net.parameters(), lr=lr)
     sch = torch.optim.lr_scheduler.ReduceLROnPlateau(opt, factor=0.5, patience=10)
     loss_fn = nn.MSELoss()
-    loader = DataLoader(TensorDataset(X_tr, y_tr),
-                        batch_size=batch_size, shuffle=True)
+    loader = DataLoader(TensorDataset(X_tr, y_tr), batch_size=batch_size, shuffle=True)
 
-    best_val = float('inf')
+    best_val = float("inf")
     best_state = None
     best_epoch = 0
     bad_epochs = 0
     history = []
 
-    print(f"  [{label}] training: device={device}  n_train={X_tr.shape[0]}  n_val={X_val.shape[0]}", flush=True)
+    print(
+        f"  [{label}] training: device={device}  n_train={X_tr.shape[0]}  n_val={X_val.shape[0]}",
+        flush=True,
+    )
 
     t0 = time.time()
     for epoch in range(n_epochs):
@@ -247,40 +287,52 @@ def train_one(net, frames_f32, y, idx_tr, idx_val, *, device,
         with torch.no_grad():
             tl = loss_fn(net(X_tr), y_tr).item()
             vl = loss_fn(net(X_val), y_val).item()
-        cur_lr = opt.param_groups[0]['lr']
-        history.append({'epoch': epoch + 1, 'train_loss': tl,
-                        'val_loss': vl, 'lr': cur_lr})
+        cur_lr = opt.param_groups[0]["lr"]
+        history.append(
+            {"epoch": epoch + 1, "train_loss": tl, "val_loss": vl, "lr": cur_lr}
+        )
 
         if (epoch + 1) % log_every == 0 or epoch == 0:
-            print(f"  [{label}]  ep {epoch+1:>3d}  train={tl:.4f}  val={vl:.4f}  lr={cur_lr:.2e}", flush=True)
+            print(
+                f"  [{label}]  ep {epoch+1:>3d}  train={tl:.4f}  val={vl:.4f}  lr={cur_lr:.2e}",
+                flush=True,
+            )
         sch.step(vl)
 
         if vl < best_val - 1e-5:
             best_val = vl
-            best_state = {k: v.detach().clone().cpu() for k, v in net.state_dict().items()}
+            best_state = {
+                k: v.detach().clone().cpu() for k, v in net.state_dict().items()
+            }
             best_epoch = epoch + 1
             bad_epochs = 0
         else:
             bad_epochs += 1
             if bad_epochs >= patience and (epoch + 1) >= min_epochs:
-                print(f"  [{label}] early stop @ epoch {epoch+1}  best val={best_val:.4f} @ {best_epoch}", flush=True)
+                print(
+                    f"  [{label}] early stop @ epoch {epoch+1}  best val={best_val:.4f} @ {best_epoch}",
+                    flush=True,
+                )
                 break
 
     elapsed = time.time() - t0
-    print(f"  [{label}] done in {elapsed:.1f}s  best val={best_val:.4f} @ epoch {best_epoch}", flush=True)
+    print(
+        f"  [{label}] done in {elapsed:.1f}s  best val={best_val:.4f} @ epoch {best_epoch}",
+        flush=True,
+    )
 
     net.load_state_dict({k: v.to(device) for k, v in best_state.items()})
     net.eval()
     with torch.no_grad():
         y_pred_val = net(X_val).detach().cpu().numpy()
-    per_dim_r2 = r2_score(y[idx_val], y_pred_val, multioutput='raw_values')
+    per_dim_r2 = r2_score(y[idx_val], y_pred_val, multioutput="raw_values")
 
     return {
-        'per_dim_r2': per_dim_r2,
-        'best_val_mse': best_val,
-        'best_epoch': best_epoch,
-        'train_time_s': elapsed,
-        'history': history,
+        "per_dim_r2": per_dim_r2,
+        "best_val_mse": best_val,
+        "best_epoch": best_epoch,
+        "train_time_s": elapsed,
+        "history": history,
     }
 
 
@@ -288,32 +340,59 @@ def train_one(net, frames_f32, y, idx_tr, idx_val, *, device,
 # Main
 # ---------------------------------------------------------------------------
 
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument('--scenes', default='data/scenes.npz')
-    ap.add_argument('--variant', default='all',
-                    choices=['all'] + VARIANTS,
-                    help="which architecture(s) to evaluate")
-    ap.add_argument('--device', default='cpu',
-                    help="cpu | cuda | mps   (BN-free models train fast on CPU)")
-    ap.add_argument('--epochs', type=int, default=200)
-    ap.add_argument('--patience', type=int, default=30)
-    ap.add_argument('--batch-size', type=int, default=64)
-    ap.add_argument('--lr', type=float, default=1e-3)
-    ap.add_argument('--val-frac', type=float, default=0.15)
-    ap.add_argument('--seed', type=int, default=42)
-    ap.add_argument('--hidden-dim', type=int, default=256,
-                    help="hidden dim for downsample_mlp / gridpool heads")
-    ap.add_argument('--hidden-dim-small', type=int, default=64,
-                    help="hidden dim for spatial_softmax head")
-    ap.add_argument('--grid-size', type=int, default=4,
-                    help="AdaptiveAvgPool2d output side for gridpool")
-    ap.add_argument('--downsample-pool', type=int, default=8,
-                    help="AvgPool2d kernel for downsample_mlp")
-    ap.add_argument('--softmax-filters', type=int, default=32,
-                    help="number of channels at the softmax layer")
-    ap.add_argument('--log-every', type=int, default=20)
-    ap.add_argument('--output', default='outputs/pp_cnn_simple.json')
+    ap.add_argument("--scenes", default="data/scenes.npz")
+    ap.add_argument(
+        "--variant",
+        default="all",
+        choices=["all"] + VARIANTS,
+        help="which architecture(s) to evaluate",
+    )
+    ap.add_argument(
+        "--device",
+        default="cpu",
+        help="cpu | cuda | mps   (BN-free models train fast on CPU)",
+    )
+    ap.add_argument("--epochs", type=int, default=200)
+    ap.add_argument("--patience", type=int, default=30)
+    ap.add_argument("--batch-size", type=int, default=64)
+    ap.add_argument("--lr", type=float, default=1e-3)
+    ap.add_argument("--val-frac", type=float, default=0.15)
+    ap.add_argument("--seed", type=int, default=42)
+    ap.add_argument(
+        "--hidden-dim",
+        type=int,
+        default=256,
+        help="hidden dim for downsample_mlp / gridpool heads",
+    )
+    ap.add_argument(
+        "--hidden-dim-small",
+        type=int,
+        default=64,
+        help="hidden dim for spatial_softmax head",
+    )
+    ap.add_argument(
+        "--grid-size",
+        type=int,
+        default=4,
+        help="AdaptiveAvgPool2d output side for gridpool",
+    )
+    ap.add_argument(
+        "--downsample-pool",
+        type=int,
+        default=8,
+        help="AvgPool2d kernel for downsample_mlp",
+    )
+    ap.add_argument(
+        "--softmax-filters",
+        type=int,
+        default=32,
+        help="number of channels at the softmax layer",
+    )
+    ap.add_argument("--log-every", type=int, default=20)
+    ap.add_argument("--output", default="outputs/pp_cnn_simple.json")
     args = ap.parse_args()
 
     torch.manual_seed(args.seed)
@@ -325,7 +404,7 @@ def main():
 
     print(f"\nLoading scenes from {args.scenes} ...", flush=True)
     scenes = load_scenes_any(args.scenes)
-    n = scenes['initial_renders'].shape[0]
+    n = scenes["initial_renders"].shape[0]
     print(f"  n_scenes={n}", flush=True)
 
     print("Building frame stack ...", flush=True)
@@ -333,7 +412,7 @@ def main():
     frames_f32 = frames.astype(np.float32) / 255.0
     print(f"  shape={frames.shape}  ({frames.nbytes/1e6:.0f} MB uint8)", flush=True)
 
-    initial_physics = scenes['initial_physics_labels']
+    initial_physics = scenes["initial_physics_labels"]
     valid_dims, full_physics_dim = compute_valid_dims(initial_physics)
     n_observable = int(valid_dims.sum())
     print(f"  observable physics dims: {n_observable}", flush=True)
@@ -344,74 +423,98 @@ def main():
     idx = np.arange(n)
     idx_tr, idx_val = train_test_split(idx, test_size=args.val_frac, random_state=42)
 
-    variants = VARIANTS if args.variant == 'all' else [args.variant]
+    variants = VARIANTS if args.variant == "all" else [args.variant]
     results = {}
 
     for variant in variants:
         print(f"\n=== variant: {variant} ===", flush=True)
-        net = make_net(variant, n_frames=3, n_channels=4,
-                       image_size=IMAGE_SIZE, output_dim=n_observable,
-                       args=args)
+        net = make_net(
+            variant,
+            n_frames=3,
+            n_channels=4,
+            image_size=IMAGE_SIZE,
+            output_dim=n_observable,
+            args=args,
+        )
         n_params = sum(p.numel() for p in net.parameters())
         print(f"  params: {n_params:,}", flush=True)
 
-        fit = train_one(net, frames_f32, y, idx_tr, idx_val,
-                        device=device, n_epochs=args.epochs,
-                        batch_size=args.batch_size, lr=args.lr,
-                        patience=args.patience, log_every=args.log_every,
-                        label=variant)
+        fit = train_one(
+            net,
+            frames_f32,
+            y,
+            idx_tr,
+            idx_val,
+            device=device,
+            n_epochs=args.epochs,
+            batch_size=args.batch_size,
+            lr=args.lr,
+            patience=args.patience,
+            log_every=args.log_every,
+            label=variant,
+        )
 
-        per_dim_r2 = fit['per_dim_r2']
+        per_dim_r2 = fit["per_dim_r2"]
         full_per_dim_r2 = np.zeros(full_physics_dim)
         full_per_dim_r2[valid_dims] = per_dim_r2
 
         print(f"\n  per-dim R² (val):", flush=True)
         for i, name in enumerate(PHYSICS_LABELS):
             if valid_dims[i]:
-                print(f"     {i:2d} {name:10s}  R²={full_per_dim_r2[i]:+.4f}", flush=True)
+                print(
+                    f"     {i:2d} {name:10s}  R²={full_per_dim_r2[i]:+.4f}", flush=True
+                )
         mean_r2 = float(per_dim_r2.mean())
         min_r2 = float(per_dim_r2.min())
         print(f"  mean valid R² = {mean_r2:+.4f}  min = {min_r2:+.4f}", flush=True)
 
         results[variant] = {
-            'n_params': int(n_params),
-            'val_mse': float(fit['best_val_mse']),
-            'best_epoch': int(fit['best_epoch']),
-            'train_time_s': float(fit['train_time_s']),
-            'mean_valid_dim_r2': mean_r2,
-            'min_valid_dim_r2': min_r2,
-            'per_dim_r2': {PHYSICS_LABELS[i]: float(full_per_dim_r2[i])
-                           for i in range(full_physics_dim)},
+            "n_params": int(n_params),
+            "val_mse": float(fit["best_val_mse"]),
+            "best_epoch": int(fit["best_epoch"]),
+            "train_time_s": float(fit["train_time_s"]),
+            "mean_valid_dim_r2": mean_r2,
+            "min_valid_dim_r2": min_r2,
+            "per_dim_r2": {
+                PHYSICS_LABELS[i]: float(full_per_dim_r2[i])
+                for i in range(full_physics_dim)
+            },
         }
 
     # ------------------------------------------------------------------
     # Summary
     # ------------------------------------------------------------------
     print("\n=== Summary ===", flush=True)
-    print(f"  {'variant':20s}  {'params':>10s}  {'val_mse':>8s}  {'mean R²':>8s}  {'min R²':>8s}  {'epoch':>6s}  {'time(s)':>8s}", flush=True)
+    print(
+        f"  {'variant':20s}  {'params':>10s}  {'val_mse':>8s}  {'mean R²':>8s}  {'min R²':>8s}  {'epoch':>6s}  {'time(s)':>8s}",
+        flush=True,
+    )
     for v, r in results.items():
-        print(f"  {v:20s}  {r['n_params']:>10,}  {r['val_mse']:>8.4f}  "
-              f"{r['mean_valid_dim_r2']:>+8.4f}  {r['min_valid_dim_r2']:>+8.4f}  "
-              f"{r['best_epoch']:>6d}  {r['train_time_s']:>8.1f}", flush=True)
+        print(
+            f"  {v:20s}  {r['n_params']:>10,}  {r['val_mse']:>8.4f}  "
+            f"{r['mean_valid_dim_r2']:>+8.4f}  {r['min_valid_dim_r2']:>+8.4f}  "
+            f"{r['best_epoch']:>6d}  {r['train_time_s']:>8.1f}",
+            flush=True,
+        )
     print(f"\n  PCA(50)+MLP baseline: mean R² = 0.6553 (val_mse=0.347)", flush=True)
     print(f"  prior CNN (291k params, GAP): mean R² = 0.499", flush=True)
 
     out = {
-        'args': vars(args),
-        'device': str(device),
-        'n_scenes': int(n),
-        'n_observable_dims': int(n_observable),
-        'baselines_for_reference': {
-            'pca50_mlp_3frame': 0.6553,
-            'prior_cnn_gap_v1': 0.499,
+        "args": vars(args),
+        "device": str(device),
+        "n_scenes": int(n),
+        "n_observable_dims": int(n_observable),
+        "baselines_for_reference": {
+            "pca50_mlp_3frame": 0.6553,
+            "prior_cnn_gap_v1": 0.499,
         },
-        'variants': results,
+        "variants": results,
     }
-    os.makedirs(os.path.dirname(args.output) or '.', exist_ok=True)
-    with open(args.output, 'w') as f:
+    os.makedirs(os.path.dirname(args.output) or ".", exist_ok=True)
+    with open(args.output, "w") as f:
         json.dump(out, f, indent=2)
     print(f"\nSaved → {args.output}", flush=True)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

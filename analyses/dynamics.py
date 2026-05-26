@@ -32,10 +32,16 @@ from config import DYNAMICS_PCA_DIM as _CFG_DYNAMICS_PCA_DIM
 from scene_generator import extract_brain_pixels, extract_frame_pixels
 
 
-def run_dynamics_analysis(neural_activity, scenes, neural_meta,
-                          encoding_delta_r2, encoder, *,
-                          inferred_physics=None,
-                          dynamics_pca_dim=None):
+def run_dynamics_analysis(
+    neural_activity,
+    scenes,
+    neural_meta,
+    encoding_delta_r2,
+    encoder,
+    *,
+    inferred_physics=None,
+    dynamics_pca_dim=None,
+):
     """
     Future brain state prediction via physics vs. pixel forward models.
 
@@ -68,18 +74,18 @@ def run_dynamics_analysis(neural_activity, scenes, neural_meta,
 
     from scene_generator import resimulate_scene
 
-    program_states = scenes['program_states']
-    initial_physics_labels = scenes['initial_physics_labels']
-    initial_renders = scenes['initial_renders']
-    scene_configs = scenes['scene_configs']
-    pillar_grays = scenes['pillar_grays']
-    lightings = scenes['lightings']
-    metadata = scenes['metadata']
+    program_states = scenes["program_states"]
+    initial_physics_labels = scenes["initial_physics_labels"]
+    initial_renders = scenes["initial_renders"]
+    scene_configs = scenes["scene_configs"]
+    pillar_grays = scenes["pillar_grays"]
+    lightings = scenes["lightings"]
+    metadata = scenes["metadata"]
     initial_rgba = extract_frame_pixels(initial_renders, metadata)
 
-    enc_scaler = encoder['scaler']
-    enc_pca = encoder['pca']
-    enc_ridge = encoder['ridge']
+    enc_scaler = encoder["scaler"]
+    enc_pca = encoder["pca"]
+    enc_ridge = encoder["ridge"]
 
     n_scenes, n_neurons = neural_activity.shape
 
@@ -92,7 +98,8 @@ def run_dynamics_analysis(neural_activity, scenes, neural_meta,
         if (i + 1) % 100 == 0 or i == 0:
             print(f"  Resimulating scene {i+1}/{n_scenes}...")
         resim_program_states[i] = resimulate_scene(
-            scene_configs[i], initial_physics_labels[i],
+            scene_configs[i],
+            initial_physics_labels[i],
             return_program_state=True,
             pillar_gray=pillar_grays[i],
             lighting=lightings[i],
@@ -133,7 +140,8 @@ def run_dynamics_analysis(neural_activity, scenes, neural_meta,
             if (i + 1) % 100 == 0 or i == 0:
                 print(f"  Resimulating scene {i+1}/{n_scenes}...")
             resim_inferred_states[i] = resimulate_scene(
-                scene_configs[i], inferred_physics[i],
+                scene_configs[i],
+                inferred_physics[i],
                 return_program_state=True,
                 pillar_gray=pillar_grays[i],
                 lighting=lightings[i],
@@ -149,7 +157,9 @@ def run_dynamics_analysis(neural_activity, scenes, neural_meta,
                 RidgeCV(alphas=np.logspace(-2, 6, 20), alpha_per_target=True),
             )
             pipe.fit(pixel_data[train_idx], neural_activity[train_idx])
-            pred_neural_inferred[test_idx] = pipe.predict(resim_inferred_pixels[test_idx])
+            pred_neural_inferred[test_idx] = pipe.predict(
+                resim_inferred_pixels[test_idx]
+            )
         r2_inferred_forward = _r2_per_neuron(pred_neural_inferred, neural_activity)
         mean_r2_inferred = r2_inferred_forward.mean()
         print(f"  Inferred forward model mean R² (CV): {mean_r2_inferred:.4f}")
@@ -174,8 +184,9 @@ def run_dynamics_analysis(neural_activity, scenes, neural_meta,
     init_pixel_pca = pca_init.fit_transform(init_scaled)
 
     # Cross-validated MLP predictions (out-of-fold to avoid double-dipping)
-    pred_target_pca = cross_val_predict(_make_mlp(), init_pixel_pca,
-                                        target_pixel_pca, cv=5)
+    pred_target_pca = cross_val_predict(
+        _make_mlp(), init_pixel_pca, target_pixel_pca, cv=5
+    )
 
     # Inverse-transform back to raw 3-frame pixel space, then through the encoder.
     pred_target_scaled = pca_target.inverse_transform(pred_target_pca)
@@ -201,14 +212,14 @@ def run_dynamics_analysis(neural_activity, scenes, neural_meta,
     print(f"    (cf. encoding ΔR² for current brain: {encoding_delta_r2:.4f})")
 
     return {
-        'r2_physics_forward': r2_physics_forward,
-        'r2_pixel_forward': r2_pixel_forward,
-        'r2_inferred_forward': r2_inferred_forward,
-        'mean_r2_physics_forward': mean_r2_physics,
-        'mean_r2_pixel_forward': mean_r2_pixel,
-        'mean_r2_inferred_forward': mean_r2_inferred,
-        'encoding_delta_r2': encoding_delta_r2,
-        'forward_gap': gap,
+        "r2_physics_forward": r2_physics_forward,
+        "r2_pixel_forward": r2_pixel_forward,
+        "r2_inferred_forward": r2_inferred_forward,
+        "mean_r2_physics_forward": mean_r2_physics,
+        "mean_r2_pixel_forward": mean_r2_pixel,
+        "mean_r2_inferred_forward": mean_r2_inferred,
+        "encoding_delta_r2": encoding_delta_r2,
+        "forward_gap": gap,
     }
 
 

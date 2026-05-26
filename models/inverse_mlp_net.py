@@ -17,8 +17,8 @@ class InverseMLPNet(nn.Module):
     deterministic representation when the net is in eval mode (and the
     stochastic representation when in train mode for MC sampling).
     """
-    def __init__(self, input_dim, output_dim,
-                 hidden_dim=None, dropout_rate=None):
+
+    def __init__(self, input_dim, output_dim, hidden_dim=None, dropout_rate=None):
         super().__init__()
         if hidden_dim is None:
             hidden_dim = _CFG_PP_HIDDEN_DIM
@@ -49,4 +49,4 @@ class InverseMLPNet(nn.Module):
         h2 = self.h2(self.d1(h1))
         h3 = self.h3(self.d2(h2))
         out = self.out(self.d3(h3))
-        return out, {'h1': h1, 'h2': h2, 'h3': h3}
+        return out, {"h1": h1, "h2": h2, "h3": h3}

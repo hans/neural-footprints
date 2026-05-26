@@ -1,0 +1,150 @@
+{
+  "args": {
+    "scenes": "data/scenes.npz",
+    "n_scenes": 2000,
+    "device": "auto",
+    "configs": [
+      "depth_gated",
+      "depth_gated_strong",
+      "depth_gated_temporal"
+    ],
+    "epochs": 400,
+    "patience": 60,
+    "min_epochs": 60,
+    "lr": 0.003,
+    "val_frac": 0.15,
+    "batch_size": 64,
+    "seed": 42,
+    "log_every": 25,
+    "output": "outputs/inverse_diversity_sweep_depth.json"
+  },
+  "device": "cpu",
+  "n_scenes": 2000,
+  "n_observable_dims": 5,
+  "has_depth_channel": true,
+  "valid_dim_labels": [
+    "pos_x",
+    "pos_y",
+    "pos_z",
+    "linvel_x",
+    "x_accel"
+  ],
+  "configs_run": [
+    "depth_gated",
+    "depth_gated_strong",
+    "depth_gated_temporal"
+  ],
+  "results": {
+    "depth_gated": {
+      "config_name": "depth_gated",
+      "model_cls": "SpatialSoftmaxDepthGated",
+      "n_channels": 5,
+      "config": {
+        "n_filters": 128,
+        "learned_temp": true,
+        "hidden_dim": 256,
+        "head_depth": 3,
+        "dropout_rate": 0.05,
+        "depth_gamma_init": 2.0
+      },
+      "n_params": 359654,
+      "val_mse": 0.6947387456893921,
+      "best_epoch": 41,
+      "train_time_s": 1311.0778541564941,
+      "mean_valid_dim_r2": 0.2833329737186432,
+      "min_valid_dim_r2": -0.021097421646118164,
+      "per_dim_r2": {
+        "pos_x": 0.7083625793457031,
+        "pos_y": 0.17549842596054077,
+        "pos_z": -0.006285309791564941,
+        "orn_x": 0.0,
+        "orn_y": 0.0,
+        "orn_z": 0.0,
+        "orn_w": 0.0,
+        "linvel_x": 0.5601866245269775,
+        "linvel_y": 0.0,
+        "linvel_z": 0.0,
+        "angvel_x": 0.0,
+        "angvel_y": 0.0,
+        "angvel_z": 0.0,
+        "mass": 0.0,
+        "friction": 0.0,
+        "x_accel": -0.021097421646118164
+      }
+    },
+    "depth_gated_strong": {
+      "config_name": "depth_gated_strong",
+      "model_cls": "SpatialSoftmaxDepthGated",
+      "n_channels": 5,
+      "config": {
+        "n_filters": 256,
+        "learned_temp": true,
+        "hidden_dim": 256,
+        "head_depth": 3,
+        "dropout_rate": 0.05,
+        "depth_gamma_init": 4.0
+      },
+      "n_params": 796198,
+      "val_mse": 0.7680543661117554,
+      "best_epoch": 76,
+      "train_time_s": 2561.1530702114105,
+      "mean_valid_dim_r2": 0.20827949047088623,
+      "min_valid_dim_r2": -0.0491865873336792,
+      "per_dim_r2": {
+        "pos_x": 0.568848729133606,
+        "pos_y": 0.06113994121551514,
+        "pos_z": 0.041427433490753174,
+        "orn_x": 0.0,
+        "orn_y": 0.0,
+        "orn_z": 0.0,
+        "orn_w": 0.0,
+        "linvel_x": 0.4191679358482361,
+        "linvel_y": 0.0,
+        "linvel_z": 0.0,
+        "angvel_x": 0.0,
+        "angvel_y": 0.0,
+        "angvel_z": 0.0,
+        "mass": 0.0,
+        "friction": 0.0,
+        "x_accel": -0.0491865873336792
+      }
+    },
+    "depth_gated_temporal": {
+      "config_name": "depth_gated_temporal",
+      "model_cls": "SpatialSoftmaxDepthGatedTemporalDelta",
+      "n_channels": 5,
+      "config": {
+        "n_filters": 128,
+        "learned_temp": true,
+        "hidden_dim": 256,
+        "head_depth": 3,
+        "dropout_rate": 0.05,
+        "depth_gamma_init": 2.0
+      },
+      "n_params": 490726,
+      "val_mse": 0.6243811249732971,
+      "best_epoch": 53,
+      "train_time_s": 1496.564299106598,
+      "mean_valid_dim_r2": 0.3552173972129822,
+      "min_valid_dim_r2": -0.03497898578643799,
+      "per_dim_r2": {
+        "pos_x": 0.704428493976593,
+        "pos_y": 0.2654481530189514,
+        "pos_z": 0.24850845336914062,
+        "orn_x": 0.0,
+        "orn_y": 0.0,
+        "orn_z": 0.0,
+        "orn_w": 0.0,
+        "linvel_x": 0.5926808714866638,
+        "linvel_y": 0.0,
+        "linvel_z": 0.0,
+        "angvel_x": 0.0,
+        "angvel_y": 0.0,
+        "angvel_z": 0.0,
+        "mass": 0.0,
+        "friction": 0.0,
+        "x_accel": -0.03497898578643799
+      }
+    }
+  }
+}
