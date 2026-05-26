@@ -49,10 +49,10 @@ if backbone == "mlp":
         "mlp", device=device, pixel_pca_dim=cfg["pp_pixel_pca_dim"]
     )
     fit_kwargs = {}
-elif backbone == "softmax_cnn":
+elif backbone in ("softmax_cnn", "depth_gated_temporal"):
     sm_cfg = cfg.get("pp_softmax", {})
     inv = make_inverse_model(
-        "softmax_cnn",
+        backbone,
         device=device,
         n_filters=sm_cfg.get("n_filters", 128),
         learned_temp=sm_cfg.get("learned_temp", True),
@@ -61,6 +61,8 @@ elif backbone == "softmax_cnn":
         hidden_dim=sm_cfg.get("hidden_dim", 256),
         head_depth=sm_cfg.get("head_depth", 3),
         dropout_rate=sm_cfg.get("dropout_rate", 0.0),
+        **({"depth_gamma_init": sm_cfg.get("depth_gamma_init", 2.0)}
+           if backbone == "depth_gated_temporal" else {}),
     )
     fit_kwargs = {
         "n_epochs": sm_cfg.get("n_epochs", 200),

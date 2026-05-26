@@ -1,9 +1,9 @@
 """Backbone-aware persistence for the PP InverseModel wrappers.
 
 Checkpoints carry a ``backbone`` tag so a single loader can reconstruct any of
-the supported wrappers (currently 'mlp' / 'softmax_cnn'). Missing tag is read
-as 'mlp' for backward compatibility with checkpoints written before the
-pluggable-backbone refactor.
+the supported wrappers (currently 'mlp' / 'softmax_cnn' / 'depth_gated_temporal').
+Missing tag is read as 'mlp' for backward compatibility with checkpoints written
+before the pluggable-backbone refactor.
 """
 
 import torch
@@ -11,9 +11,10 @@ import torch
 from analyses.predictive_processing import (
     InverseModel,
     InverseSoftmaxCNN,
+    InverseDepthGatedTemporalCNN,
     INVERSE_BACKBONES,
 )
-from models import InverseMLPNet, SpatialSoftmaxV2
+from models import InverseMLPNet, SpatialSoftmaxV2, SpatialSoftmaxDepthGatedTemporalDelta
 
 
 def _arch_kwargs_mlp(inv: InverseModel):
@@ -43,11 +44,19 @@ def _arch_kwargs_softmax_cnn(inv: InverseSoftmaxCNN):
     }
 
 
+def _arch_kwargs_depth_gated_temporal(inv: InverseDepthGatedTemporalCNN):
+    kwargs = _arch_kwargs_softmax_cnn(inv)
+    kwargs["depth_gamma_init"] = float(inv.net_.depth_gamma.exp().item())
+    return kwargs
+
+
 def _backbone_of(inv) -> str:
-    if isinstance(inv, InverseModel):
-        return "mlp"
+    if isinstance(inv, InverseDepthGatedTemporalCNN):
+        return "depth_gated_temporal"
     if isinstance(inv, InverseSoftmaxCNN):
         return "softmax_cnn"
+    if isinstance(inv, InverseModel):
+        return "mlp"
     raise TypeError(
         f"unsupported wrapper type {type(inv).__name__}; "
         f"expected one of {INVERSE_BACKBONES}"
@@ -59,6 +68,8 @@ def save_inverse_model(inv, path):
     backbone = _backbone_of(inv)
     if backbone == "mlp":
         arch_kwargs = _arch_kwargs_mlp(inv)
+    elif backbone == "depth_gated_temporal":
+        arch_kwargs = _arch_kwargs_depth_gated_temporal(inv)
     else:
         arch_kwargs = _arch_kwargs_softmax_cnn(inv)
 
@@ -123,6 +134,38 @@ def _load_softmax_cnn(ckpt) -> InverseSoftmaxCNN:
     return m
 
 
+def _load_depth_gated_temporal(ckpt) -> InverseDepthGatedTemporalCNN:
+    arch = ckpt["arch_kwargs"]
+    m = InverseDepthGatedTemporalCNN(
+        n_filters=arch["n_filters"],
+        learned_temp=arch["learned_temp"],
+        temp_per_channel=arch["temp_per_channel"],
+        include_variance=arch["include_variance"],
+        hidden_dim=arch["hidden_dim"],
+        head_depth=arch["head_depth"],
+        dropout_rate=arch["dropout_rate"],
+        depth_gamma_init=arch.get("depth_gamma_init", 2.0),
+    )
+    m.net_ = SpatialSoftmaxDepthGatedTemporalDelta(
+        n_frames=arch["n_frames"],
+        n_channels=arch["n_channels"],
+        image_size=arch["image_size"],
+        output_dim=arch["output_dim"],
+        n_filters=arch["n_filters"],
+        learned_temp=arch["learned_temp"],
+        temp_per_channel=arch["temp_per_channel"],
+        include_variance=arch["include_variance"],
+        hidden_dim=arch["hidden_dim"],
+        head_depth=arch["head_depth"],
+        dropout_rate=arch["dropout_rate"],
+        depth_gamma_init=arch.get("depth_gamma_init", 2.0),
+    )
+    m.net_.load_state_dict(ckpt["state_dict"])
+    m.net_.eval()
+    m.input_scaler_ = ckpt["input_scaler"]  # None for this backbone
+    return m
+
+
 def load_inverse_model(path):
     """Reconstruct an inverse-model wrapper from a checkpoint.
 
@@ -136,6 +179,8 @@ def load_inverse_model(path):
         m = _load_mlp(ckpt)
     elif backbone == "softmax_cnn":
         m = _load_softmax_cnn(ckpt)
+    elif backbone == "depth_gated_temporal":
+        m = _load_depth_gated_temporal(ckpt)
     else:
         raise ValueError(
             f"unknown backbone {backbone!r} in checkpoint; "

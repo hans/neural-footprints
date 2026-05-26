@@ -13,7 +13,7 @@ from .spatial_softmax import (
     SpatialSoftmaxDepthGated,
     SpatialSoftmaxDepthGatedTemporalDelta,
 )
-from .frame_stack import build_frame_stack
+from .frame_stack import build_frame_stack, build_frame_stack_with_depth
 
 __all__ = [
     "InverseMLPNet",
@@ -23,4 +23,5 @@ __all__ = [
     "SpatialSoftmaxDepthGated",
     "SpatialSoftmaxDepthGatedTemporalDelta",
     "build_frame_stack",
+    "build_frame_stack_with_depth",
 ]

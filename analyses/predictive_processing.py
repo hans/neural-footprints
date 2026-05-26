@@ -44,7 +44,9 @@ from models import (
     InverseMLPNet,
     InverseCNNNet,
     SpatialSoftmaxV2,
+    SpatialSoftmaxDepthGatedTemporalDelta,
     build_frame_stack,
+    build_frame_stack_with_depth,
 )
 
 # ---------------------------------------------------------------------------
@@ -596,6 +598,21 @@ class InverseSoftmaxCNN:
         """Stacked 3-frame uint8 tensor — same convention as InverseCNN."""
         return build_frame_stack(scenes)
 
+    def _make_net(self, n_frames, n_channels, output_dim):
+        return SpatialSoftmaxV2(
+            n_frames=n_frames,
+            n_channels=n_channels,
+            image_size=IMAGE_SIZE,
+            output_dim=output_dim,
+            n_filters=self.n_filters,
+            learned_temp=self.learned_temp,
+            temp_per_channel=self.temp_per_channel,
+            include_variance=self.include_variance,
+            hidden_dim=self.hidden_dim,
+            head_depth=self.head_depth,
+            dropout_rate=self.dropout_rate,
+        )
+
     def fit(
         self,
         frames,
@@ -641,19 +658,7 @@ class InverseSoftmaxCNN:
         # in scripts/eval_pp_cnn_softmax_sweep.py reproducible inside the pipeline.
         torch.manual_seed(42)
         n_frames, n_channels = frames.shape[1], frames.shape[2]
-        self.net_ = SpatialSoftmaxV2(
-            n_frames=n_frames,
-            n_channels=n_channels,
-            image_size=IMAGE_SIZE,
-            output_dim=y.shape[1],
-            n_filters=self.n_filters,
-            learned_temp=self.learned_temp,
-            temp_per_channel=self.temp_per_channel,
-            include_variance=self.include_variance,
-            hidden_dim=self.hidden_dim,
-            head_depth=self.head_depth,
-            dropout_rate=self.dropout_rate,
-        ).to(self.device)
+        self.net_ = self._make_net(n_frames, n_channels, y.shape[1]).to(self.device)
 
         opt = torch.optim.Adam(self.net_.parameters(), lr=lr)
         sch = torch.optim.lr_scheduler.ReduceLROnPlateau(opt, factor=0.5, patience=10)
@@ -787,24 +792,61 @@ class InverseSoftmaxCNN:
 # Backbone factory
 # ---------------------------------------------------------------------------
 
-INVERSE_BACKBONES = ("mlp", "softmax_cnn")
+class InverseDepthGatedTemporalCNN(InverseSoftmaxCNN):
+    """Depth-gated temporal-delta softmax backbone (best on diverse multi-object scenes).
+
+    Uses :class:`models.spatial_softmax.SpatialSoftmaxDepthGatedTemporalDelta`:
+    depth-weighted softmax attention focuses keypoints on the foreground object,
+    and per-frame keypoint-velocity deltas give the head explicit motion cues.
+
+    Input requires the depth channel: ``prepare_input`` calls
+    ``build_frame_stack_with_depth`` returning (N, 3, 5, H, W) float32.
+    """
+
+    def __init__(self, *, depth_gamma_init=2.0, **kwargs):
+        super().__init__(**kwargs)
+        self.depth_gamma_init = depth_gamma_init
+
+    def prepare_input(self, scenes):
+        return build_frame_stack_with_depth(scenes)
+
+    def _make_net(self, n_frames, n_channels, output_dim):
+        return SpatialSoftmaxDepthGatedTemporalDelta(
+            n_frames=n_frames,
+            n_channels=n_channels,
+            image_size=IMAGE_SIZE,
+            output_dim=output_dim,
+            n_filters=self.n_filters,
+            learned_temp=self.learned_temp,
+            temp_per_channel=self.temp_per_channel,
+            include_variance=self.include_variance,
+            hidden_dim=self.hidden_dim,
+            head_depth=self.head_depth,
+            dropout_rate=self.dropout_rate,
+            depth_gamma_init=self.depth_gamma_init,
+        )
+
+
+INVERSE_BACKBONES = ("mlp", "softmax_cnn", "depth_gated_temporal")
 
 
 def make_inverse_model(backbone="mlp", *, device=None, **kwargs):
     """Build an inverse-model wrapper for the named backbone.
 
-    Currently dispatches:
-        'mlp'         → :class:`InverseModel`
-        'softmax_cnn' → :class:`InverseSoftmaxCNN`
+    Dispatches:
+        'mlp'                  → :class:`InverseModel`
+        'softmax_cnn'          → :class:`InverseSoftmaxCNN`
+        'depth_gated_temporal' → :class:`InverseDepthGatedTemporalCNN`
 
     The 'cnn' backbone (:class:`InverseCNN`) is intentionally excluded from
-    the dispatch — it is kept available as a class for the off-pipeline
-    diagnostic in scripts/eval_pp_cnn.py only.
+    the dispatch — it is kept available for the off-pipeline diagnostic only.
     """
     if backbone == "mlp":
         return InverseModel(device=device, **kwargs)
     if backbone == "softmax_cnn":
         return InverseSoftmaxCNN(device=device, **kwargs)
+    if backbone == "depth_gated_temporal":
+        return InverseDepthGatedTemporalCNN(device=device, **kwargs)
     raise ValueError(
         f"unknown pp_inverse_backbone {backbone!r}; expected one of {INVERSE_BACKBONES}"
     )
