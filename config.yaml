@@ -13,11 +13,12 @@ random_seed: 43
 # x_accel inference.
 linvel_x_max: 3.0
 # x_accel sampled uniformly from [-x_accel_max, +x_accel_max] m/s².
-# Tightened from 15 → 6: at T=0.5 s, |a|=15 produced ~1.875 m of horizontal
-# drift, which combined with linvel_x*T pushed many target frames off-camera.
-# σ_a noise floor for the {0,40,80}-frame stride is ~6 m/s², so |a|≤6 still
-# leaves the curvature signal recoverable.
-x_accel_max: 6.0
+# Set to 0.0 for no-xaccel experiment: rng.uniform(0, 0) = 0 always, so
+# x_accel is a constant 0 across all scenes. The valid_dims_ mask in
+# InverseModel automatically excludes it (std < 1e-4 check). This lets us
+# measure whether the PP-chain vs pixels-only contrast is preserved without
+# x_accel as a potential confound.
+x_accel_max: 0.0
 rsa_subsample: 500
 pixel_pca_dim: 500
 
@@ -33,7 +34,7 @@ behavioral_objective: "next_frame_pixels"
 camera_fov: 90
 
 # Predictive processing
-pp_device: "mps"
+pp_device: "cpu"
 pp_hidden_dim: 256
 pp_pixel_pca_dim: 50
 pp_early_frame: 40
