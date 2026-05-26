@@ -46,6 +46,9 @@ def _arch_kwargs_softmax_cnn(inv: InverseSoftmaxCNN):
 
 def _arch_kwargs_depth_gated_temporal(inv: InverseDepthGatedTemporalCNN):
     kwargs = _arch_kwargs_softmax_cnn(inv)
+    # The constructor validates n_channels==5 (RGBA+depth) but passes 4 to super(),
+    # so self.n_channels ends up as 4. Override here to round-trip correctly.
+    kwargs["n_channels"] = 5
     kwargs["depth_gamma_init"] = float(inv.net_.depth_gamma.exp().item())
     return kwargs
 
