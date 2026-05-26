@@ -25,8 +25,8 @@ from scene_generator import (
 
 def test_dim_constants():
     # Documented constants must match what the encoders actually emit.
-    assert SCENE_CONFIG_DIM == 9
-    assert SCENE_LIGHTING_DIM == 15
+    assert SCENE_CONFIG_DIM == 11
+    assert SCENE_LIGHTING_DIM == 57
 
 
 # --- _encode_scene_config -----------------------------------------------
@@ -34,27 +34,44 @@ def test_dim_constants():
 
 def test_encode_scene_config_sphere():
     cfg = {"shape": "sphere", "params": {"radius": 0.3},
-           "color": [0.1, 0.2, 0.3, 1.0], "x_accel": 4.0}
+           "color": [0.1, 0.2, 0.3, 1.0], "specular": 0.5, "x_accel": 4.0}
     vec = _encode_scene_config([cfg])
     assert vec.dtype == np.float32
     assert vec.shape == (SCENE_CONFIG_DIM,)
-    # Layout: [shape_is_box, radius, *half_extents(3), *color(4)]
+    # Layout: [shape_is_box(1), shape_is_cylinder(1), radius(1), *half_extents(3), *color(4), specular(1)]
     # x_accel is no longer in scene_config — it is now in physics_labels.
-    assert vec[0] == 0.0
-    assert vec[1] == pytest.approx(0.3)
-    np.testing.assert_array_equal(vec[2:5], [0.0, 0.0, 0.0])
-    np.testing.assert_allclose(vec[5:9], [0.1, 0.2, 0.3, 1.0])
+    assert vec[0] == 0.0   # not box
+    assert vec[1] == 0.0   # not cylinder
+    assert vec[2] == pytest.approx(0.3)
+    np.testing.assert_array_equal(vec[3:6], [0.0, 0.0, 0.0])
+    np.testing.assert_allclose(vec[6:10], [0.1, 0.2, 0.3, 1.0])
+    assert vec[10] == pytest.approx(0.5)
 
 
 def test_encode_scene_config_box():
     cfg = {"shape": "box", "params": {"half_extents": [0.2, 0.15, 0.3]},
-           "color": [0.7, 0.7, 0.0, 1.0], "x_accel": -2.0}
+           "color": [0.7, 0.7, 0.0, 1.0], "specular": 0.3, "x_accel": -2.0}
     vec = _encode_scene_config([cfg])
     assert vec.shape == (SCENE_CONFIG_DIM,)
-    assert vec[0] == 1.0
-    assert vec[1] == 0.0
-    np.testing.assert_allclose(vec[2:5], [0.2, 0.15, 0.3])
-    np.testing.assert_allclose(vec[5:9], [0.7, 0.7, 0.0, 1.0])
+    assert vec[0] == 1.0   # is box
+    assert vec[1] == 0.0   # not cylinder
+    assert vec[2] == 0.0   # radius=0 for box
+    np.testing.assert_allclose(vec[3:6], [0.2, 0.15, 0.3])
+    np.testing.assert_allclose(vec[6:10], [0.7, 0.7, 0.0, 1.0])
+    assert vec[10] == pytest.approx(0.3)
+
+
+def test_encode_scene_config_cylinder():
+    cfg = {"shape": "cylinder", "params": {"radius": 0.2, "half_length": 0.15},
+           "color": [0.4, 0.6, 0.8, 1.0], "specular": 0.6}
+    vec = _encode_scene_config([cfg])
+    assert vec.shape == (SCENE_CONFIG_DIM,)
+    assert vec[0] == 0.0   # not box
+    assert vec[1] == 1.0   # is cylinder
+    assert vec[2] == pytest.approx(0.2)
+    np.testing.assert_array_equal(vec[3:6], [0.0, 0.0, 0.0])
+    np.testing.assert_allclose(vec[6:10], [0.4, 0.6, 0.8, 1.0])
+    assert vec[10] == pytest.approx(0.6)
 
 
 def test_encode_scene_config_two_objects(tiny_shape_configs):
@@ -68,9 +85,9 @@ def test_encode_scene_config_two_objects(tiny_shape_configs):
 def test_encode_scene_config_ignores_x_accel():
     # x_accel must not affect the encoded vec — it now lives in physics_labels.
     with_accel = {"shape": "sphere", "params": {"radius": 0.2},
-                  "color": [0.0, 0.0, 0.0, 1.0], "x_accel": 7.5}
+                  "color": [0.0, 0.0, 0.0, 1.0], "specular": 0.4, "x_accel": 7.5}
     without = {"shape": "sphere", "params": {"radius": 0.2},
-               "color": [0.0, 0.0, 0.0, 1.0]}
+               "color": [0.0, 0.0, 0.0, 1.0], "specular": 0.4}
     np.testing.assert_array_equal(
         _encode_scene_config([with_accel]),
         _encode_scene_config([without]),
@@ -84,8 +101,10 @@ def test_encode_scene_lighting(tiny_lighting):
     vec = _encode_scene_lighting(0.55, tiny_lighting)
     assert vec.dtype == np.float32
     assert vec.shape == (SCENE_LIGHTING_DIM,)
-    # Layout: [pillar_gray, *lightDirection(3), *lightColor(3), lightDistance,
-    #          *camJitter(3), *camTargetJitter(3), lightAmbientCoeff(1)]
+    # Layout: [pillar_gray(1), lightDirection(3), lightColor(3), lightDistance(1),
+    #          camJitter(3), camTargetJitter(3), lightAmbientCoeff(1),
+    #          groundColor(3), backdropColor(3), backdropSpecular(1),
+    #          5× (x,y,z,radius,color[3])]
     assert vec[0] == pytest.approx(0.55)
     np.testing.assert_allclose(vec[1:4], tiny_lighting["lightDirection"])
     np.testing.assert_allclose(vec[4:7], tiny_lighting["lightColor"])
@@ -93,6 +112,12 @@ def test_encode_scene_lighting(tiny_lighting):
     np.testing.assert_allclose(vec[8:11], tiny_lighting["camJitter"])
     np.testing.assert_allclose(vec[11:14], tiny_lighting["camTargetJitter"])
     assert vec[14] == pytest.approx(tiny_lighting["lightAmbientCoeff"])
+    # Indices 15–21: groundColor(3) + backdropColor(3) + backdropSpecular(1) — defaults
+    np.testing.assert_allclose(vec[15:18], [0.6, 0.6, 0.6])   # groundColor default
+    np.testing.assert_allclose(vec[18:21], [0.2, 0.2, 0.4])   # backdropColor default
+    assert vec[21] == pytest.approx(0.0)                        # backdropSpecular default mean
+    # Indices 22–56: 5 background spheres × 7 floats, all zero (no backgroundObjects in fixture)
+    np.testing.assert_array_equal(vec[22:57], np.zeros(35, dtype=np.float32))
 
 
 # --- _build_program_state ------------------------------------------------

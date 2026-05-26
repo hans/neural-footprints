@@ -44,9 +44,10 @@ PILLAR_HEIGHT = 1.5   # total height in z
 PILLAR_Y_CENTER = -1.0
 PILLAR_Z_CENTER = 0.75
 
+N_BACKGROUND_OBJECTS = 5
 
-SCENE_CONFIG_DIM = 9  # per object
-SCENE_LIGHTING_DIM = 15
+SCENE_CONFIG_DIM = 11  # per object: shape_is_box(1), shape_is_cylinder(1), radius(1), half_extents(3), color(4), specular(1)
+SCENE_LIGHTING_DIM = 57  # 15 base + 7 new (groundColor(3)+backdropColor(3)+backdropSpecular(1)) + 5×7 per bg sphere
 
 
 _DEFAULT_LIGHTING = {
@@ -65,13 +66,27 @@ def _sample_lighting(rng):
         'lightDirection': [float(rng.uniform(-1, 1)),
                            float(rng.uniform(-2, 0)),
                            float(rng.uniform(2, 4))],
-        'lightColor': [float(c) for c in rng.uniform(0.7, 1.0, size=3)],
+        'lightColor': [float(c) for c in rng.uniform(0.6, 1.0, size=3)],
         'lightDistance': float(rng.uniform(3.0, 8.0)),
-        'camJitter': [float(v) for v in rng.uniform(-0.3, 0.3, size=3)],
-        'camTargetJitter': [float(rng.uniform(-0.15, 0.15)),
+        'camJitter': [float(v) for v in rng.uniform(-0.5, 0.5, size=3)],
+        'camTargetJitter': [float(rng.uniform(-0.25, 0.25)),
                             0.0,
                             float(rng.uniform(-0.1, 0.1))],
         'lightAmbientCoeff': float(rng.uniform(0.2, 0.4)),
+        'groundColor': [float(c) for c in rng.uniform(0.3, 0.9, size=3)],
+        'backdropColor': [float(c) for c in rng.uniform(0.1, 0.8, size=3)],
+        'backdropSpecular': [float(v) for v in rng.uniform(0.0, 0.3, size=3)],
+        'backgroundObjects': [
+            {
+                'x': float(rng.uniform(-3.0, 3.0)),
+                'y': float(rng.uniform(0.5, 2.5)),
+                'z': float(rng.uniform(0.1, 2.5)),
+                'radius': float(rng.uniform(0.05, 0.4)),
+                'color': [float(c) for c in rng.uniform(0.1, 1.0, size=3)],
+                'specular': float(rng.uniform(0.0, 0.8)),
+            }
+            for _ in range(N_BACKGROUND_OBJECTS)
+        ],
     }
 
 
@@ -158,6 +173,38 @@ def _build_mjspec(rng):
     cam.quat = _look_at_quat(eye, target)
     cam.fovy = _CFG_CAMERA_FOV
 
+    # Background spheres (visual only)
+    bg_objects = lighting.get('backgroundObjects', [])
+    for i, obj in enumerate(bg_objects):
+        if obj.get('radius', 0.0) <= 0.0:
+            continue
+        mat = spec.add_material()
+        mat.name = f'bg_mat_{i}'
+        mat.rgba = [*obj['color'], 1.0]
+        mat.shininess = obj.get('specular', 0.0)
+        bg_geom = spec.worldbody.add_geom()
+        bg_geom.type = mujoco.mjtGeom.mjGEOM_SPHERE
+        bg_geom.size = [obj['radius'], 0, 0]
+        bg_geom.pos = [obj['x'], obj['y'], obj['z']]
+        bg_geom.material = f'bg_mat_{i}'
+        bg_geom.contype = 0
+        bg_geom.conaffinity = 0
+
+    # Backdrop wall (visual only)
+    backdrop_color = lighting.get('backdropColor', [0.2, 0.2, 0.4])
+    backdrop_spec = lighting.get('backdropSpecular', [0.0, 0.0, 0.0])
+    bd_mat = spec.add_material()
+    bd_mat.name = 'backdrop_mat'
+    bd_mat.rgba = [*backdrop_color, 1.0]
+    bd_mat.shininess = float(np.mean(backdrop_spec))
+    bd_geom = spec.worldbody.add_geom()
+    bd_geom.type = mujoco.mjtGeom.mjGEOM_BOX
+    bd_geom.size = [10.0, 0.05, 3.0]
+    bd_geom.pos = [0.0, 2.0, 2.0]
+    bd_geom.material = 'backdrop_mat'
+    bd_geom.contype = 0
+    bd_geom.conaffinity = 0
+
     # Object randomization (same distributions as old _create_scene)
     mass = rng.uniform(0.5, 5.0)
     friction = rng.uniform(0.1, 1.0)
@@ -168,13 +215,25 @@ def _build_mjspec(rng):
     z = rng.uniform(0.4, 0.8)
     x_vel = float(rng.uniform(-_CFG_LINVEL_X_MAX, _CFG_LINVEL_X_MAX))
     x_accel = float(rng.uniform(-_CFG_X_ACCEL_MAX, _CFG_X_ACCEL_MAX))
+    specular = float(rng.uniform(0.0, 0.8))
 
-    if rng.random() < 0.5:
+    shape_roll = rng.random()
+    if shape_roll < 1/3:  # sphere
         radius = float(rng.uniform(0.07, 0.5))
-        shape_cfg = {'shape': 'sphere', 'params': {'radius': radius}, 'color': list(color), 'x_accel': x_accel}
-    else:
+        shape_cfg = {'shape': 'sphere', 'params': {'radius': radius}, 'color': list(color), 'specular': specular, 'x_accel': x_accel}
+    elif shape_roll < 2/3:  # box
         half_extents = [float(v) for v in rng.uniform(0.07, 0.5, size=3)]
-        shape_cfg = {'shape': 'box', 'params': {'half_extents': half_extents}, 'color': list(color), 'x_accel': x_accel}
+        shape_cfg = {'shape': 'box', 'params': {'half_extents': half_extents}, 'color': list(color), 'specular': specular, 'x_accel': x_accel}
+    else:  # cylinder
+        radius = float(rng.uniform(0.07, 0.35))
+        half_length = float(rng.uniform(0.075, 0.3))
+        shape_cfg = {'shape': 'cylinder', 'params': {'radius': radius, 'half_length': half_length}, 'color': list(color), 'specular': specular, 'x_accel': x_accel}
+
+    # Object material (handles color + specular)
+    obj_mat = spec.add_material()
+    obj_mat.name = 'obj_mat'
+    obj_mat.rgba = color
+    obj_mat.shininess = specular
 
     # Object body — 3 slide joints (no rotation DOF)
     body = spec.worldbody.add_body()
@@ -190,10 +249,13 @@ def _build_mjspec(rng):
     if shape_cfg['shape'] == 'sphere':
         geom.type = mujoco.mjtGeom.mjGEOM_SPHERE
         geom.size = [shape_cfg['params']['radius'], 0, 0]
-    else:
+    elif shape_cfg['shape'] == 'cylinder':
+        geom.type = mujoco.mjtGeom.mjGEOM_CYLINDER
+        geom.size = [shape_cfg['params']['radius'], shape_cfg['params']['half_length'], 0]
+    else:  # box
         geom.type = mujoco.mjtGeom.mjGEOM_BOX
         geom.size = shape_cfg['params']['half_extents']
-    geom.rgba = color
+    geom.material = 'obj_mat'
     geom.friction = [friction, 0.005, 0.0001]
     geom.mass = mass  # NOTE: if MuJoCo requires density instead, compute density = mass / volume
 
@@ -256,8 +318,9 @@ def _encode_scene_config(shape_configs):
     """
     Encode scene shape configs into a fixed-length float32 vector.
 
-    Per object: shape_is_box(1), radius(1), half_extents(3), color(4) = 9 floats.
-    Unused fields zeroed (radius=0 for box, half_extents=[0,0,0] for sphere).
+    Per object: shape_is_box(1), shape_is_cylinder(1), radius(1),
+                half_extents(3), color(4), specular(1) = 13 floats.
+    Unused fields zeroed (radius=0 for box, half_extents=[0,0,0] for sphere/cylinder).
 
     Note: x_accel used to live here but moved to physics_labels — it is a
     kinematic state field (recoverable from three frames), not a render-
@@ -265,15 +328,17 @@ def _encode_scene_config(shape_configs):
     """
     vec = []
     for cfg in shape_configs:
-        if cfg['shape'] == 'box':
-            vec.append(1.0)
+        shape = cfg['shape']
+        vec.append(1.0 if shape == 'box' else 0.0)
+        vec.append(1.0 if shape == 'cylinder' else 0.0)
+        if shape == 'box':
             vec.append(0.0)
             vec.extend(cfg['params']['half_extents'])
-        else:
-            vec.append(0.0)
+        else:  # sphere or cylinder
             vec.append(cfg['params']['radius'])
             vec.extend([0.0, 0.0, 0.0])
         vec.extend(cfg['color'])
+        vec.append(cfg.get('specular', 0.4))
     return np.array(vec, dtype=np.float32)
 
 
@@ -282,15 +347,29 @@ def _encode_scene_lighting(pillar_gray, lighting):
     Encode per-scene lighting and camera parameters into a fixed-length float32 vector.
 
     pillar_gray(1), lightDirection(3), lightColor(3), lightDistance(1),
-    camJitter(3), camTargetJitter(3), lightAmbientCoeff(1) = 15 floats.
+    camJitter(3), camTargetJitter(3), lightAmbientCoeff(1) = 15 base floats.
+    groundColor(3), backdropColor(3), backdropSpecular(1) = 7 new floats → subtotal 22.
+    5 background spheres × 7 floats each (x,y,z,radius,color[3]) = 35 → total 57.
     """
     vec = [pillar_gray]
-    vec.extend(lighting['lightDirection'])
-    vec.extend(lighting['lightColor'])
-    vec.append(lighting['lightDistance'])
-    vec.extend(lighting.get('camJitter', [0.0, 0.0, 0.0]))
-    vec.extend(lighting.get('camTargetJitter', [0.0, 0.0, 0.0]))
-    vec.append(lighting.get('lightAmbientCoeff', 0.4))
+    vec.extend(lighting['lightDirection'])           # 3
+    vec.extend(lighting['lightColor'])               # 3
+    vec.append(lighting['lightDistance'])            # 1
+    vec.extend(lighting.get('camJitter', [0.0, 0.0, 0.0]))         # 3
+    vec.extend(lighting.get('camTargetJitter', [0.0, 0.0, 0.0]))   # 3
+    vec.append(lighting.get('lightAmbientCoeff', 0.4))              # 1 → subtotal 15
+    vec.extend(lighting.get('groundColor', [0.6, 0.6, 0.6]))        # 3
+    vec.extend(lighting.get('backdropColor', [0.2, 0.2, 0.4]))      # 3
+    vec.append(float(np.mean(lighting.get('backdropSpecular', [0.0, 0.0, 0.0]))))  # 1 → subtotal 22
+    # 5 background spheres × 7 floats each = 35
+    bg = lighting.get('backgroundObjects', [])
+    for i in range(N_BACKGROUND_OBJECTS):
+        if i < len(bg):
+            o = bg[i]
+            vec.extend([o['x'], o['y'], o['z'], o['radius']])  # 4
+            vec.extend(o['color'])                              # 3
+        else:
+            vec.extend([0.0] * 7)
     return np.array(vec, dtype=np.float32)
 
 
@@ -616,6 +695,45 @@ def resimulate_scene(shape_configs, initial_physics_row, *, n_timesteps=None,
     cam.quat = _look_at_quat(eye, target_pt)
     cam.fovy = _CFG_CAMERA_FOV
 
+    # Background spheres (visual only) — must match _build_mjspec order
+    bg_objects = lighting.get('backgroundObjects', [])
+    for i, obj in enumerate(bg_objects):
+        if obj.get('radius', 0.0) <= 0.0:
+            continue
+        mat = spec.add_material()
+        mat.name = f'bg_mat_{i}'
+        mat.rgba = [*obj['color'], 1.0]
+        mat.shininess = obj.get('specular', 0.0)
+        bg_geom = spec.worldbody.add_geom()
+        bg_geom.type = mujoco.mjtGeom.mjGEOM_SPHERE
+        bg_geom.size = [obj['radius'], 0, 0]
+        bg_geom.pos = [obj['x'], obj['y'], obj['z']]
+        bg_geom.material = f'bg_mat_{i}'
+        bg_geom.contype = 0
+        bg_geom.conaffinity = 0
+
+    # Backdrop wall (visual only) — must match _build_mjspec order
+    backdrop_color = lighting.get('backdropColor', [0.2, 0.2, 0.4])
+    backdrop_spec = lighting.get('backdropSpecular', [0.0, 0.0, 0.0])
+    bd_mat = spec.add_material()
+    bd_mat.name = 'backdrop_mat'
+    bd_mat.rgba = [*backdrop_color, 1.0]
+    bd_mat.shininess = float(np.mean(backdrop_spec))
+    bd_geom = spec.worldbody.add_geom()
+    bd_geom.type = mujoco.mjtGeom.mjGEOM_BOX
+    bd_geom.size = [10.0, 0.05, 3.0]
+    bd_geom.pos = [0.0, 2.0, 2.0]
+    bd_geom.material = 'backdrop_mat'
+    bd_geom.contype = 0
+    bd_geom.conaffinity = 0
+
+    # Object material (handles color + specular)
+    specular = cfg.get('specular', 0.4)
+    obj_mat = spec.add_material()
+    obj_mat.name = 'obj_mat'
+    obj_mat.rgba = cfg['color']
+    obj_mat.shininess = specular
+
     body = spec.worldbody.add_body()
     body.name = "object"
     body.pos = pos
@@ -629,10 +747,13 @@ def resimulate_scene(shape_configs, initial_physics_row, *, n_timesteps=None,
     if cfg['shape'] == 'sphere':
         geom.type = mujoco.mjtGeom.mjGEOM_SPHERE
         geom.size = [cfg['params']['radius'], 0, 0]
-    else:
+    elif cfg['shape'] == 'cylinder':
+        geom.type = mujoco.mjtGeom.mjGEOM_CYLINDER
+        geom.size = [cfg['params']['radius'], cfg['params']['half_length'], 0]
+    else:  # box
         geom.type = mujoco.mjtGeom.mjGEOM_BOX
         geom.size = cfg['params']['half_extents']
-    geom.rgba = cfg['color']
+    geom.material = 'obj_mat'
     geom.friction = [friction, 0.005, 0.0001]
     geom.mass = mass
 
