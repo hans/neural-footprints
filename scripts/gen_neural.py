@@ -6,15 +6,13 @@ import numpy as np
 
 from load_config import load_config
 from io_utils import load_scenes, save_neural
-from neural_model import generate_neural_activity, print_variance_diagnostic
+from neural_model import generate_neural_activity
 
 cfg = load_config()
 
-# Load only the slices we need and free large arrays immediately to stay within
-# memory budget. scenes (2.75 GB) and fwd (1.18 GB) must not both be live when
-# generate_neural_activity runs (it needs ~2.4 GB for centered + W internally).
 scenes = load_scenes(snakemake.input.scenes)
 render_indices = scenes["metadata"]["render_indices"]
+# Brain state block 1: raw observed frames (initial + early + late).
 raw_frames = np.concatenate(
     [scenes["initial_renders"], scenes["early_renders"], scenes["late_renders"]], axis=1
 ).astype(np.float32)
@@ -23,23 +21,20 @@ del scenes
 pp = np.load(snakemake.input.pp_activations)
 fwd = np.load(snakemake.input.forward_renders)
 
-# Use forward-model render (predicted S from inferred P) instead of actual camera bytes.
-# Brain state is now [raw_frames | fwd_render | inv_acts | P_hat]: raw sensation enters
-# both as a direct block and through the inverse model's input.
-render = fwd["forward_program_states"][:, render_indices]
-hidden_acts = pp["hidden_acts"]
-inferred_physics = pp["inferred_physics"]
-pp_layer = str(pp["layer"])
+# Brain state block 2: forward-model render (predicted S from inferred P).
+render = fwd["forward_program_states"][:, render_indices].astype(np.float32)
+hidden_acts = pp["hidden_acts"].astype(np.float32)
+inferred_physics = pp["inferred_physics"].astype(np.float32)
 del fwd, pp
 
-n_scenes = render.shape[0]
+n_scenes = raw_frames.shape[0]
 D_raw = raw_frames.shape[1]
 D_render = render.shape[1]
 D_hidden = hidden_acts.shape[1]
 D_inferred = inferred_physics.shape[1]
+D_total = D_raw + D_render + D_hidden + D_inferred
 
-# Fill neural_input in-place to avoid a large temporary from np.concatenate.
-neural_input = np.empty((n_scenes, D_raw + D_render + D_hidden + D_inferred), dtype=np.float32)
+neural_input = np.empty((n_scenes, D_total), dtype=np.float32)
 neural_input[:, :D_raw] = raw_frames
 neural_input[:, D_raw : D_raw + D_render] = render
 neural_input[:, D_raw + D_render : D_raw + D_render + D_hidden] = hidden_acts
@@ -47,20 +42,6 @@ neural_input[:, D_raw + D_render + D_hidden :] = inferred_physics
 del raw_frames, render, hidden_acts, inferred_physics
 
 block_sizes = [D_raw, D_render, D_hidden, D_inferred]
-block_names = ["raw_frames", "fwd_render", "hidden_acts", "inferred_physics"]
-
-neural_input_metadata = {
-    "D_raw": D_raw,
-    "D_render": D_render,
-    "D_hidden": D_hidden,
-    "D_inferred": D_inferred,
-    "D_total": D_raw + D_render + D_hidden + D_inferred,
-    "pp_layer": pp_layer,
-    # Keys expected by print_variance_diagnostic:
-    "D_render_bytes": D_render,
-    "D_physics_labels": D_hidden + D_inferred,
-    "D_scene_config": 0,
-}
 
 neural, neural_meta = generate_neural_activity(
     neural_input,
@@ -68,7 +49,15 @@ neural, neural_meta = generate_neural_activity(
     n_neurons=cfg["n_neurons"],
     noise_level=cfg["noise_level"],
     block_sizes=block_sizes,
+    normalization="stable_rank_trunc",
 )
-print_variance_diagnostic(neural_input_metadata, neural_meta, block_sizes, block_names)
+
+block_names = ["raw_frames", "fwd_render", "hidden_acts", "inferred_physics"]
+print(
+    f"stable_rank_trunc: k={neural_meta['block_k_values'].tolist()} "
+    f"(sr={[f'{r:.1f}' for r in neural_meta['block_stable_ranks'].tolist()]}) "
+    f"D_proj={neural_meta['W'].shape[1]}"
+)
+print(f"  blocks: {dict(zip(block_names, block_sizes))}")
 
 save_neural(neural, neural_meta, snakemake.output.neural)
