@@ -12,7 +12,13 @@ from config import N_NEURONS as _CFG_N_NEURONS, NOISE_LEVEL as _CFG_NOISE_LEVEL
 
 
 def generate_neural_activity(
-    program_states, seed, *, n_neurons=None, noise_level=None, block_sizes=None
+    program_states,
+    seed,
+    *,
+    n_neurons=None,
+    noise_level=None,
+    block_sizes=None,
+    normalization="operator_norm",
 ):
     """
     Generate neural activity from raw program states via random linear projection.
@@ -24,8 +30,19 @@ def generate_neural_activity(
     seed : int
         Random seed for reproducibility.
     block_sizes : list[int] or None
-        Sizes of consecutive blocks in program_states for per-block operator-norm
-        normalization. If None, treats the entire D as one block.
+        Sizes of consecutive blocks in program_states. If None, treats entire D
+        as one block.
+    normalization : {"operator_norm", "stable_rank_trunc"}
+        Per-block normalization scheme.
+
+        "operator_norm" (default): divide each block by its largest singular
+        value (operator norm). Preserves the original D-dimensional input to W.
+
+        "stable_rank_trunc": truncate each block to its stable rank k =
+        max(1, round(||X||_F² / ||X||_op²)) via truncated SVD (Gram-matrix
+        eigendecomposition), then whiten within that subspace. W is sized
+        (n_neurons, sum_of_ks) instead of (n_neurons, D_total). Unit-norm
+        columns from eigendecomposition serve as the whitened scores.
 
     Returns
     -------
@@ -45,53 +62,122 @@ def generate_neural_activity(
     means = program_states.mean(axis=0)
     centered = program_states - means
 
-    # Step 2: Per-block operator-norm normalization, done in-place on centered.
-    # Each block is divided by its largest singular value so the trace ratio
-    # across blocks reflects intrinsic-dim (participation ratio) asymmetry,
-    # not raw amplitude differences.
-    # In-place avoids allocating another full copy of the (potentially large) matrix.
     if block_sizes is None:
         block_sizes = [D]
 
-    block_norms = []
-    start = 0
-    for size in block_sizes:
-        block = centered[:, start : start + size]
-        if size == 0:
-            sigma = 1.0
-        elif min(block.shape) <= 1:
-            sigma = float(np.linalg.norm(block, ord=2))
-            if sigma == 0.0:
+    if normalization == "operator_norm":
+        # Divide each block by its largest singular value in-place.
+        # In-place avoids allocating another full copy of the (potentially large) matrix.
+        block_norms = []
+        start = 0
+        for size in block_sizes:
+            block = centered[:, start : start + size]
+            if size == 0:
                 sigma = 1.0
-        else:
-            # Form the smaller Gram matrix — only the (min(n,D) × min(n,D)) result
-            # needs float64; the large block stays float32 throughout.
+            elif min(block.shape) <= 1:
+                sigma = float(np.linalg.norm(block, ord=2))
+                if sigma == 0.0:
+                    sigma = 1.0
+            else:
+                # Gram matrix on the smaller axis — stays float64 for numerical safety.
+                n, d = block.shape
+                gram = (block @ block.T if n <= d else block.T @ block).astype(
+                    np.float64
+                )
+                sigma = float(np.sqrt(np.linalg.eigvalsh(gram).max()))
+                if sigma == 0.0:
+                    sigma = 1.0
+            block_norms.append(sigma)
+            centered[:, start : start + size] /= sigma
+            start += size
+
+        normalized = centered
+        D_proj = D
+        block_stable_ranks = None
+        block_k_values = None
+
+    elif normalization == "stable_rank_trunc":
+        # Truncate each block to its stable rank via Gram-matrix eigendecomposition.
+        # Uses U[:, :k] (unit-norm columns = whitened scores within subspace).
+        # W is then sized (n_neurons, sum_of_ks).
+        blocks_reduced = []
+        block_stable_ranks = []
+        block_k_values = []
+        block_norms = []
+        start = 0
+        for size in block_sizes:
+            block = centered[:, start : start + size].astype(np.float64)
+            if size == 0:
+                block_stable_ranks.append(0.0)
+                block_k_values.append(0)
+                block_norms.append(1.0)
+                start += size
+                continue
+
             n, d = block.shape
-            gram = (block @ block.T if n <= d else block.T @ block).astype(np.float64)
-            sigma = float(np.sqrt(np.linalg.eigvalsh(gram).max()))
-            if sigma == 0.0:
-                sigma = 1.0
-        block_norms.append(sigma)
-        centered[:, start : start + size] /= sigma
-        start += size
+            if min(n, d) <= 1:
+                # Trivially rank-1: normalise to unit norm and keep.
+                norm = float(np.linalg.norm(block))
+                if norm == 0.0:
+                    norm = 1.0
+                blocks_reduced.append((block / norm).astype(np.float32))
+                block_stable_ranks.append(1.0)
+                block_k_values.append(1)
+                block_norms.append(norm)
+                start += size
+                continue
 
-    normalized = centered  # normalized in-place; alias for clarity below
+            if n <= d:
+                # n×n Gram matrix — eigvecs are left singular vectors U.
+                gram = (block @ block.T).astype(np.float64)
+                eigvals, eigvecs = np.linalg.eigh(gram)  # ascending order
+                sr = float(eigvals.sum() / eigvals.max()) if eigvals.max() > 0 else 1.0
+                k = max(1, round(sr))
+                # Top-k eigvecs (last k columns in ascending-order output).
+                U_k = eigvecs[:, -k:].astype(np.float32)
+                blocks_reduced.append(U_k)
+            else:
+                # d×d Gram matrix — eigvecs are right singular vectors V.
+                # Recover U = X V / S for unit-norm columns.
+                gram = (block.T @ block).astype(np.float64)
+                eigvals, eigvecs = np.linalg.eigh(gram)  # ascending order
+                sr = float(eigvals.sum() / eigvals.max()) if eigvals.max() > 0 else 1.0
+                k = max(1, round(sr))
+                V_k = eigvecs[:, -k:]  # (d, k) — top-k right singular vectors
+                S_k = np.sqrt(np.maximum(eigvals[-k:], 0.0))  # (k,)
+                # Guard divide-by-zero for near-zero singular values
+                S_k = np.where(S_k > 0, S_k, 1.0)
+                U_k = (block @ V_k / S_k[None, :]).astype(np.float32)  # (n, k)
+                blocks_reduced.append(U_k)
 
-    # Step 3: Random projection matrix (float32 keeps the matmul in float32)
-    W = rng.normal(0, 1.0 / np.sqrt(D), size=(n_neurons, D)).astype(np.float32)
+            block_stable_ranks.append(sr)
+            block_k_values.append(k)
+            block_norms.append(
+                float(np.sqrt(eigvals.max())) if eigvals.max() > 0 else 1.0
+            )
+            start += size
 
-    # Step 4: Signal
+        normalized = np.concatenate(blocks_reduced, axis=1)  # (n_scenes, sum_of_ks)
+        D_proj = normalized.shape[1]
+
+    else:
+        raise ValueError(f"Unknown normalization: {normalization!r}")
+
+    # Random projection matrix — scale by 1/sqrt(D_proj) where D_proj is the
+    # actual input dimensionality after normalization.
+    W = rng.normal(0, 1.0 / np.sqrt(D_proj), size=(n_neurons, D_proj)).astype(
+        np.float32
+    )
+
     signal = normalized @ W.T  # [n_scenes x n_neurons]
 
-    # Step 5: Noise
     signal_std = signal.std()
     noise = noise_level * signal_std * rng.normal(0, 1, size=signal.shape)
 
-    # Step 6: Neural activity
     neural_activity = signal + noise
 
     var_per_dim = normalized.var(axis=0)
-    total_var = var_per_dim.sum()
+    total_var = float(var_per_dim.sum())
 
     metadata = {
         "W": W,
@@ -100,6 +186,13 @@ def generate_neural_activity(
         "signal_std": signal_std,
         "var_per_dim": var_per_dim,
         "total_var": total_var,
+        "normalization": normalization,
+        "block_stable_ranks": (
+            np.array(block_stable_ranks) if block_stable_ranks is not None else None
+        ),
+        "block_k_values": (
+            np.array(block_k_values, dtype=int) if block_k_values is not None else None
+        ),
     }
 
     return neural_activity, metadata
@@ -112,6 +205,8 @@ def print_variance_diagnostic(
     Print the key diagnostic: how much variance comes from render vs physics slices.
 
     This ratio is NOT set by a parameter — it is printed as a finding.
+    Only meaningful for the "operator_norm" normalization where var_per_dim
+    indices still correspond to original input dimensions.
     """
     D_render = scene_metadata["D_render_bytes"]
     D_physics = (
