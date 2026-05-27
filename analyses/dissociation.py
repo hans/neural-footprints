@@ -24,7 +24,6 @@ from sklearn.preprocessing import StandardScaler
 
 from config import BEHAVIORAL_PCA_DIM as _CFG_BEHAVIORAL_PCA_DIM
 from config import BEHAVIORAL_OBJECTIVE as _CFG_BEHAVIORAL_OBJECTIVE
-from scene_generator import extract_brain_pixels
 
 
 # ---------------------------------------------------------------------------
@@ -323,7 +322,10 @@ def run_dissociation_analysis(neural_activity, scenes, neural_meta,
     print(f"  Pixel+physics model mean R²:  {mean_r2_combined:.4f}")
 
     # --- Prepare features for behavioral sufficiency scoring ---
-    pixel_data = extract_brain_pixels(program_states, metadata)
+    pixel_data = np.concatenate(
+        [scenes['initial_renders'], scenes['early_renders'], scenes['late_renders']],
+        axis=1,
+    )
     pixel_pca = encoder['pca'].transform(encoder['scaler'].transform(pixel_data))
     physics_scaled = encoder['scaler_phys'].transform(physics_labels)
 
