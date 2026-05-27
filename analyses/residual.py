@@ -27,9 +27,6 @@ from sklearn.linear_model import RidgeCV
 from sklearn.model_selection import KFold, cross_val_predict
 from sklearn.preprocessing import StandardScaler
 
-from analyses.encoding import pca_reduce_pixels
-from scene_generator import extract_brain_pixels
-
 
 def _r2_per_neuron(y_true, y_pred):
     ss_res = ((y_true - y_pred) ** 2).sum(axis=0)
@@ -47,28 +44,24 @@ def run_residual_analysis(
     scenes,
     neural_meta,
     *,
-    pixel_pca_dim,
-    r2_raw_pixel,
-    r2_raw_physics_gt,
+    raw_pixel_pca,
     predicted_pixel_pca=None,
     n_splits=5,
     random_state=42,
 ):
     """
-    Run residual encoding analysis.
+    Run residual encoding analysis (two-condition variance partitioning).
 
-    Returns dict with per-neuron R² arrays for raw and residualized neural,
-    across {pixel, gt physics} predictor sets. Raw-neural baselines are
-    passed in (from the encoding analysis) so this stage and dissociation
-    report identical numbers.
+    Condition (a): residualize neural on X only → r2_P_given_X (expect high,
+      physics still visible after removing raw-frame variance).
+    Condition (b): residualize neural on [X, S] → r2_P_given_XS (expect ~0,
+      KEY — physics collapses once predicted-frame variance is also removed).
     """
     print("\n" + "=" * 60)
-    print("RESIDUAL ANALYSIS: encoding on pixel-residualized neural")
+    print("RESIDUAL ANALYSIS: variance partitioning with X and S")
     print("=" * 60)
 
-    program_states = scenes["program_states"]
     physics_labels = scenes["physics_labels"]
-    metadata = scenes["metadata"]
 
     n_scenes, n_neurons = neural_activity.shape
     print(f"  n_scenes={n_scenes}, n_neurons={n_neurons}")
@@ -76,101 +69,46 @@ def run_residual_analysis(
     cv = KFold(n_splits=n_splits, shuffle=True, random_state=random_state)
     alphas = np.logspace(-2, 6, 20)
 
-    # --- Predictor matrices ---
-    print(f"\nReducing brain pixels to {pixel_pca_dim} PCA components...")
-    pixel_data = extract_brain_pixels(program_states, metadata)
-    pixel_pca, pca, _ = pca_reduce_pixels(
-        pixel_data, pixel_pca_dim, random_state=random_state
-    )
-    print(f"  PCA explained variance: {pca.explained_variance_ratio_.sum():.2%}")
-
     physics_scaled = StandardScaler().fit_transform(physics_labels)
 
-    predictor_sets = {
-        "pixel": pixel_pca,
-        "physics_gt": physics_scaled,
-    }
+    # --- Condition (a): residualize on X ---
+    print("\nStage 1a: cross-validated residuals after removing X...")
+    y_pred_X = _ridge_cv_predict(raw_pixel_pca, neural_activity, cv=cv, alphas=alphas)
+    y_resid_X = neural_activity - y_pred_X
+    var_kept_X = y_resid_X.var(axis=0).mean() / neural_activity.var(axis=0).mean()
+    print(f"  residual variance fraction = {var_kept_X:.4f}")
 
-    # --- Raw-neural baselines (reused from encoding analysis) ---
-    r2_raw = {
-        "pixel": np.asarray(r2_raw_pixel),
-        "physics_gt": np.asarray(r2_raw_physics_gt),
-    }
-    print("\nRaw-neural R² baselines (from encoding analysis):")
-    for name, arr in r2_raw.items():
-        print(f"  R² (raw, {name:>10}): mean={arr.mean():.4f}")
-
-    # --- Stage 1: out-of-fold pixel residuals ---
-    print("\nStage 1: cross-validated pixel residuals...")
-    y_pred_pixel = _ridge_cv_predict(pixel_pca, neural_activity, cv=cv, alphas=alphas)
-    y_resid = neural_activity - y_pred_pixel
-    var_kept = y_resid.var(axis=0).mean() / neural_activity.var(axis=0).mean()
-    print(f"  mean residual variance / raw variance = {var_kept:.4f}")
-
-    # --- Stage 2: encode residuals from each predictor set ---
-    print("\nStage 2: encoding on residual neural...")
-    r2_resid = {}
-    for name, X in predictor_sets.items():
-        y_hat = _ridge_cv_predict(X, y_resid, cv=cv, alphas=alphas)
-        r2_resid[name] = _r2_per_neuron(y_resid, y_hat)
-        print(f"  R² (resid, {name:>10}): mean={r2_resid[name].mean():.4f}")
-
-    # Sanity: pixel-on-residual should be ~0
-    if r2_resid["pixel"].mean() > 0.05:
-        print(
-            f"  WARNING: r2_pixel_resid mean is {r2_resid['pixel'].mean():.4f}, "
-            "expected ~0 — stage-1 ridge may be underfitting pixels."
-        )
+    print("Stage 2a: encode physics from X-residual neural...")
+    r2_P_given_X = _r2_per_neuron(
+        y_resid_X,
+        _ridge_cv_predict(physics_scaled, y_resid_X, cv=cv, alphas=alphas),
+    )
+    print(f"  r2_P | X: mean={r2_P_given_X.mean():.4f}  (expect > 0.01)")
 
     result = {
-        "r2_raw_pixel": r2_raw["pixel"],
-        "r2_raw_physics_gt": r2_raw["physics_gt"],
-        "r2_resid_pixel": r2_resid["pixel"],
-        "r2_resid_physics_gt": r2_resid["physics_gt"],
-        "residual_variance_fraction": float(var_kept),
-        "pixel_pca_dim": int(pixel_pca_dim),
+        "r2_P_given_X": r2_P_given_X,
+        "residual_variance_fraction_X": float(var_kept_X),
         "n_splits": int(n_splits),
         "random_state": int(random_state),
     }
 
-    # --- Predicted-S Stage-1 residualization ---
+    # --- Condition (b): residualize on [X, S] (KEY) ---
     if predicted_pixel_pca is not None:
-        print("\nStage 1 (predicted-S): cross-validated predicted-pixel residuals...")
-        y_pred_pred = _ridge_cv_predict(
-            predicted_pixel_pca, neural_activity, cv=cv, alphas=alphas
-        )
-        y_resid_pred = neural_activity - y_pred_pred
-        var_kept_pred = (
-            y_resid_pred.var(axis=0).mean() / neural_activity.var(axis=0).mean()
-        )
-        print(f"  mean residual variance / raw variance = {var_kept_pred:.4f}")
+        print("\nStage 1b: cross-validated residuals after removing [X, S]...")
+        XS = np.hstack([raw_pixel_pca, predicted_pixel_pca])
+        y_pred_XS = _ridge_cv_predict(XS, neural_activity, cv=cv, alphas=alphas)
+        y_resid_XS = neural_activity - y_pred_XS
+        var_kept_XS = y_resid_XS.var(axis=0).mean() / neural_activity.var(axis=0).mean()
+        print(f"  residual variance fraction = {var_kept_XS:.4f}")
 
-        print("\nStage 2 (predicted-S): encoding on predicted-S residual neural...")
-        r2_resid_pred_self = _r2_per_neuron(
-            y_resid_pred,
-            _ridge_cv_predict(predicted_pixel_pca, y_resid_pred, cv=cv, alphas=alphas),
+        print("Stage 2b: encode physics from [X,S]-residual neural (KEY)...")
+        r2_P_given_XS = _r2_per_neuron(
+            y_resid_XS,
+            _ridge_cv_predict(physics_scaled, y_resid_XS, cv=cv, alphas=alphas),
         )
-        r2_resid_physics_via_pred = _r2_per_neuron(
-            y_resid_pred,
-            _ridge_cv_predict(physics_scaled, y_resid_pred, cv=cv, alphas=alphas),
-        )
-        print(
-            f"  R² (resid_pred, predicted_S):  mean={r2_resid_pred_self.mean():.4f}  "
-            "(sanity — expect ~0)"
-        )
-        print(
-            f"  R² (resid_pred, physics_gt):   mean={r2_resid_physics_via_pred.mean():.4f}  "
-            "(expect ~0)"
-        )
+        print(f"  r2_P | X,S: mean={r2_P_given_XS.mean():.4f}  (expect < 0.01 KEY)")
 
-        if r2_resid_pred_self.mean() > 0.05:
-            print(
-                f"  WARNING: predicted-S self-residual mean is "
-                f"{r2_resid_pred_self.mean():.4f}, expected ~0."
-            )
-
-        result["r2_resid_predicted_pixel"] = r2_resid_pred_self
-        result["r2_resid_physics_gt_via_predicted_pixel"] = r2_resid_physics_via_pred
-        result["residual_variance_fraction_predicted"] = float(var_kept_pred)
+        result["r2_P_given_XS"] = r2_P_given_XS
+        result["residual_variance_fraction_XS"] = float(var_kept_XS)
 
     return result
