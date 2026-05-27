@@ -16,8 +16,6 @@ from sklearn.linear_model import RidgeCV
 from sklearn.model_selection import KFold, cross_val_predict, cross_val_score
 from sklearn.neural_network import MLPClassifier
 from sklearn.preprocessing import StandardScaler
-from config import PIXEL_PCA_DIM as _CFG_PIXEL_PCA_DIM
-from scene_generator import extract_brain_pixels
 
 
 def pca_reduce_pixels(pixel_data, n_components, random_state=42):
@@ -88,103 +86,83 @@ def run_encoding_analysis(
     scenes,
     neural_meta,
     *,
-    pixel_pca_dim=None,
+    raw_pixel_pca,
     predicted_pixel_pca=None,
     compute_null=True,
     n_null_permutations=50,
     null_seed=0,
 ):
     """
-    Run encoding model analysis.
+    Run encoding model analysis (variance partitioning: X, P, S).
 
-    1. PCA-reduce 3-frame brain pixels to PIXEL_PCA_DIM components
-    2. Ridge regression: neural ~ pixel_PCA -> R² per neuron
-    3. Ridge regression: neural ~ pixel_PCA + physics_labels -> R²
-    4. DeltaR² should be tiny
-    5. Subsampling curve: vary neurons sampled, plot DeltaR² + significance
-    6. Control: MLP physics_labels -> behavior_label
-    7. Permutation null: shuffle scene→physics association n_null_permutations
-       times, refit physics-only and combined encoders. Yields a null
-       distribution for r2_physics_only and r2_combined; ΔR² null is derived
-       (combined null minus fixed pixel-only baseline).
+    Fits ridge encoders for all combinations of:
+      X = raw observed frames (PCA-reduced), P = physics labels, S = predicted frames.
+
+    Key quantities:
+      delta_P_given_X  = r2_XP - r2_X   (physics added beyond raw frames; naive positive)
+      delta_P_given_XS = r2_XPS - r2_XS (physics added beyond frames+predicted; expect ~0)
     """
-    if pixel_pca_dim is None:
-        pixel_pca_dim = _CFG_PIXEL_PCA_DIM
-
     print("\n" + "=" * 60)
-    print("SIMULATION 1: Encoding Model False Negatives")
+    print("SIMULATION 1: Encoding Model — Variance Partitioning (X, P, S)")
     print("=" * 60)
 
-    program_states = scenes["program_states"]
     physics_labels = scenes["physics_labels"]
     behavior_labels = scenes["behavior_labels"]
-    metadata = scenes["metadata"]
 
     n_scenes, n_neurons = neural_activity.shape
-
-    # --- Extract and PCA-reduce 3-frame brain pixels (RGBA only) ---
-    print(
-        f"\nExtracting brain pixels and reducing to {pixel_pca_dim} PCA components..."
-    )
-    pixel_data = extract_brain_pixels(program_states, metadata)
-    pixel_pca, pca, pixel_scaler = pca_reduce_pixels(pixel_data, pixel_pca_dim)
-    print(f"  PCA explained variance: {pca.explained_variance_ratio_.sum():.2%}")
-    del pixel_data  # free ~393 MB — PCA-reduced result is all we need
 
     # --- Standardize physics labels ---
     scaler_phys = StandardScaler()
     physics_scaled = scaler_phys.fit_transform(physics_labels)
 
-    # --- Encoding model: pixels only ---
-    # Use the SVD-cached fast helper for all fits — same implementation for
-    # observed and null lets the permutation null directly bracket the real
-    # ΔR². Validated to match sklearn's RidgeCV(alpha_per_target=True) wrapped
-    # in cross_val_predict to ~1e-2 absolute (sklearn's gcv_mode picks slightly
-    # different alphas than our LOO-via-SVD on near-noise targets).
-    print("\nFitting encoding model: neural ~ pixel_PCA ...")
-    r2_pixel_only = ridge_r2_per_neuron_fast(pixel_pca, neural_activity)
+    # --- Encoding models: X, P, [X,P] ---
+    print("\nFitting encoding model: neural ~ X (raw frames)...")
+    r2_X = ridge_r2_per_neuron_fast(raw_pixel_pca, neural_activity)
 
-    # --- Encoding model: physics only ---
-    print("Fitting encoding model: neural ~ physics_labels ...")
-    r2_physics_only = ridge_r2_per_neuron_fast(physics_scaled, neural_activity)
+    print("Fitting encoding model: neural ~ P (physics)...")
+    r2_P = ridge_r2_per_neuron_fast(physics_scaled, neural_activity)
 
-    # --- Encoding model: pixels + physics labels ---
-    print("Fitting encoding model: neural ~ pixel_PCA + physics_labels ...")
-    combined = np.hstack([pixel_pca, physics_scaled])
-    r2_combined = ridge_r2_per_neuron_fast(combined, neural_activity)
+    print("Fitting encoding model: neural ~ [X, P]...")
+    r2_XP = ridge_r2_per_neuron_fast(
+        np.hstack([raw_pixel_pca, physics_scaled]), neural_activity
+    )
 
-    del combined
-    delta_r2 = r2_combined - r2_pixel_only
-    mean_r2_pixel = r2_pixel_only.mean()
-    mean_r2_phys = r2_physics_only.mean()
-    mean_r2_comb = r2_combined.mean()
-    mean_delta = delta_r2.mean()
+    delta_P_given_X = r2_XP - r2_X
 
-    print(f"\n  Mean R² (pixel only):         {mean_r2_pixel:.4f}")
-    print(f"  Mean R² (physics only):       {mean_r2_phys:.4f}")
-    print(f"  Mean R² (pixel+physics):      {mean_r2_comb:.4f}")
-    print(f"  Mean ΔR²:                     {mean_delta:.6f}")
+    print(f"\n  Mean R² X:             {r2_X.mean():.4f}")
+    print(f"  Mean R² P:             {r2_P.mean():.4f}")
+    print(f"  Mean R² [X,P]:         {r2_XP.mean():.4f}")
+    print(f"  delta_P | X:           {delta_P_given_X.mean():.6f}")
 
-    # --- Encoding model: predicted pixels (forward-model render, Predicted S) ---
-    r2_predicted_pixel = None
-    mean_r2_predicted_pixel = None
-    r2_combined_pred = None
-    delta_r2_pred = None
+    # --- Encoding models: S, [X,S], [X,S,P] (requires predicted_pixel_pca) ---
+    r2_S = r2_XS = r2_XPS = delta_P_given_XS = None
     if predicted_pixel_pca is not None:
-        print("Fitting encoding model: neural ~ predicted_pixel_PCA (Predicted S) ...")
-        r2_predicted_pixel = ridge_r2_per_neuron_fast(
-            predicted_pixel_pca, neural_activity
+        print("\nFitting encoding model: neural ~ S (predicted frames)...")
+        r2_S = ridge_r2_per_neuron_fast(predicted_pixel_pca, neural_activity)
+
+        print("Fitting encoding model: neural ~ [X, S]...")
+        r2_XS = ridge_r2_per_neuron_fast(
+            np.hstack([raw_pixel_pca, predicted_pixel_pca]), neural_activity
         )
-        mean_r2_predicted_pixel = r2_predicted_pixel.mean()
-        print(f"  Mean R² (predicted S):        {mean_r2_predicted_pixel:.4f}")
-        print(
-            "Fitting encoding model: neural ~ predicted_pixel_PCA + physics_labels ..."
+
+        print("Fitting encoding model: neural ~ [X, S, P]...")
+        r2_XPS = ridge_r2_per_neuron_fast(
+            np.hstack([raw_pixel_pca, predicted_pixel_pca, physics_scaled]),
+            neural_activity,
         )
-        combined_pred = np.hstack([predicted_pixel_pca, physics_scaled])
-        r2_combined_pred = ridge_r2_per_neuron_fast(combined_pred, neural_activity)
-        delta_r2_pred = r2_combined_pred - r2_predicted_pixel
-        print(f"  Mean R² (predicted S + physics): {r2_combined_pred.mean():.4f}")
-        print(f"  Mean ΔR² (physics | predicted S): {delta_r2_pred.mean():.6f}")
+
+        delta_P_given_XS = r2_XPS - r2_XS
+
+        print(f"  Mean R² S:             {r2_S.mean():.4f}")
+        print(f"  Mean R² [X,S]:         {r2_XS.mean():.4f}")
+        print(f"  Mean R² [X,S,P]:       {r2_XPS.mean():.4f}")
+        print(f"  delta_P | X,S:         {delta_P_given_XS.mean():.6f}")
+
+    # Backward-compat aliases (dissociation, dynamics, plots)
+    r2_pixel_only = r2_X
+    r2_physics_only = r2_P
+    r2_combined = r2_XP
+    delta_r2 = delta_P_given_X
 
     # --- Control: physics_labels -> behavior_label ---
     # MLP because KE = 0.5*m*v² is nonlinear in the physics label features.
@@ -203,8 +181,9 @@ def run_encoding_analysis(
         "  (High accuracy expected: KE label is a deterministic function of physics labels)"
     )
 
-    # --- Subsampling curve ---
+    # --- Subsampling curve over delta_P_given_XS (fall back to delta_P_given_X) ---
     print("\nComputing subsampling curve...")
+    curve_delta = delta_P_given_XS if delta_P_given_XS is not None else delta_P_given_X
     neuron_counts = [10, 25, 50, 100, 200, 300, 400, n_neurons]
     neuron_counts = [n for n in neuron_counts if n <= n_neurons]
     rng = np.random.default_rng(42)
@@ -214,41 +193,43 @@ def run_encoding_analysis(
     subsample_sig_fracs = []
 
     for n_sub in neuron_counts:
-        # Random subsample of neurons, repeated 20 times
         deltas = []
         for _ in range(20):
             idx = rng.choice(n_neurons, size=n_sub, replace=False)
-            sub_delta = delta_r2[idx]
-            deltas.append(sub_delta.mean())
+            deltas.append(curve_delta[idx].mean())
         deltas = np.array(deltas)
         subsample_means.append(deltas.mean())
         subsample_sems.append(deltas.std() / np.sqrt(len(deltas)))
-        # Fraction of subsamples where mean ΔR² > 0
         subsample_sig_fracs.append((deltas > 0).mean())
 
     # --- Permutation null: shuffle scene→physics association ---
     if compute_null:
         null_results = _compute_null_distribution(
-            pixel_pca,
+            raw_pixel_pca,
             physics_scaled,
             neural_activity,
-            r2_pixel_only,
-            r2_physics_only,
-            r2_combined,
-            delta_r2,
+            r2_X,
+            r2_P,
+            r2_XP,
+            delta_P_given_X,
             n_permutations=n_null_permutations,
             seed=null_seed,
         )
     else:
         null_results = _empty_null_results(neural_activity.shape[1])
 
-    # --- Fit full encoder on all data (for downstream dynamics analysis) ---
+    # --- Fit full encoder on raw_pixel_pca (for downstream dynamics analysis) ---
     print("\nFitting full encoder for downstream use...")
     alphas = np.logspace(-2, 6, 20)
     encoder_ridge = RidgeCV(alphas=alphas, alpha_per_target=True)
-    encoder_ridge.fit(pixel_pca, neural_activity)
+    encoder_ridge.fit(raw_pixel_pca, neural_activity)
 
     result = {
+        "r2_X": r2_X,
+        "r2_P": r2_P,
+        "r2_XP": r2_XP,
+        "delta_P_given_X": delta_P_given_X,
+        # backward-compat aliases
         "r2_pixel_only": r2_pixel_only,
         "r2_physics_only": r2_physics_only,
         "r2_combined": r2_combined,
@@ -260,17 +241,15 @@ def run_encoding_analysis(
         "subsample_neuron_counts": neuron_counts,
         **null_results,
         "encoder": {
-            "scaler": pixel_scaler,
-            "pca": pca,
             "ridge": encoder_ridge,
             "scaler_phys": scaler_phys,
         },
     }
-    if r2_predicted_pixel is not None:
-        result["r2_predicted_pixel"] = r2_predicted_pixel
-    if r2_combined_pred is not None:
-        result["r2_combined_pred"] = r2_combined_pred
-        result["delta_r2_pred"] = delta_r2_pred
+    if r2_S is not None:
+        result["r2_S"] = r2_S
+        result["r2_XS"] = r2_XS
+        result["r2_XPS"] = r2_XPS
+        result["delta_P_given_XS"] = delta_P_given_XS
     return result
 
 

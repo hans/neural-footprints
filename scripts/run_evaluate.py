@@ -13,13 +13,19 @@ dynamics = load_results(snakemake.input.dynamics)
 
 # Convert lists back to arrays where evaluate() expects them
 for key in [
+    "r2_X",
+    "r2_P",
+    "r2_XP",
+    "r2_S",
+    "r2_XS",
+    "r2_XPS",
+    "delta_P_given_X",
+    "delta_P_given_XS",
+    # backward-compat aliases
     "r2_pixel_only",
     "r2_physics_only",
     "r2_combined",
     "delta_r2",
-    "r2_predicted_pixel",
-    "r2_combined_pred",
-    "delta_r2_pred",
 ]:
     if key in encoding:
         encoding[key] = np.array(encoding[key])
@@ -27,14 +33,7 @@ for key in [
 residual_results = None
 if hasattr(snakemake.input, "residual"):
     residual_results = load_results(snakemake.input.residual)
-    for key in [
-        "r2_raw_pixel",
-        "r2_raw_physics_gt",
-        "r2_resid_pixel",
-        "r2_resid_physics_gt",
-        "r2_resid_predicted_pixel",
-        "r2_resid_physics_gt_via_predicted_pixel",
-    ]:
+    for key in ["r2_P_given_X", "r2_P_given_XS"]:
         if key in residual_results and residual_results[key] is not None:
             residual_results[key] = np.array(residual_results[key])
 

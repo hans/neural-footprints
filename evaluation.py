@@ -52,54 +52,23 @@ def evaluate(
             }
         )
 
-    # --- Predictive Processing (prerequisite: inverse model quality) ---
-    inverse_ok = True
-    if pp_results is not None:
-        lines.append(f"\n{BOLD}Predictive Processing{RESET}")
-        inverse_ok = pp_results["inverse_mean_r2"] > 0.30
-        check(
-            "Inverse model recovers physics from pixels",
-            inverse_ok,
-            f"R² = {pp_results['inverse_mean_r2']:.4f}",
-            "expect > 0.30 — prerequisite for PP chain and inferred-physics checks",
-        )
-        check(
-            "PP chain predicts better than pixel-only",
-            pp_results["pp_r2"] > pp_results["pixel_r2"],
-            f"PP R² = {pp_results['pp_r2']:.4f} vs pixel-only R² = {pp_results['pixel_r2']:.4f}",
-            "expect PP > pixel-only"
-            + ("" if inverse_ok else " (depends on inverse model)"),
-        )
-        check(
-            "Inferred physics invisible to neural regression",
-            pp_results["neural_r2_inferred_physics"] < 0.10,
-            f"R² = {pp_results['neural_r2_inferred_physics']:.4f}",
-            "expect < 0.10",
-        )
-        check(
-            "Pixel PCA explains neural activity at t=0",
-            pp_results["neural_r2_t0"] > 0.20,
-            f"R² = {pp_results['neural_r2_t0']:.4f}",
-            "expect > 0.20",
-        )
-
-    # --- Encoding Model ---
-    dr2 = encoding_results["delta_r2"].mean()
+    # --- Variance Partitioning (Encoding Model) ---
+    r2_X = np.asarray(encoding_results["r2_X"]).mean()
+    r2_P = np.asarray(encoding_results["r2_P"]).mean()
     ctrl = encoding_results["control_accuracy"]
-    r2_pixel = encoding_results["r2_pixel_only"].mean()
 
-    lines.append(f"\n{BOLD}Encoding Model{RESET}")
+    lines.append(f"\n{BOLD}Variance Partitioning{RESET}")
     check(
-        "Physics adds negligible variance (ΔR²)",
-        dr2 < 0.03,
-        f"ΔR² = {dr2:.4f}",
-        "expect < 0.03",
+        "X (raw frames) explains neural activity",
+        r2_X > 0.30,
+        f"R² = {r2_X:.4f}",
+        "expect > 0.30",
     )
     check(
-        "Pixel model explains neural activity",
-        r2_pixel > 0.30,
-        f"R² = {r2_pixel:.4f}",
-        "expect > 0.30",
+        "P (physics) explains neural activity",
+        r2_P > 0.10,
+        f"R² = {r2_P:.4f}",
+        "expect > 0.10",
     )
     check(
         "Control: physics predicts behavior",
@@ -108,78 +77,85 @@ def evaluate(
         "expect > 90%",
     )
 
-    if encoding_results.get("r2_predicted_pixel") is not None:
-        r2_pred = np.asarray(encoding_results["r2_predicted_pixel"]).mean()
+    if encoding_results.get("r2_S") is not None:
+        r2_S = np.asarray(encoding_results["r2_S"]).mean()
         check(
-            "Predicted-S explains neural activity",
-            r2_pred > 0.20,
-            f"R² = {r2_pred:.4f}",
-            "expect > 0.20",
+            "S (predicted frames) explains neural activity",
+            r2_S > 0.30,
+            f"R² = {r2_S:.4f}",
+            "expect > 0.30",
         )
 
-    if encoding_results.get("delta_r2_pred") is not None:
-        dr2_pred = np.asarray(encoding_results["delta_r2_pred"]).mean()
+    if encoding_results.get("delta_P_given_X") is not None:
+        dpx = np.asarray(encoding_results["delta_P_given_X"]).mean()
         check(
-            "Physics adds negligible variance beyond predicted-S (ΔR²)",
-            dr2_pred < 0.005,
-            f"ΔR² = {dr2_pred:.6f}",
-            "expect < 0.005 — tighter than pixel baseline; predicted-S absorbs physics-correlated variance",
+            "delta_P | X > 0 (naive positive: physics adds beyond raw frames)",
+            dpx > 0.005,
+            f"ΔR² = {dpx:.6f}",
+            "expect > 0.005",
         )
 
-    if encoding_results.get("r2_inferred") is not None:
-        dr2_inf = encoding_results["delta_r2_inferred"].mean()
+    if encoding_results.get("delta_P_given_XS") is not None:
+        dpxs = np.asarray(encoding_results["delta_P_given_XS"]).mean()
         check(
-            "Inferred physics adds negligible variance",
-            dr2_inf < 0.03,
-            f"ΔR² = {dr2_inf:.6f}",
-            "expect < 0.03" + ("" if inverse_ok else " (depends on inverse model)"),
+            "delta_P | X,S ≈ 0 (KEY: physics adds nothing beyond frames + model)",
+            dpxs < 0.005,
+            f"ΔR² = {dpxs:.6f}",
+            "expect < 0.005 KEY",
         )
+
+    # --- Residualization ---
+    if residual_results is not None:
+        lines.append(f"\n{BOLD}Residualization{RESET}")
+        if residual_results.get("r2_P_given_X") is not None:
+            r2_PgX = float(np.asarray(residual_results["r2_P_given_X"]).mean())
+            check(
+                "r2_P | X > 0 (physics survives X-only residualization)",
+                r2_PgX > 0.01,
+                f"R² = {r2_PgX:.4f}",
+                "expect > 0.01",
+            )
+        if residual_results.get("r2_P_given_XS") is not None:
+            r2_PgXS = float(np.asarray(residual_results["r2_P_given_XS"]).mean())
+            check(
+                "r2_P | X,S ≈ 0 (KEY: physics collapses after X+S residualization)",
+                r2_PgXS < 0.01,
+                f"R² = {r2_PgXS:.4f}",
+                "expect < 0.01 KEY",
+            )
 
     # --- RSA ---
-    nr = rsa_results["corr_neural_pixel"]
-    np_ = rsa_results["corr_neural_physics"]
-    partial = rsa_results["partial_neural_physics"]
+    corr_X = rsa_results["corr_neural_X"]
+    corr_P = rsa_results["corr_neural_P"]
+    partial_X = rsa_results["partial_P_given_X"]
 
     lines.append(f"\n{BOLD}RSA{RESET}")
     check(
-        "Neural ↔ Pixel correlation is dominant",
-        nr > 0.10,
-        f"r = {nr:.4f}",
+        "Neural ↔ X correlation is dominant",
+        corr_X > 0.10,
+        f"r = {corr_X:.4f}",
         "expect > 0.10",
     )
     check(
-        "Neural ↔ Physics correlation is small",
-        np_ < 0.10,
-        f"r = {np_:.4f}",
-        "expect < 0.10",
+        "Neural ↔ physics correlation present",
+        corr_P > 0.05,
+        f"r = {corr_P:.4f}",
+        "expect > 0.05",
     )
     check(
-        "Neural ↔ Physics | Pixel is near zero",
-        abs(partial) < 0.05,
-        f"r = {partial:.4f}",
-        "expect |r| < 0.05",
-    )
-    check(
-        "Pixel dominates physics (ratio > 2×)",
-        nr > 2 * abs(np_),
-        f"ratio = {nr / abs(np_) if np_ != 0 else float('inf'):.1f}×",
-        "expect pixel/physics > 2×",
+        "Partial neural↔physics | X > 0 (naive positive)",
+        partial_X > 0.02,
+        f"r = {partial_X:.4f}",
+        "expect > 0.02",
     )
 
-    if rsa_results.get("corr_neural_inferred") is not None:
-        ni = rsa_results["corr_neural_inferred"]
-        partial_ni = rsa_results["partial_neural_inferred"]
-        # Threshold loosened from 0.05 → 0.10 after the scene-gen review:
-        # the better inverse model legitimately puts more physics-relevant
-        # signal into the cognitive-PP layer that feeds neural activity, so
-        # residual correlation with inferred physics rises slightly above 0.05.
-        # The headline finding (pixel dominates) is unchanged — the partial
-        # is small in absolute terms.
+    if rsa_results.get("partial_P_given_XS") is not None:
+        partial_XS = rsa_results["partial_P_given_XS"]
         check(
-            "Neural ↔ Inferred physics | Pixel near zero",
-            abs(partial_ni) < 0.10,
-            f"r = {partial_ni:.4f}",
-            "expect |r| < 0.10" + ("" if inverse_ok else " (depends on inverse model)"),
+            "Partial neural↔physics | X,S ≈ 0 (KEY)",
+            abs(partial_XS) < 0.05,
+            f"r = {partial_XS:.4f}",
+            "expect |r| < 0.05 KEY",
         )
 
     # --- Dissociation ---
@@ -238,66 +214,6 @@ def evaluate(
                 f"delta R² = {delta_pix:.4f}",
                 "expect < 0.70 — blurry PCA prediction cannot match sharp object-displacement delta",
             )
-
-    # --- Residual Encoding ---
-    if residual_results is not None:
-        r2_resid_pixel = float(residual_results["r2_resid_pixel"].mean())
-        r2_raw_gt = float(residual_results["r2_raw_physics_gt"].mean())
-        r2_resid_gt = float(residual_results["r2_resid_physics_gt"].mean())
-        var_kept = float(residual_results["residual_variance_fraction"])
-
-        lines.append(f"\n{BOLD}Residual Encoding{RESET}")
-        check(
-            "Stage-1 sanity: pixel does not predict its own residual",
-            abs(r2_resid_pixel) < 0.05,
-            f"R² = {r2_resid_pixel:.4f}",
-            "expect |R²| < 0.05",
-        )
-        check(
-            "Stage-1 leaves substantial residual variance",
-            var_kept > 0.05,
-            f"residual var fraction = {var_kept:.4f}",
-            "expect > 0.05",
-        )
-        check(
-            "Raw neural carries GT-physics signal (pre-residualization)",
-            r2_raw_gt > 0.01,
-            f"R² = {r2_raw_gt:.4f}",
-            "expect > 0.01 — needed for the collapse to be meaningful",
-        )
-        check(
-            "Residualization removes GT-physics signal (false negative)",
-            r2_resid_gt < 0.01,
-            f"R² = {r2_resid_gt:.4f}",
-            "expect < 0.01",
-        )
-
-    if (
-        residual_results is not None
-        and residual_results.get("r2_resid_predicted_pixel") is not None
-    ):
-        r2_resid_pred_self = float(
-            np.asarray(residual_results["r2_resid_predicted_pixel"]).mean()
-        )
-        r2_resid_phys_via_pred = float(
-            np.asarray(
-                residual_results["r2_resid_physics_gt_via_predicted_pixel"]
-            ).mean()
-        )
-
-        lines.append(f"\n{BOLD}Residual Encoding — Predicted-S Stage-1{RESET}")
-        check(
-            "Sanity: predicted-S does not predict its own residual",
-            abs(r2_resid_pred_self) < 0.05,
-            f"R² = {r2_resid_pred_self:.4f}",
-            "expect |R²| < 0.05",
-        )
-        check(
-            "Predicted-S residualization removes GT-physics signal",
-            r2_resid_phys_via_pred < 0.01,
-            f"R² = {r2_resid_phys_via_pred:.4f}",
-            "expect < 0.01 — physics collapses after removing predicted-S variance",
-        )
 
     # --- Dynamics (future brain state) ---
     if dynamics_results is not None:
