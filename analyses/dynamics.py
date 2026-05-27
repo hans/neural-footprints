@@ -29,7 +29,7 @@ from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 from analyses.dissociation import _make_mlp
 from config import DYNAMICS_PCA_DIM as _CFG_DYNAMICS_PCA_DIM
-from scene_generator import extract_brain_pixels, extract_frame_pixels
+from scene_generator import extract_frame_pixels
 
 
 def run_dynamics_analysis(
@@ -105,8 +105,19 @@ def run_dynamics_analysis(
             lighting=lightings[i],
         )
 
-    pixel_data = extract_brain_pixels(program_states, metadata)
-    resim_pixels = extract_brain_pixels(resim_program_states, metadata)
+    pixel_data = np.concatenate(
+        [scenes["initial_renders"], scenes["early_renders"], scenes["late_renders"]],
+        axis=1,
+    )
+    fri = metadata["frame_render_indices"]
+    resim_pixels = np.concatenate(
+        [
+            resim_program_states[:, fri["initial"]],
+            resim_program_states[:, fri["early"]],
+            resim_program_states[:, fri["late"]],
+        ],
+        axis=1,
+    )
 
     print("  Cross-validating encoder on resimulated pixels (5-fold)...")
     kf = KFold(n_splits=5, shuffle=False)
@@ -146,7 +157,14 @@ def run_dynamics_analysis(
                 pillar_gray=pillar_grays[i],
                 lighting=lightings[i],
             )
-        resim_inferred_pixels = extract_brain_pixels(resim_inferred_states, metadata)
+        resim_inferred_pixels = np.concatenate(
+            [
+                resim_inferred_states[:, fri["initial"]],
+                resim_inferred_states[:, fri["early"]],
+                resim_inferred_states[:, fri["late"]],
+            ],
+            axis=1,
+        )
 
         print("  Cross-validating encoder on inferred-resimulated pixels (5-fold)...")
         pred_neural_inferred = np.zeros_like(neural_activity)
