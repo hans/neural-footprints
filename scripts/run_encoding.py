@@ -13,14 +13,19 @@ scenes = load_scenes(snakemake.input.scenes)
 neural, neural_meta = load_neural(snakemake.input.neural)
 fwd = np.load(snakemake.input.forward_renders)
 
-# Predicted-S: brain pixels extracted from the forward-model program states
+# X: raw observed frames (initial + early + late), PCA-reduced
+raw_frames = np.concatenate(
+    [scenes["initial_renders"], scenes["early_renders"], scenes["late_renders"]], axis=1
+)
+raw_pixel_pca, raw_pca, raw_scaler = pca_reduce_pixels(raw_frames, cfg["pixel_pca_dim"])
+del raw_frames
+
+# S: brain pixels extracted from forward-model program states, PCA-reduced
 fwd_states = fwd["forward_program_states"]
 predicted_brain_pixels = extract_brain_pixels(fwd_states, scenes["metadata"])
 predicted_pixel_pca, _, _ = pca_reduce_pixels(
     predicted_brain_pixels, cfg["pixel_pca_dim"]
 )
-# Free the 1.18 GB fwd_states and ~393 MB pixel buffer — only the PCA result
-# is needed downstream.
 del fwd_states, predicted_brain_pixels, fwd
 # W is the projection matrix used only during neural generation; drop it here
 # to reclaim ~590 MB before the ridge fits.
@@ -30,13 +35,16 @@ results = run_encoding_analysis(
     neural,
     scenes,
     neural_meta,
-    pixel_pca_dim=cfg["pixel_pca_dim"],
+    raw_pixel_pca=raw_pixel_pca,
     predicted_pixel_pca=predicted_pixel_pca,
     compute_null=cfg.get("encoding_compute_null", True),
     n_null_permutations=cfg.get("encoding_n_null_permutations", 50),
 )
 encoder = results.pop("encoder")
-# Forward arrays needed by downstream analyses (dissociation, etc.).
+# Scaler and PCA built here; add to encoder for dynamics (uses scaler/pca/ridge).
+encoder["scaler"] = raw_scaler
+encoder["pca"] = raw_pca
+# Forward arrays needed by downstream analyses (dissociation reads these from encoder).
 for key in (
     "r2_pixel_only",
     "r2_physics_only",
@@ -51,6 +59,10 @@ save_encoder(encoder, snakemake.output.encoder)
 
 # Save plot data
 plot_kwargs = dict(
+    r2_X=results["r2_X"],
+    r2_P=results["r2_P"],
+    r2_XP=results["r2_XP"],
+    delta_P_given_X=results["delta_P_given_X"],
     r2_pixel_only=results["r2_pixel_only"],
     r2_physics_only=results["r2_physics_only"],
     r2_combined=results["r2_combined"],
@@ -63,9 +75,7 @@ plot_kwargs = dict(
     control_accuracy=np.array(results["control_accuracy"]),
     control_accuracy_std=np.array(results["control_accuracy_std"]),
 )
-if "r2_predicted_pixel" in results:
-    plot_kwargs["r2_predicted_pixel"] = results["r2_predicted_pixel"]
-if "r2_combined_pred" in results:
-    plot_kwargs["r2_combined_pred"] = results["r2_combined_pred"]
-    plot_kwargs["delta_r2_pred"] = results["delta_r2_pred"]
+for key in ("r2_S", "r2_XS", "r2_XPS", "delta_P_given_XS"):
+    if key in results:
+        plot_kwargs[key] = results[key]
 np.savez_compressed(snakemake.output.plot_data, **plot_kwargs)
