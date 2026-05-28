@@ -73,11 +73,11 @@ add("encodingDeltaRsq", fmt(np.mean(delta_r2), 4))
 add("controlAccuracy", pct(encoding["control_accuracy"]))
 
 # --- RSA ---
-add("rsaCorrNeuralPixel", fmt(rsa["corr_neural_pixel"], 4))
-add("rsaCorrNeuralPhysics", fmt(rsa["corr_neural_physics"], 4))
-add("rsaCorrPixelPhysics", fmt(rsa["corr_pixel_physics"], 4))
-add("rsaPartialNeuralPhysics", fmt(rsa["partial_neural_physics"], 4))
-add("rsaRatio", fmt(rsa["corr_neural_pixel"] / max(rsa["corr_neural_physics"], 1e-9), 1))
+add("rsaCorrNeuralPixel", fmt(rsa["corr_neural_X"], 4))
+add("rsaCorrNeuralPhysics", fmt(rsa["corr_neural_P"], 4))
+add("rsaCorrPixelPhysics", fmt(rsa["corr_X_P"], 4))
+add("rsaPartialNeuralPhysics", fmt(rsa["partial_P_given_X"], 4))
+add("rsaRatio", fmt(rsa["corr_neural_X"] / max(rsa["corr_neural_P"], 1e-9), 1))
 
 # --- dynamics ---
 r2_phys_fwd = np.array(dynamics["r2_physics_forward"])
