@@ -146,17 +146,17 @@ def plot_encoding(plot_data, fig_dir="figures"):
 
 def plot_rsa(plot_data, fig_dir="figures"):
     rdm_neural = plot_data["rdm_neural"]
-    rdm_pixel = plot_data['rdm_X']
+    rdm_pixel = plot_data["rdm_X"]
     rdm_physics_gt = plot_data["rdm_physics"]
     n_sub = int(plot_data["n_sub"])
-    corr_neural_pixel = float(plot_data['corr_neural_X'])
-    corr_neural_physics_gt = float(plot_data['corr_neural_P'])
+    corr_neural_pixel = float(plot_data["corr_neural_X"])
+    corr_neural_physics_gt = float(plot_data["corr_neural_P"])
 
     keys = plot_data.files if hasattr(plot_data, "files") else plot_data
-    has_inferred = "rdm_inferred" in keys
-    rdm_physics_inf = plot_data["rdm_inferred"] if has_inferred else None
+    has_inferred = "rdm_S" in keys
+    rdm_physics_inf = plot_data["rdm_S"] if has_inferred else None
     corr_neural_physics_inf = (
-        float(plot_data["corr_neural_inferred"]) if has_inferred else None
+        float(plot_data["corr_neural_S"]) if has_inferred else None
     )
     has_predicted = "rdm_predicted" in keys
     rdm_predicted_flat = plot_data["rdm_predicted"] if has_predicted else None
@@ -793,6 +793,7 @@ def plot_sample_scenes(
 
 def plot_residual(plot_data, fig_dir="figures"):
 <<<<<<< HEAD
+<<<<<<< HEAD
     r2_P_given_X = plot_data['r2_P_given_X']
     var_kept_X = float(plot_data['residual_variance_fraction_X'])
     n = len(r2_P_given_X)
@@ -819,12 +820,23 @@ def plot_residual(plot_data, fig_dir="figures"):
         [r2_resid_pixel.std() / np.sqrt(n), r2_resid_physics_gt.std() / np.sqrt(n)]
     )
 >>>>>>> d56db75 (Add depth_gated_temporal inverse model for diverse multi-object scenes)
+=======
+    r2_P_given_X = plot_data["r2_P_given_X"]
+    var_kept_X = float(plot_data["residual_variance_fraction_X"])
+    n = len(r2_P_given_X)
+
+    keys = plot_data.files if hasattr(plot_data, "files") else plot_data
+    has_XS = "r2_P_given_XS" in keys
+    r2_P_given_XS = plot_data["r2_P_given_XS"] if has_XS else None
+    var_kept_XS = float(plot_data["residual_variance_fraction_XS"]) if has_XS else None
+>>>>>>> d0dd436 (fix: update plot keys and dissociation pixel dims after variance-partitioning restructure)
 
     with paper_style():
         fig, axes = plt.subplots(1, 2, figsize=(FULL_WIDTH, 2.4))
 
         # Panel A: per-neuron scatter — X-residual vs X+S-residual physics R²
         ax = axes[0]
+<<<<<<< HEAD
 <<<<<<< HEAD
         if has_XS:
             ax.scatter(r2_P_given_X, r2_P_given_XS,
@@ -920,13 +932,90 @@ def plot_residual(plot_data, fig_dir="figures"):
             capsize=3,
             label="Residualized neural",
         )
+=======
+        if has_XS:
+            ax.scatter(
+                r2_P_given_X,
+                r2_P_given_XS,
+                s=6,
+                alpha=0.5,
+                color=COLORS["physics"],
+                edgecolors="none",
+            )
+            lo = float(min(r2_P_given_X.min(), r2_P_given_XS.min()))
+            hi = float(max(r2_P_given_X.max(), r2_P_given_XS.max()))
+            pad = 0.05 * (hi - lo if hi > lo else 1.0)
+            ax.plot(
+                [lo - pad, hi + pad],
+                [lo - pad, hi + pad],
+                color="gray",
+                linestyle="--",
+                linewidth=0.8,
+                label="y = x",
+            )
+            ax.axhline(0, color="gray", linestyle=":", linewidth=0.6)
+            ax.set_xlim(lo - pad, hi + pad)
+            ax.set_ylim(lo - pad, hi + pad)
+            ax.set_xlabel("R² (P | X-residual neural)")
+            ax.set_ylabel("R² (P | X+S-residual neural)")
+            ax.set_title("Physics collapses after removing X+S")
+            ax.legend(loc="upper left")
+        else:
+            n_bins = max(20, n // 50)
+            ax.hist(r2_P_given_X, bins=n_bins, color=COLORS["physics"], alpha=0.7)
+            ax.axvline(0, color="gray", linestyle=":", linewidth=0.6)
+            ax.set_xlabel("R² (P | X-residual neural)")
+            ax.set_ylabel("Neuron count")
+            ax.set_title(
+                f"Physics R² after X-residualization\n(var kept={var_kept_X:.2f})"
+            )
+
+        # Panel B: mean physics R² under each residualization condition
+        ax = axes[1]
+        if has_XS:
+            labels = ["X residual", "X+S residual"]
+            means = [r2_P_given_X.mean(), r2_P_given_XS.mean()]
+            sems = [r2_P_given_X.std() / np.sqrt(n), r2_P_given_XS.std() / np.sqrt(n)]
+            bars = ax.bar(
+                labels,
+                means,
+                yerr=sems,
+                color=[COLORS["sensory"], COLORS["physics"]],
+                capsize=3,
+                width=0.5,
+            )
+            ax.set_title(
+                f"Mean R² (var kept: X={var_kept_X:.2f}, XS={var_kept_XS:.2f})"
+            )
+        else:
+            means = [r2_P_given_X.mean()]
+            sems = [r2_P_given_X.std() / np.sqrt(n)]
+            bars = ax.bar(
+                ["X residual"],
+                means,
+                yerr=sems,
+                color=[COLORS["physics"]],
+                capsize=3,
+                width=0.5,
+            )
+            ax.set_title(f"Mean R² (var kept={var_kept_X:.2f})")
+>>>>>>> d0dd436 (fix: update plot keys and dissociation pixel dims after variance-partitioning restructure)
         ax.axhline(0, color="gray", linestyle="--", linewidth=0.6)
-        ax.set_xticks(x)
-        ax.set_xticklabels([LABEL_SENSORY, LABEL_PHYSICS])
         ax.set_ylabel("Mean R²")
+<<<<<<< HEAD
         ax.set_title(f"Encoding R² (residual var fraction = {var_kept:.2f})")
         ax.legend()
 >>>>>>> d56db75 (Add depth_gated_temporal inverse model for diverse multi-object scenes)
+=======
+        for bar, val in zip(bars, means):
+            ax.text(
+                bar.get_x() + bar.get_width() / 2,
+                bar.get_height() + 0.001,
+                f"{val:.4f}",
+                ha="center",
+                va="bottom",
+            )
+>>>>>>> d0dd436 (fix: update plot keys and dissociation pixel dims after variance-partitioning restructure)
 
         plt.tight_layout()
         fig_path = f"{fig_dir}/residual_analysis.pdf"

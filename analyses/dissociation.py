@@ -407,11 +407,11 @@ def run_dissociation_analysis(
 
     # --- Prepare features for behavioral sufficiency scoring ---
     pixel_data = np.concatenate(
-        [scenes['initial_renders'], scenes['early_renders'], scenes['late_renders']],
+        [scenes["initial_renders"], scenes["early_renders"], scenes["late_renders"]],
         axis=1,
     )
-    pixel_pca = encoder['pca'].transform(encoder['scaler'].transform(pixel_data))
-    physics_scaled = encoder['scaler_phys'].transform(physics_labels)
+    pixel_pca = encoder["pca"].transform(encoder["scaler"].transform(pixel_data))
+    physics_scaled = encoder["scaler_phys"].transform(physics_labels)
 
     # 3-frame pixel input for the behavioral pixel model. Uses a
     # behavioral-sized PCA (whitened) so pixel and physics models are
