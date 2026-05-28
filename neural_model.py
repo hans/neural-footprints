@@ -19,6 +19,7 @@ def generate_neural_activity(
     noise_level=None,
     block_sizes=None,
     normalization="operator_norm",
+    block_norm=None,
 ):
     """
     Generate neural activity from raw program states via random linear projection.
@@ -33,16 +34,10 @@ def generate_neural_activity(
         Sizes of consecutive blocks in program_states. If None, treats entire D
         as one block.
     normalization : {"operator_norm", "stable_rank_trunc"}
-        Per-block normalization scheme.
-
-        "operator_norm" (default): divide each block by its largest singular
-        value (operator norm). Preserves the original D-dimensional input to W.
-
-        "stable_rank_trunc": truncate each block to its stable rank k =
-        max(1, round(||X||_F² / ||X||_op²)) via truncated SVD (Gram-matrix
-        eigendecomposition), then whiten within that subspace. W is sized
-        (n_neurons, sum_of_ks) instead of (n_neurons, D_total). Unit-norm
-        columns from eigendecomposition serve as the whitened scores.
+        Per-block normalization scheme (legacy; used when block_norm is None).
+    block_norm : {"truncated_svd", "zscore"} or None
+        If set, overrides normalization. "truncated_svd" maps to stable_rank_trunc
+        logic; "zscore" applies per-dimension z-scoring within each block.
 
     Returns
     -------
@@ -64,6 +59,14 @@ def generate_neural_activity(
 
     if block_sizes is None:
         block_sizes = [D]
+
+    # block_norm overrides normalization when set
+    if block_norm == "truncated_svd":
+        normalization = "stable_rank_trunc"
+    elif block_norm == "zscore":
+        normalization = "zscore"
+    elif block_norm is not None:
+        raise ValueError(f"Unknown block_norm: {block_norm!r}")
 
     if normalization == "operator_norm":
         # Divide each block by its largest singular value in-place.
@@ -160,6 +163,27 @@ def generate_neural_activity(
         normalized = np.concatenate(blocks_reduced, axis=1)  # (n_scenes, sum_of_ks)
         D_proj = normalized.shape[1]
 
+    elif normalization == "zscore":
+        # Per-dimension z-scoring within each block (divide each column by its std).
+        block_norms = []
+        start = 0
+        for size in block_sizes:
+            block = centered[:, start : start + size]
+            if size == 0:
+                block_norms.append(1.0)
+                start += size
+                continue
+            stds = block.std(axis=0)
+            stds = np.where(stds < 1e-8, 1.0, stds)
+            centered[:, start : start + size] /= stds
+            block_norms.append(float(stds.mean()))
+            start += size
+
+        normalized = centered
+        D_proj = D
+        block_stable_ranks = None
+        block_k_values = None
+
     else:
         raise ValueError(f"Unknown normalization: {normalization!r}")
 
@@ -187,6 +211,7 @@ def generate_neural_activity(
         "var_per_dim": var_per_dim,
         "total_var": total_var,
         "normalization": normalization,
+        "block_norm": block_norm,
         "block_stable_ranks": (
             np.array(block_stable_ranks) if block_stable_ranks is not None else None
         ),
