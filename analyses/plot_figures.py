@@ -792,35 +792,6 @@ def plot_sample_scenes(
 
 
 def plot_residual(plot_data, fig_dir="figures"):
-<<<<<<< HEAD
-<<<<<<< HEAD
-    r2_P_given_X = plot_data['r2_P_given_X']
-    var_kept_X = float(plot_data['residual_variance_fraction_X'])
-    n = len(r2_P_given_X)
-
-    keys = plot_data.files if hasattr(plot_data, 'files') else plot_data
-    has_XS = 'r2_P_given_XS' in keys
-    r2_P_given_XS = plot_data['r2_P_given_XS'] if has_XS else None
-    var_kept_XS = float(plot_data['residual_variance_fraction_XS']) if has_XS else None
-=======
-    r2_raw_pixel = plot_data["r2_raw_pixel"]
-    r2_raw_physics_gt = plot_data["r2_raw_physics_gt"]
-    r2_resid_pixel = plot_data["r2_resid_pixel"]
-    r2_resid_physics_gt = plot_data["r2_resid_physics_gt"]
-    var_kept = float(plot_data["residual_variance_fraction"])
-
-    n = len(r2_raw_physics_gt)
-
-    raw_means = np.array([r2_raw_pixel.mean(), r2_raw_physics_gt.mean()])
-    resid_means = np.array([r2_resid_pixel.mean(), r2_resid_physics_gt.mean()])
-    raw_sems = np.array(
-        [r2_raw_pixel.std() / np.sqrt(n), r2_raw_physics_gt.std() / np.sqrt(n)]
-    )
-    resid_sems = np.array(
-        [r2_resid_pixel.std() / np.sqrt(n), r2_resid_physics_gt.std() / np.sqrt(n)]
-    )
->>>>>>> d56db75 (Add depth_gated_temporal inverse model for diverse multi-object scenes)
-=======
     r2_P_given_X = plot_data["r2_P_given_X"]
     var_kept_X = float(plot_data["residual_variance_fraction_X"])
     n = len(r2_P_given_X)
@@ -829,110 +800,12 @@ def plot_residual(plot_data, fig_dir="figures"):
     has_XS = "r2_P_given_XS" in keys
     r2_P_given_XS = plot_data["r2_P_given_XS"] if has_XS else None
     var_kept_XS = float(plot_data["residual_variance_fraction_XS"]) if has_XS else None
->>>>>>> d0dd436 (fix: update plot keys and dissociation pixel dims after variance-partitioning restructure)
 
     with paper_style():
         fig, axes = plt.subplots(1, 2, figsize=(FULL_WIDTH, 2.4))
 
         # Panel A: per-neuron scatter — X-residual vs X+S-residual physics R²
         ax = axes[0]
-<<<<<<< HEAD
-<<<<<<< HEAD
-        if has_XS:
-            ax.scatter(r2_P_given_X, r2_P_given_XS,
-                       s=6, alpha=0.5, color=COLORS['physics'], edgecolors='none')
-            lo = float(min(r2_P_given_X.min(), r2_P_given_XS.min()))
-            hi = float(max(r2_P_given_X.max(), r2_P_given_XS.max()))
-            pad = 0.05 * (hi - lo if hi > lo else 1.0)
-            ax.plot([lo - pad, hi + pad], [lo - pad, hi + pad],
-                    color='gray', linestyle='--', linewidth=0.8, label='y = x')
-            ax.axhline(0, color='gray', linestyle=':', linewidth=0.6)
-            ax.set_xlim(lo - pad, hi + pad)
-            ax.set_ylim(lo - pad, hi + pad)
-            ax.set_xlabel('R² (P | X-residual neural)')
-            ax.set_ylabel('R² (P | X+S-residual neural)')
-            ax.set_title('Physics collapses after removing X+S')
-            ax.legend(loc='upper left')
-        else:
-            n_bins = max(20, n // 50)
-            ax.hist(r2_P_given_X, bins=n_bins, color=COLORS['physics'], alpha=0.7)
-            ax.axvline(0, color='gray', linestyle=':', linewidth=0.6)
-            ax.set_xlabel('R² (P | X-residual neural)')
-            ax.set_ylabel('Neuron count')
-            ax.set_title(f'Physics R² after X-residualization\n(var kept={var_kept_X:.2f})')
-=======
-        ax.scatter(
-            r2_raw_physics_gt,
-            r2_resid_physics_gt,
-            s=6,
-            alpha=0.5,
-            color=COLORS["physics"],
-            edgecolors="none",
-        )
-        lo = float(min(r2_raw_physics_gt.min(), r2_resid_physics_gt.min()))
-        hi = float(max(r2_raw_physics_gt.max(), r2_resid_physics_gt.max()))
-        pad = 0.05 * (hi - lo if hi > lo else 1.0)
-        ax.plot(
-            [lo - pad, hi + pad],
-            [lo - pad, hi + pad],
-            color="gray",
-            linestyle="--",
-            linewidth=0.8,
-            label="y = x",
-        )
-        ax.axhline(0, color="gray", linestyle=":", linewidth=0.6)
-        ax.set_xlim(lo - pad, hi + pad)
-        ax.set_ylim(lo - pad, hi + pad)
-        ax.set_xlabel("R² (raw neural ~ GT physics)")
-        ax.set_ylabel("R² (residualized neural ~ GT physics)")
-        ax.set_title("Per-neuron collapse after pixel-residualization")
-        ax.legend(loc="upper left")
->>>>>>> d56db75 (Add depth_gated_temporal inverse model for diverse multi-object scenes)
-
-        # Panel B: mean physics R² under each residualization condition
-        ax = axes[1]
-<<<<<<< HEAD
-        if has_XS:
-            labels = ['X residual', 'X+S residual']
-            means = [r2_P_given_X.mean(), r2_P_given_XS.mean()]
-            sems = [r2_P_given_X.std() / np.sqrt(n), r2_P_given_XS.std() / np.sqrt(n)]
-            bars = ax.bar(labels, means, yerr=sems,
-                          color=[COLORS['sensory'], COLORS['physics']],
-                          capsize=3, width=0.5)
-            ax.set_title(f'Mean R² (var kept: X={var_kept_X:.2f}, XS={var_kept_XS:.2f})')
-        else:
-            means = [r2_P_given_X.mean()]
-            sems = [r2_P_given_X.std() / np.sqrt(n)]
-            bars = ax.bar(['X residual'], means, yerr=sems,
-                          color=[COLORS['physics']], capsize=3, width=0.5)
-            ax.set_title(f'Mean R² (var kept={var_kept_X:.2f})')
-        ax.axhline(0, color='gray', linestyle='--', linewidth=0.6)
-        ax.set_ylabel('Mean R²')
-        for bar, val in zip(bars, means):
-            ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.001,
-                    f'{val:.4f}', ha='center', va='bottom')
-=======
-        x = np.arange(2)
-        width = 0.35
-        ax.bar(
-            x - width / 2,
-            raw_means,
-            width,
-            yerr=raw_sems,
-            color=COLORS["sensory"],
-            capsize=3,
-            label="Raw neural",
-        )
-        ax.bar(
-            x + width / 2,
-            resid_means,
-            width,
-            yerr=resid_sems,
-            color=COLORS["physics"],
-            capsize=3,
-            label="Residualized neural",
-        )
-=======
         if has_XS:
             ax.scatter(
                 r2_P_given_X,
@@ -999,14 +872,8 @@ def plot_residual(plot_data, fig_dir="figures"):
                 width=0.5,
             )
             ax.set_title(f"Mean R² (var kept={var_kept_X:.2f})")
->>>>>>> d0dd436 (fix: update plot keys and dissociation pixel dims after variance-partitioning restructure)
         ax.axhline(0, color="gray", linestyle="--", linewidth=0.6)
         ax.set_ylabel("Mean R²")
-<<<<<<< HEAD
-        ax.set_title(f"Encoding R² (residual var fraction = {var_kept:.2f})")
-        ax.legend()
->>>>>>> d56db75 (Add depth_gated_temporal inverse model for diverse multi-object scenes)
-=======
         for bar, val in zip(bars, means):
             ax.text(
                 bar.get_x() + bar.get_width() / 2,
@@ -1015,7 +882,6 @@ def plot_residual(plot_data, fig_dir="figures"):
                 ha="center",
                 va="bottom",
             )
->>>>>>> d0dd436 (fix: update plot keys and dissociation pixel dims after variance-partitioning restructure)
 
         plt.tight_layout()
         fig_path = f"{fig_dir}/residual_analysis.pdf"
