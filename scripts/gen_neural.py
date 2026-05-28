@@ -43,13 +43,15 @@ del raw_frames, render, hidden_acts, inferred_physics
 
 block_sizes = [D_raw, D_render, D_hidden, D_inferred]
 
+block_norm = snakemake.params.get("block_norm", cfg.get("block_norm", "truncated_svd"))
+
 neural, neural_meta = generate_neural_activity(
     neural_input,
     cfg["random_seed"],
     n_neurons=cfg["n_neurons"],
     noise_level=cfg["noise_level"],
     block_sizes=block_sizes,
-    normalization="stable_rank_trunc",
+    block_norm=block_norm,
 )
 
 block_names = ["raw_frames", "fwd_render", "hidden_acts", "inferred_physics"]

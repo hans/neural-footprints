@@ -1,44 +1,43 @@
 configfile: "config.yaml"
 
+_ALL_FIGURES = [
+    "figures/{norm}/encoding_analysis.pdf",
+    "figures/{norm}/rsa_analysis.pdf",
+    "figures/{norm}/dissociation.pdf",
+    "figures/{norm}/dissociation_combined.pdf",
+    "figures/{norm}/predicted_frames.pdf",
+    "figures/{norm}/predicted_frames_compact.pdf",
+    "figures/{norm}/pca_analysis.pdf",
+    "figures/{norm}/pca_variance_decoding.pdf",
+    "figures/{norm}/dynamics_analysis.pdf",
+    "figures/{norm}/predictive_processing.pdf",
+    "figures/{norm}/pp_frames.pdf",
+    "figures/{norm}/residual_analysis.pdf",
+    "figures/{norm}/sample_scenes.pdf",
+]
+
 
 rule all:
     input:
-        "outputs/evaluation.json",
-        "figures/encoding_analysis.pdf",
-        "figures/rsa_analysis.pdf",
-        "figures/dissociation.pdf",
-        "figures/dissociation_combined.pdf",
-        "figures/predicted_frames.pdf",
-        "figures/predicted_frames_compact.pdf",
-        "figures/pca_analysis.pdf",
-        "figures/pca_variance_decoding.pdf",
-        "figures/dynamics_analysis.pdf",
-        "figures/predictive_processing.pdf",
-        "figures/pp_frames.pdf",
-        "figures/residual_analysis.pdf",
-        "figures/sample_scenes.pdf",
-        "paper/results_macros.tex",
+        expand("outputs/{norm}/evaluation.json", norm=config["block_norms"]),
+        expand(_ALL_FIGURES, norm=config["block_norms"]),
+        expand("paper/{norm}_results_macros.tex", norm=config["block_norms"]),
 
 
 rule figures:
     input:
-        "figures/encoding_analysis.pdf",
-        "figures/rsa_analysis.pdf",
-        "figures/dissociation.pdf",
-        "figures/dissociation_combined.pdf",
-        "figures/predicted_frames.pdf",
-        "figures/predicted_frames_compact.pdf",
-        "figures/pca_analysis.pdf",
-        "figures/pca_variance_decoding.pdf",
-        "figures/dynamics_analysis.pdf",
-        "figures/predictive_processing.pdf",
-        "figures/pp_frames.pdf",
-        "figures/residual_analysis.pdf",
-        "figures/sample_scenes.pdf",
+        expand(_ALL_FIGURES, norm=config["block_norms"]),
+
+
+rule norm_all:
+    input:
+        expand("outputs/{norm}/evaluation.json", norm=[config["block_norm"]]),
+        expand(_ALL_FIGURES, norm=[config["block_norm"]]),
+        expand("paper/{norm}_results_macros.tex", norm=[config["block_norm"]]),
 
 
 # ---------------------------------------------------------------------------
-# Data generation
+# Data generation (norm-independent: shared across all norms)
 # ---------------------------------------------------------------------------
 
 rule generate_scenes:
@@ -74,7 +73,9 @@ rule generate_neural:
         pp_activations="data/pp_activations.npz",
         forward_renders="data/forward_renders.npz",
     output:
-        neural="data/neural.npz",
+        neural="data/{norm}/neural.npz",
+    params:
+        block_norm=lambda wildcards: wildcards.norm,
     script:
         "scripts/gen_neural.py"
 
@@ -86,12 +87,12 @@ rule generate_neural:
 rule predictive_processing:
     input:
         scenes="data/scenes.npz",
-        neural="data/neural.npz",
+        neural="data/{norm}/neural.npz",
         model="data/inverse_model.pt",
     output:
-        results="outputs/pp_results.json",
-        inferred="data/inferred_physics.npz",
-        plot_data="data/pp_plot_data.npz",
+        results="outputs/{norm}/pp_results.json",
+        inferred="data/{norm}/inferred_physics.npz",
+        plot_data="data/{norm}/pp_plot_data.npz",
     script:
         "scripts/run_pp.py"
 
@@ -99,12 +100,12 @@ rule predictive_processing:
 rule encoding:
     input:
         scenes="data/scenes.npz",
-        neural="data/neural.npz",
+        neural="data/{norm}/neural.npz",
         forward_renders="data/forward_renders.npz",
     output:
-        results="outputs/encoding_results.json",
-        encoder="data/encoder.joblib",
-        plot_data="data/encoding_plot_data.npz",
+        results="outputs/{norm}/encoding_results.json",
+        encoder="data/{norm}/encoder.joblib",
+        plot_data="data/{norm}/encoding_plot_data.npz",
     script:
         "scripts/run_encoding.py"
 
@@ -112,11 +113,11 @@ rule encoding:
 rule rsa:
     input:
         scenes="data/scenes.npz",
-        neural="data/neural.npz",
+        neural="data/{norm}/neural.npz",
         forward_renders="data/forward_renders.npz",
     output:
-        results="outputs/rsa_results.json",
-        plot_data="data/rsa_plot_data.npz",
+        results="outputs/{norm}/rsa_results.json",
+        plot_data="data/{norm}/rsa_plot_data.npz",
     script:
         "scripts/run_rsa.py"
 
@@ -124,12 +125,12 @@ rule rsa:
 rule dissociation:
     input:
         scenes="data/scenes.npz",
-        neural="data/neural.npz",
-        encoder="data/encoder.joblib",
+        neural="data/{norm}/neural.npz",
+        encoder="data/{norm}/encoder.joblib",
         forward_renders="data/forward_renders.npz",
     output:
-        results="outputs/dissociation_results.json",
-        plot_data="data/dissociation_plot_data.npz",
+        results="outputs/{norm}/dissociation_results.json",
+        plot_data="data/{norm}/dissociation_plot_data.npz",
     script:
         "scripts/run_dissociation.py"
 
@@ -137,10 +138,10 @@ rule dissociation:
 rule pca:
     input:
         scenes="data/scenes.npz",
-        neural="data/neural.npz",
+        neural="data/{norm}/neural.npz",
     output:
-        results="outputs/pca_results.json",
-        plot_data="data/pca_plot_data.npz",
+        results="outputs/{norm}/pca_results.json",
+        plot_data="data/{norm}/pca_plot_data.npz",
     script:
         "scripts/run_pca.py"
 
@@ -148,13 +149,13 @@ rule pca:
 rule dynamics:
     input:
         scenes="data/scenes.npz",
-        neural="data/neural.npz",
-        encoding="outputs/encoding_results.json",
-        encoder="data/encoder.joblib",
-        inferred="data/inferred_physics.npz",
+        neural="data/{norm}/neural.npz",
+        encoding="outputs/{norm}/encoding_results.json",
+        encoder="data/{norm}/encoder.joblib",
+        inferred="data/{norm}/inferred_physics.npz",
     output:
-        results="outputs/dynamics_results.json",
-        plot_data="data/dynamics_plot_data.npz",
+        results="outputs/{norm}/dynamics_results.json",
+        plot_data="data/{norm}/dynamics_plot_data.npz",
     script:
         "scripts/run_dynamics.py"
 
@@ -162,12 +163,12 @@ rule dynamics:
 rule residual:
     input:
         scenes="data/scenes.npz",
-        neural="data/neural.npz",
-        encoding="outputs/encoding_results.json",
+        neural="data/{norm}/neural.npz",
+        encoding="outputs/{norm}/encoding_results.json",
         forward_renders="data/forward_renders.npz",
     output:
-        results="outputs/residual_results.json",
-        plot_data="data/residual_plot_data.npz",
+        results="outputs/{norm}/residual_results.json",
+        plot_data="data/{norm}/residual_plot_data.npz",
     script:
         "scripts/run_residual.py"
 
@@ -181,77 +182,77 @@ rule plot_scenes:
         scenes="data/scenes.npz",
         forward_renders="data/forward_renders.npz",
     output:
-        figure="figures/sample_scenes.pdf",
+        figure="figures/{norm}/sample_scenes.pdf",
     script:
         "scripts/plot_scenes.py"
 
 
 rule plot_encoding:
     input:
-        plot_data="data/encoding_plot_data.npz",
+        plot_data="data/{norm}/encoding_plot_data.npz",
     output:
-        figure="figures/encoding_analysis.pdf",
+        figure="figures/{norm}/encoding_analysis.pdf",
     script:
         "scripts/plot_encoding.py"
 
 
 rule plot_rsa:
     input:
-        plot_data="data/rsa_plot_data.npz",
+        plot_data="data/{norm}/rsa_plot_data.npz",
     output:
-        figure="figures/rsa_analysis.pdf",
+        figure="figures/{norm}/rsa_analysis.pdf",
     script:
         "scripts/plot_rsa.py"
 
 
 rule plot_dissociation:
     input:
-        plot_data="data/dissociation_plot_data.npz",
+        plot_data="data/{norm}/dissociation_plot_data.npz",
     output:
-        figure="figures/dissociation.pdf",
-        combined="figures/dissociation_combined.pdf",
-        predicted="figures/predicted_frames.pdf",
-        predicted_compact="figures/predicted_frames_compact.pdf",
+        figure="figures/{norm}/dissociation.pdf",
+        combined="figures/{norm}/dissociation_combined.pdf",
+        predicted="figures/{norm}/predicted_frames.pdf",
+        predicted_compact="figures/{norm}/predicted_frames_compact.pdf",
     script:
         "scripts/plot_dissociation.py"
 
 
 rule plot_pca:
     input:
-        plot_data="data/pca_plot_data.npz",
+        plot_data="data/{norm}/pca_plot_data.npz",
     output:
-        figure="figures/pca_analysis.pdf",
-        overlay="figures/pca_variance_decoding.pdf",
+        figure="figures/{norm}/pca_analysis.pdf",
+        overlay="figures/{norm}/pca_variance_decoding.pdf",
     script:
         "scripts/plot_pca.py"
 
 
 rule plot_dynamics:
     input:
-        plot_data="data/dynamics_plot_data.npz",
+        plot_data="data/{norm}/dynamics_plot_data.npz",
     output:
-        figure="figures/dynamics_analysis.pdf",
+        figure="figures/{norm}/dynamics_analysis.pdf",
     script:
         "scripts/plot_dynamics.py"
 
 
 rule plot_pp:
     input:
-        plot_data="data/pp_plot_data.npz",
+        plot_data="data/{norm}/pp_plot_data.npz",
         forward_renders="data/forward_renders.npz",
         scenes="data/scenes.npz",
     output:
-        figure="figures/predictive_processing.pdf",
-        frames="figures/pp_frames.pdf",
+        figure="figures/{norm}/predictive_processing.pdf",
+        frames="figures/{norm}/pp_frames.pdf",
     script:
         "scripts/plot_pp.py"
 
 
 rule plot_residual:
     input:
-        plot_data="data/residual_plot_data.npz",
+        plot_data="data/{norm}/residual_plot_data.npz",
     output:
-        figure="figures/residual_analysis.pdf",
+        figure="figures/{norm}/residual_analysis.pdf",
     script:
         "scripts/plot_residual.py"
 
@@ -262,25 +263,25 @@ rule plot_residual:
 
 rule paper_macros:
     input:
-        encoding="outputs/encoding_results.json",
-        rsa="outputs/rsa_results.json",
-        dynamics="outputs/dynamics_results.json",
-        pca="outputs/pca_results.json",
-        evaluation="outputs/evaluation.json",
+        encoding="outputs/{norm}/encoding_results.json",
+        rsa="outputs/{norm}/rsa_results.json",
+        dynamics="outputs/{norm}/dynamics_results.json",
+        pca="outputs/{norm}/pca_results.json",
+        evaluation="outputs/{norm}/evaluation.json",
     output:
-        "paper/results_macros.tex",
+        "paper/{norm}_results_macros.tex",
     script:
         "scripts/gen_macros.py"
 
 
 rule evaluate:
     input:
-        encoding="outputs/encoding_results.json",
-        rsa="outputs/rsa_results.json",
-        dissociation="outputs/dissociation_results.json",
-        dynamics="outputs/dynamics_results.json",
-        residual="outputs/residual_results.json",
+        encoding="outputs/{norm}/encoding_results.json",
+        rsa="outputs/{norm}/rsa_results.json",
+        dissociation="outputs/{norm}/dissociation_results.json",
+        dynamics="outputs/{norm}/dynamics_results.json",
+        residual="outputs/{norm}/residual_results.json",
     output:
-        "outputs/evaluation.json",
+        "outputs/{norm}/evaluation.json",
     script:
         "scripts/run_evaluate.py"

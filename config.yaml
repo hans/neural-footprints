@@ -1,3 +1,6 @@
+block_norms: [truncated_svd, zscore]
+block_norm: truncated_svd
+
 n_scenes: 2000
 n_objects: 1
 image_size: 64
