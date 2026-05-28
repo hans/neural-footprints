@@ -55,11 +55,11 @@ neural, neural_meta = generate_neural_activity(
 )
 
 block_names = ["raw_frames", "fwd_render", "hidden_acts", "inferred_physics"]
-print(
-    f"stable_rank_trunc: k={neural_meta['block_k_values'].tolist()} "
-    f"(sr={[f'{r:.1f}' for r in neural_meta['block_stable_ranks'].tolist()]}) "
-    f"D_proj={neural_meta['W'].shape[1]}"
-)
+if block_norm == "truncated_svd":
+    print(
+        f"stable_rank_trunc: k={neural_meta['block_k_values'].tolist()} "
+        f"(sr={[f'{r:.1f}' for r in neural_meta['block_stable_ranks'].tolist()]}) ")
+print(f"D_proj={neural_meta['W'].shape[1]}")
 print(f"  blocks: {dict(zip(block_names, block_sizes))}")
 
 save_neural(neural, neural_meta, snakemake.output.neural)
