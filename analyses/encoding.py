@@ -256,6 +256,15 @@ def run_encoding_analysis(
             delta_P_given_X,
             n_permutations=n_null_permutations,
             seed=null_seed,
+            predicted_pixel_pca=predicted_pixel_pca,
+            physics_inf_scaled=physics_inf_scaled,
+            r2_XS_observed=r2_XS,
+            r2_XPS_observed=r2_XPS,
+            delta_P_given_XS_observed=delta_P_given_XS,
+            r2_P_inf_observed=r2_P_inf,
+            delta_P_inf_given_X_observed=delta_P_inf_given_X,
+            r2_XPS_inf_observed=r2_XPS_inf,
+            delta_P_inf_given_XS_observed=delta_P_inf_given_XS,
         )
     else:
         null_results = _empty_null_results(neural_activity.shape[1])
@@ -314,35 +323,99 @@ def _compute_null_distribution(
     *,
     n_permutations,
     seed,
+    predicted_pixel_pca=None,
+    physics_inf_scaled=None,
+    r2_XS_observed=None,
+    r2_XPS_observed=None,
+    delta_P_given_XS_observed=None,
+    r2_P_inf_observed=None,
+    delta_P_inf_given_X_observed=None,
+    r2_XPS_inf_observed=None,
+    delta_P_inf_given_XS_observed=None,
 ):
     """
     Run n_permutations row-shuffles of physics_scaled. For each shuffle, fit
     physics-only and combined ridge encoders. Returns null arrays + summary
     CIs and one-sided p-values.
 
-    Pixel-only baseline is fixed across permutations (only physics columns
-    move), so ΔR² null is r2_combined_null minus the observed r2_pixel_only.
+    Pixel-only and X+S baselines are fixed across permutations (only physics
+    columns move), so delta nulls subtract fixed observed baselines.
+
+    When predicted_pixel_pca is provided, also computes r2_XPS_null and
+    delta_P_given_XS_null (= r2_XPS_null − fixed observed r2_XS).
+
+    When physics_inf_scaled is provided, the SAME row-permutation is applied
+    to inferred physics for apples-to-apples inferred-physics nulls.
+    Using the same perm for GT and inferred physics is required for valid
+    paired comparison.
     """
     n_scenes = neural_activity.shape[0]
     n_neurons = neural_activity.shape[1]
+    has_S = predicted_pixel_pca is not None
+    has_inf = physics_inf_scaled is not None
+
+    if has_S:
+        assert r2_XS_observed is not None, (
+            "r2_XS_observed (per-neuron array) must be provided when "
+            "predicted_pixel_pca is given"
+        )
+
     print(f"\nComputing permutation null ({n_permutations} shuffles)...")
     rng = np.random.default_rng(seed)
+
+    # Pre-allocate null arrays
     r2_phys_null = np.empty((n_permutations, n_neurons))
     r2_comb_null = np.empty((n_permutations, n_neurons))
+    if has_S:
+        r2_XPS_null = np.empty((n_permutations, n_neurons))
+    if has_inf:
+        r2_P_inf_null = np.empty((n_permutations, n_neurons))
+        r2_XP_inf_null = np.empty((n_permutations, n_neurons))
+        if has_S:
+            r2_XPS_inf_null = np.empty((n_permutations, n_neurons))
+
     for p in range(n_permutations):
+        # Single permutation applied to both GT and inferred physics
         perm = rng.permutation(n_scenes)
         physics_perm = physics_scaled[perm]
+
+        # GT physics fits (current: 2 fits; +S: 1 more = 3 total when S present)
         r2_phys_null[p] = ridge_r2_per_neuron_fast(physics_perm, neural_activity)
-        combined_perm = np.hstack([pixel_pca, physics_perm])
-        r2_comb_null[p] = ridge_r2_per_neuron_fast(combined_perm, neural_activity)
+        r2_comb_null[p] = ridge_r2_per_neuron_fast(
+            np.hstack([pixel_pca, physics_perm]), neural_activity
+        )
+        if has_S:
+            r2_XPS_null[p] = ridge_r2_per_neuron_fast(
+                np.hstack([pixel_pca, predicted_pixel_pca, physics_perm]),
+                neural_activity,
+            )
+
+        # Inferred-physics fits (SAME perm for apples-to-apples comparison)
+        if has_inf:
+            inf_perm = physics_inf_scaled[perm]
+            r2_P_inf_null[p] = ridge_r2_per_neuron_fast(inf_perm, neural_activity)
+            r2_XP_inf_null[p] = ridge_r2_per_neuron_fast(
+                np.hstack([pixel_pca, inf_perm]), neural_activity
+            )
+            if has_S:
+                r2_XPS_inf_null[p] = ridge_r2_per_neuron_fast(
+                    np.hstack([pixel_pca, predicted_pixel_pca, inf_perm]),
+                    neural_activity,
+                )
+
         if (p + 1) % 10 == 0 or p == 0:
             print(
                 f"  perm {p + 1}/{n_permutations}: "
                 f"physics_null mean R² = {r2_phys_null[p].mean():.4f}, "
                 f"combined_null mean R² = {r2_comb_null[p].mean():.4f}"
             )
+
+    # ΔR² nulls: subtract FIXED observed baselines (X-only and X+S)
     delta_null = r2_comb_null - r2_pixel_only[None, :]
-    return {
+
+    # --- Assemble output dict ---
+    # Backward-compat keys (existing consumers)
+    out = {
         "r2_physics_only_null": r2_phys_null,
         "r2_combined_null": r2_comb_null,
         "delta_r2_null": delta_null,
@@ -350,6 +423,45 @@ def _compute_null_distribution(
         **_null_summary("combined", r2_comb_null, observed=r2_combined.mean()),
         **_null_summary("delta", delta_null, observed=delta_r2.mean()),
     }
+
+    # New canonical-name summaries for r2_P and delta_P_given_X
+    out.update(_null_summary("r2_P", r2_phys_null, observed=r2_physics_only.mean()))
+    out.update(_null_summary("delta_P_given_X", delta_null, observed=delta_r2.mean()))
+
+    if has_S:
+        delta_P_given_XS_null = r2_XPS_null - r2_XS_observed[None, :]
+        _obs_r2_XPS = float(r2_XPS_observed.mean()) if r2_XPS_observed is not None else 0.0
+        _obs_dpxs = float(delta_P_given_XS_observed.mean()) if delta_P_given_XS_observed is not None else 0.0
+        out["r2_XPS_null"] = r2_XPS_null
+        out["delta_P_given_XS_null"] = delta_P_given_XS_null
+        out.update(_null_summary("r2_XPS", r2_XPS_null, observed=_obs_r2_XPS))
+        out.update(_null_summary("delta_P_given_XS",
+                                 delta_P_given_XS_null,
+                                 observed=_obs_dpxs))
+
+    if has_inf:
+        delta_P_inf_given_X_null = r2_XP_inf_null - r2_pixel_only[None, :]
+        _obs_r2_P_inf = float(r2_P_inf_observed.mean()) if r2_P_inf_observed is not None else 0.0
+        _obs_delta_inf_X = float(delta_P_inf_given_X_observed.mean()) if delta_P_inf_given_X_observed is not None else 0.0
+        out["r2_P_inf_null"] = r2_P_inf_null
+        out["r2_XP_inf_null"] = r2_XP_inf_null
+        out["delta_P_inf_given_X_null"] = delta_P_inf_given_X_null
+        out.update(_null_summary("r2_P_inf", r2_P_inf_null, observed=_obs_r2_P_inf))
+        out.update(_null_summary("delta_P_inf_given_X",
+                                 delta_P_inf_given_X_null,
+                                 observed=_obs_delta_inf_X))
+        if has_S:
+            delta_P_inf_given_XS_null = r2_XPS_inf_null - r2_XS_observed[None, :]
+            _obs_r2_XPS_inf = float(r2_XPS_inf_observed.mean()) if r2_XPS_inf_observed is not None else 0.0
+            _obs_delta_inf_XS = float(delta_P_inf_given_XS_observed.mean()) if delta_P_inf_given_XS_observed is not None else 0.0
+            out["r2_XPS_inf_null"] = r2_XPS_inf_null
+            out["delta_P_inf_given_XS_null"] = delta_P_inf_given_XS_null
+            out.update(_null_summary("r2_XPS_inf", r2_XPS_inf_null, observed=_obs_r2_XPS_inf))
+            out.update(_null_summary("delta_P_inf_given_XS",
+                                     delta_P_inf_given_XS_null,
+                                     observed=_obs_delta_inf_XS))
+
+    return out
 
 
 def _null_summary(prefix, null_array, observed):
@@ -376,7 +488,29 @@ def _empty_null_results(n_neurons):
         "r2_combined_null": empty,
         "delta_r2_null": empty,
     }
+    # Backward-compat prefixes
     for prefix in ("physics", "combined", "delta"):
+        base.update(
+            {
+                f"null_{prefix}_perm_means": empty_means,
+                f"null_{prefix}_ci_lo": nan,
+                f"null_{prefix}_ci_hi": nan,
+                f"null_{prefix}_mean": nan,
+                f"null_{prefix}_pvalue": nan,
+                f"null_{prefix}_observed": nan,
+            }
+        )
+    # New canonical-name prefixes (added by this extension)
+    for prefix in (
+        "r2_P",
+        "delta_P_given_X",
+        "r2_XPS",
+        "delta_P_given_XS",
+        "r2_P_inf",
+        "delta_P_inf_given_X",
+        "r2_XPS_inf",
+        "delta_P_inf_given_XS",
+    ):
         base.update(
             {
                 f"null_{prefix}_perm_means": empty_means,
