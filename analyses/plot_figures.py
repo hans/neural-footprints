@@ -153,10 +153,10 @@ def plot_rsa(plot_data, fig_dir="figures"):
     corr_neural_physics_gt = float(plot_data["corr_neural_P"])
 
     keys = plot_data.files if hasattr(plot_data, "files") else plot_data
-    has_inferred = "rdm_S" in keys
-    rdm_physics_inf = plot_data["rdm_S"] if has_inferred else None
+    has_inferred = "rdm_physics_inf" in keys
+    rdm_physics_inf = plot_data["rdm_physics_inf"] if has_inferred else None
     corr_neural_physics_inf = (
-        float(plot_data["corr_neural_S"]) if has_inferred else None
+        float(plot_data["corr_neural_P_inf"]) if has_inferred else None
     )
     has_predicted = "rdm_predicted" in keys
     rdm_predicted_flat = plot_data["rdm_predicted"] if has_predicted else None
