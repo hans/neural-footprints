@@ -29,6 +29,10 @@ predicted_pixel_pca, _, _ = pca_reduce_pixels(
 )
 del fwd_states, predicted_brain_pixels, fwd
 
+# P_inf: inferred physics from the inverse model run on per-norm neural activity
+inferred_data = np.load(snakemake.input.inferred)
+inferred_physics_labels = inferred_data["inferred_physics_all"]
+
 results = run_rsa_analysis(
     neural,
     scenes,
@@ -36,12 +40,14 @@ results = run_rsa_analysis(
     raw_pixel_pca=raw_pixel_pca,
     rsa_subsample=cfg["rsa_subsample"],
     predicted_pixel_pca=predicted_pixel_pca,
+    inferred_physics_labels=inferred_physics_labels,
 )
 
 # Separate large arrays from JSON results
 rdm_neural = results.pop("rdm_neural")
 rdm_X = results.pop("rdm_X")
 rdm_physics = results.pop("rdm_physics")
+rdm_physics_inf = results.pop("rdm_physics_inf", None)
 rdm_S = results.pop("rdm_S", None)
 n_sub = results.pop("n_sub")
 
@@ -62,4 +68,9 @@ if rdm_S is not None:
     plot_kwargs["corr_neural_S"] = np.array(results["corr_neural_S"])
 if "partial_P_given_XS" in results:
     plot_kwargs["partial_P_given_XS"] = np.array(results["partial_P_given_XS"])
+if rdm_physics_inf is not None:
+    plot_kwargs["rdm_physics_inf"] = rdm_physics_inf
+for key in ("corr_neural_P_inf", "partial_P_inf_given_X", "partial_P_inf_given_XS"):
+    if key in results:
+        plot_kwargs[key] = np.array(results[key])
 np.savez_compressed(snakemake.output.plot_data, **plot_kwargs)

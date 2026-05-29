@@ -71,6 +71,7 @@ def run_rsa_analysis(
     raw_pixel_pca,
     rsa_subsample=None,
     predicted_pixel_pca=None,
+    inferred_physics_labels=None,
 ):
     """
     Run RSA analysis on a subsample of scenes.
@@ -79,6 +80,10 @@ def run_rsa_analysis(
     2. Spearman correlations: neural<->X (high), neural<->physics
     3. partial_P_given_X  = partial Spearman(neural, physics | X)
     4. partial_P_given_XS = partial Spearman(neural, physics | X, S)  [KEY ≈ 0]
+
+    When inferred_physics_labels is provided, the same RSA metrics are computed
+    with P_inf (inferred physics) substituted for GT physics, yielding
+    corr_neural_P_inf, partial_P_inf_given_X, partial_P_inf_given_XS.
     """
     if rsa_subsample is None:
         rsa_subsample = _CFG_RSA_SUBSAMPLE
@@ -101,10 +106,19 @@ def run_rsa_analysis(
     X_sub = raw_pixel_pca[sub_idx]
     physics_sub = physics_labels[sub_idx]
     S_sub = predicted_pixel_pca[sub_idx] if predicted_pixel_pca is not None else None
+    physics_inf_sub = (
+        inferred_physics_labels[sub_idx] if inferred_physics_labels is not None else None
+    )
 
     # Standardize physics for RDM
     scaler_phys = StandardScaler()
     physics_scaled = scaler_phys.fit_transform(physics_sub)
+
+    # Standardize inferred physics for RDM
+    physics_inf_scaled = None
+    if physics_inf_sub is not None:
+        scaler_inf = StandardScaler()
+        physics_inf_scaled = scaler_inf.fit_transform(physics_inf_sub)
 
     # Compute RDMs
     print(f"\nSubsampled {n_sub} scenes for RSA.")
@@ -116,19 +130,19 @@ def run_rsa_analysis(
     for rdm in [rdm_neural, rdm_X, rdm_physics]:
         rdm[np.isnan(rdm)] = 0.0
 
-    # Spearman correlations
+    # Spearman correlations (GT physics)
     corr_neural_X, p_nX = spearmanr(rdm_neural, rdm_X)
     corr_neural_P, p_nP = spearmanr(rdm_neural, rdm_physics)
     corr_X_P, _ = spearmanr(rdm_X, rdm_physics)
 
-    print(f"\n  Spearman neural<->X:       r={corr_neural_X:.4f}  (p={p_nX:.2e})")
-    print(f"  Spearman neural<->physics: r={corr_neural_P:.4f}  (p={p_nP:.2e})")
-    print(f"  Spearman X<->physics:      r={corr_X_P:.4f}")
+    print(f"\n  Spearman neural<->X:           r={corr_neural_X:.4f}  (p={p_nX:.2e})")
+    print(f"  Spearman neural<->physics(GT): r={corr_neural_P:.4f}  (p={p_nP:.2e})")
+    print(f"  Spearman X<->physics(GT):      r={corr_X_P:.4f}")
 
     # Partial correlation: neural<->physics | X
     partial_P_given_X, partial_p_X = _partial_spearman(rdm_neural, rdm_physics, rdm_X)
     print(
-        f"  Partial neural<->physics | X:    r={partial_P_given_X:.4f}  (p={partial_p_X:.2e})"
+        f"  Partial neural<->physics(GT) | X:    r={partial_P_given_X:.4f}  (p={partial_p_X:.2e})"
     )
 
     result = {
@@ -142,23 +156,57 @@ def run_rsa_analysis(
         "n_sub": n_sub,
     }
 
+    # Inferred-physics RDM and correlations
+    rdm_physics_inf = None
+    if physics_inf_scaled is not None:
+        rdm_physics_inf = _compute_rdm(physics_inf_scaled)
+        rdm_physics_inf[np.isnan(rdm_physics_inf)] = 0.0
+
+        corr_neural_P_inf, p_nPinf = spearmanr(rdm_neural, rdm_physics_inf)
+        corr_X_P_inf, _ = spearmanr(rdm_X, rdm_physics_inf)
+        print(
+            f"  Spearman neural<->physics(inf): r={corr_neural_P_inf:.4f}  (p={p_nPinf:.2e})"
+        )
+
+        partial_P_inf_given_X, _ = _partial_spearman(
+            rdm_neural, rdm_physics_inf, rdm_X
+        )
+        print(
+            f"  Partial neural<->physics(inf) | X:   r={partial_P_inf_given_X:.4f}"
+        )
+
+        result["rdm_physics_inf"] = rdm_physics_inf
+        result["corr_neural_P_inf"] = corr_neural_P_inf
+        result["corr_X_P_inf"] = corr_X_P_inf
+        result["partial_P_inf_given_X"] = partial_P_inf_given_X
+
     # Predicted-S RDM and partial controlling for both X and S
     if S_sub is not None:
         rdm_S = _compute_rdm(S_sub)
         rdm_S[np.isnan(rdm_S)] = 0.0
         corr_neural_S, _ = spearmanr(rdm_neural, rdm_S)
-        print(f"  Spearman neural<->S:       r={corr_neural_S:.4f}")
+        print(f"  Spearman neural<->S:           r={corr_neural_S:.4f}")
 
         partial_P_given_XS, partial_p_XS = _partial_spearman_2(
             rdm_neural, rdm_physics, rdm_X, rdm_S
         )
         print(
-            f"  Partial neural<->physics | X,S:  r={partial_P_given_XS:.4f}  "
+            f"  Partial neural<->physics(GT) | X,S:  r={partial_P_given_XS:.4f}  "
             f"(p={partial_p_XS:.2e})  [KEY]"
         )
 
         result["rdm_S"] = rdm_S
         result["corr_neural_S"] = corr_neural_S
         result["partial_P_given_XS"] = partial_P_given_XS
+
+        # Inferred-physics partial controlling for both X and S
+        if rdm_physics_inf is not None:
+            partial_P_inf_given_XS, _ = _partial_spearman_2(
+                rdm_neural, rdm_physics_inf, rdm_X, rdm_S
+            )
+            print(
+                f"  Partial neural<->physics(inf) | X,S: r={partial_P_inf_given_XS:.4f}"
+            )
+            result["partial_P_inf_given_XS"] = partial_P_inf_given_XS
 
     return result

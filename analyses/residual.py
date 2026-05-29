@@ -46,6 +46,7 @@ def run_residual_analysis(
     *,
     raw_pixel_pca,
     predicted_pixel_pca=None,
+    inferred_physics_labels=None,
     n_splits=5,
     random_state=42,
 ):
@@ -56,6 +57,10 @@ def run_residual_analysis(
       physics still visible after removing raw-frame variance).
     Condition (b): residualize neural on [X, S] → r2_P_given_XS (expect ~0,
       KEY — physics collapses once predicted-frame variance is also removed).
+
+    When inferred_physics_labels is provided, the same residualization stages
+    are repeated substituting P_inf for P, yielding r2_P_inf_given_X and
+    r2_P_inf_given_XS.
     """
     print("\n" + "=" * 60)
     print("RESIDUAL ANALYSIS: variance partitioning with X and S")
@@ -71,6 +76,11 @@ def run_residual_analysis(
 
     physics_scaled = StandardScaler().fit_transform(physics_labels)
 
+    # Standardize inferred physics (if provided)
+    physics_inf_scaled = None
+    if inferred_physics_labels is not None:
+        physics_inf_scaled = StandardScaler().fit_transform(inferred_physics_labels)
+
     # --- Condition (a): residualize on X ---
     print("\nStage 1a: cross-validated residuals after removing X...")
     y_pred_X = _ridge_cv_predict(raw_pixel_pca, neural_activity, cv=cv, alphas=alphas)
@@ -78,7 +88,7 @@ def run_residual_analysis(
     var_kept_X = y_resid_X.var(axis=0).mean() / neural_activity.var(axis=0).mean()
     print(f"  residual variance fraction = {var_kept_X:.4f}")
 
-    print("Stage 2a: encode physics from X-residual neural...")
+    print("Stage 2a: encode GT physics from X-residual neural...")
     r2_P_given_X = _r2_per_neuron(
         y_resid_X,
         _ridge_cv_predict(physics_scaled, y_resid_X, cv=cv, alphas=alphas),
@@ -92,6 +102,16 @@ def run_residual_analysis(
         "random_state": int(random_state),
     }
 
+    # --- Condition (a) with inferred physics ---
+    if physics_inf_scaled is not None:
+        print("Stage 2a (inf): encode inferred physics from X-residual neural...")
+        r2_P_inf_given_X = _r2_per_neuron(
+            y_resid_X,
+            _ridge_cv_predict(physics_inf_scaled, y_resid_X, cv=cv, alphas=alphas),
+        )
+        print(f"  r2_P_inf | X: mean={r2_P_inf_given_X.mean():.4f}")
+        result["r2_P_inf_given_X"] = r2_P_inf_given_X
+
     # --- Condition (b): residualize on [X, S] (KEY) ---
     if predicted_pixel_pca is not None:
         print("\nStage 1b: cross-validated residuals after removing [X, S]...")
@@ -101,7 +121,7 @@ def run_residual_analysis(
         var_kept_XS = y_resid_XS.var(axis=0).mean() / neural_activity.var(axis=0).mean()
         print(f"  residual variance fraction = {var_kept_XS:.4f}")
 
-        print("Stage 2b: encode physics from [X,S]-residual neural (KEY)...")
+        print("Stage 2b: encode GT physics from [X,S]-residual neural (KEY)...")
         r2_P_given_XS = _r2_per_neuron(
             y_resid_XS,
             _ridge_cv_predict(physics_scaled, y_resid_XS, cv=cv, alphas=alphas),
@@ -110,5 +130,15 @@ def run_residual_analysis(
 
         result["r2_P_given_XS"] = r2_P_given_XS
         result["residual_variance_fraction_XS"] = float(var_kept_XS)
+
+        # --- Condition (b) with inferred physics ---
+        if physics_inf_scaled is not None:
+            print("Stage 2b (inf): encode inferred physics from [X,S]-residual neural...")
+            r2_P_inf_given_XS = _r2_per_neuron(
+                y_resid_XS,
+                _ridge_cv_predict(physics_inf_scaled, y_resid_XS, cv=cv, alphas=alphas),
+            )
+            print(f"  r2_P_inf | X,S: mean={r2_P_inf_given_XS.mean():.4f}")
+            result["r2_P_inf_given_XS"] = r2_P_inf_given_XS
 
     return result

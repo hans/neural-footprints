@@ -104,6 +104,7 @@ rule encoding:
         scenes="data/scenes.npz",
         neural="data/{norm}/neural.npz",
         forward_renders="data/forward_renders.npz",
+        inferred="data/{norm}/inferred_physics.npz",
     output:
         results="outputs/{norm}/encoding_results.json",
         encoder="data/{norm}/encoder.joblib",
@@ -117,6 +118,7 @@ rule rsa:
         scenes="data/scenes.npz",
         neural="data/{norm}/neural.npz",
         forward_renders="data/forward_renders.npz",
+        inferred="data/{norm}/inferred_physics.npz",
     output:
         results="outputs/{norm}/rsa_results.json",
         plot_data="data/{norm}/rsa_plot_data.npz",
@@ -168,6 +170,7 @@ rule residual:
         neural="data/{norm}/neural.npz",
         encoding="outputs/{norm}/encoding_results.json",
         forward_renders="data/forward_renders.npz",
+        inferred="data/{norm}/inferred_physics.npz",
     output:
         results="outputs/{norm}/residual_results.json",
         plot_data="data/{norm}/residual_plot_data.npz",
