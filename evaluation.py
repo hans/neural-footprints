@@ -70,6 +70,14 @@ def evaluate(
         f"R² = {r2_P:.4f}",
         "expect > 0.10",
     )
+    if encoding_results.get("null_r2_P_pvalue") is not None:
+        pval = float(encoding_results["null_r2_P_pvalue"])
+        check(
+            "r2_P significantly above null (p < 0.05)",
+            pval < 0.05,
+            f"p = {pval:.3f}",
+            "PASS iff p < 0.05 one-sided vs permutation null",
+        )
     check(
         "Control: physics predicts behavior",
         ctrl > 0.90,
@@ -94,6 +102,14 @@ def evaluate(
             f"ΔR² = {dpx:.6f}",
             "expect > 0.005",
         )
+        if encoding_results.get("null_delta_P_given_X_pvalue") is not None:
+            pval = float(encoding_results["null_delta_P_given_X_pvalue"])
+            check(
+                "delta_P | X significantly above null (p < 0.05)",
+                pval < 0.05,
+                f"p = {pval:.3f}",
+                "PASS iff p < 0.05 one-sided vs permutation null",
+            )
 
     if encoding_results.get("delta_P_given_XS") is not None:
         dpxs = np.asarray(encoding_results["delta_P_given_XS"]).mean()
@@ -103,6 +119,14 @@ def evaluate(
             f"ΔR² = {dpxs:.6f}",
             "expect < 0.005 KEY",
         )
+        if encoding_results.get("null_delta_P_given_XS_pvalue") is not None:
+            pval = float(encoding_results["null_delta_P_given_XS_pvalue"])
+            check(
+                "delta_P | X,S significantly above null (KEY significance test, p < 0.05)",
+                pval < 0.05,
+                f"p = {pval:.3f}",
+                "PASS iff p < 0.05; PASS here means physics genuinely adds beyond X+S (bad news)",
+            )
 
     # Inferred-physics parallel checks (same thresholds as GT)
     if encoding_results.get("r2_P_inf") is not None:
@@ -113,6 +137,14 @@ def evaluate(
             f"R² = {r2_P_inf:.4f}",
             "expect > 0.10 (same threshold as GT; pass/fail asymmetry is the finding)",
         )
+        if encoding_results.get("null_r2_P_inf_pvalue") is not None:
+            pval = float(encoding_results["null_r2_P_inf_pvalue"])
+            check(
+                "r2_P_inf significantly above null (p < 0.05)",
+                pval < 0.05,
+                f"p = {pval:.3f}",
+                "PASS iff p < 0.05 one-sided vs permutation null",
+            )
     if encoding_results.get("delta_P_inf_given_X") is not None:
         dpx_inf = np.asarray(encoding_results["delta_P_inf_given_X"]).mean()
         check(
@@ -121,6 +153,14 @@ def evaluate(
             f"ΔR² = {dpx_inf:.6f}",
             "expect > 0.005",
         )
+        if encoding_results.get("null_delta_P_inf_given_X_pvalue") is not None:
+            pval = float(encoding_results["null_delta_P_inf_given_X_pvalue"])
+            check(
+                "delta_P_inf | X significantly above null (p < 0.05)",
+                pval < 0.05,
+                f"p = {pval:.3f}",
+                "PASS iff p < 0.05 one-sided vs permutation null",
+            )
     if encoding_results.get("delta_P_inf_given_XS") is not None:
         dpxs_inf = np.asarray(encoding_results["delta_P_inf_given_XS"]).mean()
         check(
@@ -129,6 +169,14 @@ def evaluate(
             f"ΔR² = {dpxs_inf:.6f}",
             "expect < 0.005 KEY",
         )
+        if encoding_results.get("null_delta_P_inf_given_XS_pvalue") is not None:
+            pval = float(encoding_results["null_delta_P_inf_given_XS_pvalue"])
+            check(
+                "delta_P_inf | X,S significantly above null (KEY significance test, p < 0.05)",
+                pval < 0.05,
+                f"p = {pval:.3f}",
+                "PASS iff p < 0.05; PASS here means inferred physics genuinely adds beyond X+S (bad news)",
+            )
 
     # --- Residualization ---
     if residual_results is not None:
