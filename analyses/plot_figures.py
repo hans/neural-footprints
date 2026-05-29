@@ -801,6 +801,10 @@ def plot_residual(plot_data, fig_dir="figures"):
     r2_P_given_XS = plot_data["r2_P_given_XS"] if has_XS else None
     var_kept_XS = float(plot_data["residual_variance_fraction_XS"]) if has_XS else None
 
+    # Pre-residualization baseline R²(P → neural), from encoding analysis.
+    has_pre = "r2_P_neural" in keys
+    r2_P_neural = plot_data["r2_P_neural"] if has_pre else None
+
     with paper_style():
         fig, axes = plt.subplots(1, 2, figsize=(FULL_WIDTH, 2.4))
 
@@ -843,35 +847,48 @@ def plot_residual(plot_data, fig_dir="figures"):
                 f"Physics R² after X-residualization\n(var kept={var_kept_X:.2f})"
             )
 
-        # Panel B: mean physics R² under each residualization condition
+        # Panel B: mean physics R² — raw → X-residual → X+S-residual
         ax = axes[1]
+        labels = []
+        means = []
+        sems = []
+        bar_colors = []
+
+        if has_pre:
+            labels.append("R²(P)")
+            means.append(r2_P_neural.mean())
+            sems.append(r2_P_neural.std() / np.sqrt(n))
+            bar_colors.append(COLORS["physics"])
+
+        labels.append("R²(P|X)")
+        means.append(r2_P_given_X.mean())
+        sems.append(r2_P_given_X.std() / np.sqrt(n))
+        bar_colors.append(COLORS["sensory"])
+
         if has_XS:
-            labels = ["X residual", "X+S residual"]
-            means = [r2_P_given_X.mean(), r2_P_given_XS.mean()]
-            sems = [r2_P_given_X.std() / np.sqrt(n), r2_P_given_XS.std() / np.sqrt(n)]
-            bars = ax.bar(
-                labels,
-                means,
-                yerr=sems,
-                color=[COLORS["sensory"], COLORS["physics"]],
-                capsize=3,
-                width=0.5,
-            )
-            ax.set_title(
-                f"Mean R² (var kept: X={var_kept_X:.2f}, XS={var_kept_XS:.2f})"
-            )
+            labels.append("R²(P|X,S)")
+            means.append(r2_P_given_XS.mean())
+            sems.append(r2_P_given_XS.std() / np.sqrt(n))
+            bar_colors.append(COLORS["control"])
+
+        bars = ax.bar(
+            labels,
+            means,
+            yerr=sems,
+            color=bar_colors,
+            capsize=3,
+            width=0.5,
+        )
+
+        title_parts = []
+        if has_pre:
+            title_parts.append(f"R²(P)={means[0]:.4f}")
+        if has_XS:
+            title_parts.append(f"var kept: X={var_kept_X:.2f}, XS={var_kept_XS:.2f}")
         else:
-            means = [r2_P_given_X.mean()]
-            sems = [r2_P_given_X.std() / np.sqrt(n)]
-            bars = ax.bar(
-                ["X residual"],
-                means,
-                yerr=sems,
-                color=[COLORS["physics"]],
-                capsize=3,
-                width=0.5,
-            )
-            ax.set_title(f"Mean R² (var kept={var_kept_X:.2f})")
+            title_parts.append(f"var kept={var_kept_X:.2f}")
+        ax.set_title("  ".join(title_parts))
+
         ax.axhline(0, color="gray", linestyle="--", linewidth=0.6)
         ax.set_ylabel("Mean R²")
         for bar, val in zip(bars, means):
@@ -881,6 +898,7 @@ def plot_residual(plot_data, fig_dir="figures"):
                 f"{val:.4f}",
                 ha="center",
                 va="bottom",
+                fontsize=7,
             )
 
         plt.tight_layout()

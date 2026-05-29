@@ -2,6 +2,8 @@ import sys, os
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+import json
+
 import numpy as np
 from load_config import load_config
 from io_utils import load_scenes, load_neural, save_results
@@ -38,7 +40,14 @@ results = run_residual_analysis(
 )
 save_results(results, snakemake.output.results)
 
-plot_arrays = {}
+# Load pre-residualization R²(P → neural) from encoding results.
+# Note: encoding uses KFold(shuffle=False) while residual uses KFold(shuffle=True,
+# random_state=42) — same number of folds (5) but different fold assignment.
+with open(snakemake.input.encoding) as f:
+    enc = json.load(f)
+r2_P_neural = np.array(enc["r2_P"])
+
+plot_arrays = {"r2_P_neural": r2_P_neural}
 for key in ("r2_P_given_X", "r2_P_given_XS"):
     if key in results:
         val = results[key]
