@@ -29,17 +29,23 @@ predicted_pixel_pca, _, _ = pca_reduce_pixels(
 )
 del fwd_states, predicted_brain_pixels, fwd
 
+# P_inf: inferred physics from the inverse model run on per-norm neural activity
+inferred_data = np.load(snakemake.input.inferred)
+inferred_physics_labels = inferred_data["inferred_physics_all"]
+
 results = run_residual_analysis(
     neural,
     scenes,
     neural_meta,
     raw_pixel_pca=raw_pixel_pca,
     predicted_pixel_pca=predicted_pixel_pca,
+    inferred_physics_labels=inferred_physics_labels,
 )
 save_results(results, snakemake.output.results)
 
 plot_arrays = {}
-for key in ("r2_P_given_X", "r2_P_given_XS"):
+for key in ("r2_P_given_X", "r2_P_given_XS",
+            "r2_P_inf_given_X", "r2_P_inf_given_XS"):
     if key in results:
         val = results[key]
         plot_arrays[key] = np.array(val) if not isinstance(val, np.ndarray) else val

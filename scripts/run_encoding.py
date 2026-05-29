@@ -31,12 +31,17 @@ del fwd_states, predicted_brain_pixels, fwd
 # to reclaim ~590 MB before the ridge fits.
 del neural_meta["W"]
 
+# P_inf: inferred physics from the inverse model run on per-norm neural activity
+inferred_data = np.load(snakemake.input.inferred)
+inferred_physics_labels = inferred_data["inferred_physics_all"]
+
 results = run_encoding_analysis(
     neural,
     scenes,
     neural_meta,
     raw_pixel_pca=raw_pixel_pca,
     predicted_pixel_pca=predicted_pixel_pca,
+    inferred_physics_labels=inferred_physics_labels,
     compute_null=cfg.get("encoding_compute_null", True),
     n_null_permutations=cfg.get("encoding_n_null_permutations", 50),
 )
@@ -75,7 +80,9 @@ plot_kwargs = dict(
     control_accuracy=np.array(results["control_accuracy"]),
     control_accuracy_std=np.array(results["control_accuracy_std"]),
 )
-for key in ("r2_S", "r2_XS", "r2_XPS", "delta_P_given_XS"):
+for key in ("r2_S", "r2_XS", "r2_XPS", "delta_P_given_XS",
+            "r2_P_inf", "r2_XP_inf", "delta_P_inf_given_X",
+            "r2_XPS_inf", "delta_P_inf_given_XS"):
     if key in results:
         plot_kwargs[key] = results[key]
 np.savez_compressed(snakemake.output.plot_data, **plot_kwargs)

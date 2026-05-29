@@ -88,6 +88,7 @@ def run_encoding_analysis(
     *,
     raw_pixel_pca,
     predicted_pixel_pca=None,
+    inferred_physics_labels=None,
     compute_null=True,
     n_null_permutations=50,
     null_seed=0,
@@ -101,6 +102,10 @@ def run_encoding_analysis(
     Key quantities:
       delta_P_given_X  = r2_XP - r2_X   (physics added beyond raw frames; naive positive)
       delta_P_given_XS = r2_XPS - r2_XS (physics added beyond frames+predicted; expect ~0)
+
+    When inferred_physics_labels is provided, the same fits are repeated with
+    P_inf (inferred physics from the inverse model), yielding _inf-suffixed
+    variants: r2_P_inf, r2_XP_inf, delta_P_inf_given_X, etc.
     """
     print("\n" + "=" * 60)
     print("SIMULATION 1: Encoding Model — Variance Partitioning (X, P, S)")
@@ -114,6 +119,12 @@ def run_encoding_analysis(
     # --- Standardize physics labels ---
     scaler_phys = StandardScaler()
     physics_scaled = scaler_phys.fit_transform(physics_labels)
+
+    # --- Standardize inferred physics (if provided) ---
+    physics_inf_scaled = None
+    if inferred_physics_labels is not None:
+        scaler_inf = StandardScaler()
+        physics_inf_scaled = scaler_inf.fit_transform(inferred_physics_labels)
 
     # --- Encoding models: X, P, [X,P] ---
     print("\nFitting encoding model: neural ~ X (raw frames)...")
@@ -134,8 +145,26 @@ def run_encoding_analysis(
     print(f"  Mean R² [X,P]:         {r2_XP.mean():.4f}")
     print(f"  delta_P | X:           {delta_P_given_X.mean():.6f}")
 
+    # --- Inferred-physics variants: P_inf, [X, P_inf] ---
+    r2_P_inf = r2_XP_inf = delta_P_inf_given_X = None
+    if physics_inf_scaled is not None:
+        print("\nFitting encoding model: neural ~ P_inf (inferred physics)...")
+        r2_P_inf = ridge_r2_per_neuron_fast(physics_inf_scaled, neural_activity)
+
+        print("Fitting encoding model: neural ~ [X, P_inf]...")
+        r2_XP_inf = ridge_r2_per_neuron_fast(
+            np.hstack([raw_pixel_pca, physics_inf_scaled]), neural_activity
+        )
+
+        delta_P_inf_given_X = r2_XP_inf - r2_X
+
+        print(f"\n  Mean R² P_inf:         {r2_P_inf.mean():.4f}")
+        print(f"  Mean R² [X,P_inf]:     {r2_XP_inf.mean():.4f}")
+        print(f"  delta_P_inf | X:       {delta_P_inf_given_X.mean():.6f}")
+
     # --- Encoding models: S, [X,S], [X,S,P] (requires predicted_pixel_pca) ---
     r2_S = r2_XS = r2_XPS = delta_P_given_XS = None
+    r2_XPS_inf = delta_P_inf_given_XS = None
     if predicted_pixel_pca is not None:
         print("\nFitting encoding model: neural ~ S (predicted frames)...")
         r2_S = ridge_r2_per_neuron_fast(predicted_pixel_pca, neural_activity)
@@ -157,6 +186,19 @@ def run_encoding_analysis(
         print(f"  Mean R² [X,S]:         {r2_XS.mean():.4f}")
         print(f"  Mean R² [X,S,P]:       {r2_XPS.mean():.4f}")
         print(f"  delta_P | X,S:         {delta_P_given_XS.mean():.6f}")
+
+        # --- Inferred-physics XS variant ---
+        if physics_inf_scaled is not None:
+            print("Fitting encoding model: neural ~ [X, S, P_inf]...")
+            r2_XPS_inf = ridge_r2_per_neuron_fast(
+                np.hstack([raw_pixel_pca, predicted_pixel_pca, physics_inf_scaled]),
+                neural_activity,
+            )
+
+            delta_P_inf_given_XS = r2_XPS_inf - r2_XS
+
+            print(f"  Mean R² [X,S,P_inf]:   {r2_XPS_inf.mean():.4f}")
+            print(f"  delta_P_inf | X,S:     {delta_P_inf_given_XS.mean():.6f}")
 
     # Backward-compat aliases (dissociation, dynamics, plots)
     r2_pixel_only = r2_X
@@ -250,6 +292,14 @@ def run_encoding_analysis(
         result["r2_XS"] = r2_XS
         result["r2_XPS"] = r2_XPS
         result["delta_P_given_XS"] = delta_P_given_XS
+    # Inferred-physics parallel metrics
+    if r2_P_inf is not None:
+        result["r2_P_inf"] = r2_P_inf
+        result["r2_XP_inf"] = r2_XP_inf
+        result["delta_P_inf_given_X"] = delta_P_inf_given_X
+    if r2_XPS_inf is not None:
+        result["r2_XPS_inf"] = r2_XPS_inf
+        result["delta_P_inf_given_XS"] = delta_P_inf_given_XS
     return result
 
 

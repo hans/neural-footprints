@@ -26,6 +26,12 @@ for key in [
     "r2_physics_only",
     "r2_combined",
     "delta_r2",
+    # inferred-physics variants
+    "r2_P_inf",
+    "r2_XP_inf",
+    "delta_P_inf_given_X",
+    "r2_XPS_inf",
+    "delta_P_inf_given_XS",
 ]:
     if key in encoding:
         encoding[key] = np.array(encoding[key])
@@ -33,7 +39,8 @@ for key in [
 residual_results = None
 if hasattr(snakemake.input, "residual"):
     residual_results = load_results(snakemake.input.residual)
-    for key in ["r2_P_given_X", "r2_P_given_XS"]:
+    for key in ["r2_P_given_X", "r2_P_given_XS",
+                "r2_P_inf_given_X", "r2_P_inf_given_XS"]:
         if key in residual_results and residual_results[key] is not None:
             residual_results[key] = np.array(residual_results[key])
 

@@ -104,6 +104,32 @@ def evaluate(
             "expect < 0.005 KEY",
         )
 
+    # Inferred-physics parallel checks (same thresholds as GT)
+    if encoding_results.get("r2_P_inf") is not None:
+        r2_P_inf = np.asarray(encoding_results["r2_P_inf"]).mean()
+        check(
+            "P_inf (inferred physics) explains neural activity",
+            r2_P_inf > 0.10,
+            f"R² = {r2_P_inf:.4f}",
+            "expect > 0.10 (same threshold as GT; pass/fail asymmetry is the finding)",
+        )
+    if encoding_results.get("delta_P_inf_given_X") is not None:
+        dpx_inf = np.asarray(encoding_results["delta_P_inf_given_X"]).mean()
+        check(
+            "delta_P_inf | X > 0 (naive positive: inferred physics adds beyond raw frames)",
+            dpx_inf > 0.005,
+            f"ΔR² = {dpx_inf:.6f}",
+            "expect > 0.005",
+        )
+    if encoding_results.get("delta_P_inf_given_XS") is not None:
+        dpxs_inf = np.asarray(encoding_results["delta_P_inf_given_XS"]).mean()
+        check(
+            "delta_P_inf | X,S ≈ 0 (KEY: inferred physics adds nothing beyond frames + model)",
+            dpxs_inf < 0.005,
+            f"ΔR² = {dpxs_inf:.6f}",
+            "expect < 0.005 KEY",
+        )
+
     # --- Residualization ---
     if residual_results is not None:
         lines.append(f"\n{BOLD}Residualization{RESET}")
@@ -121,6 +147,23 @@ def evaluate(
                 "r2_P | X,S ≈ 0 (KEY: physics collapses after X+S residualization)",
                 r2_PgXS < 0.01,
                 f"R² = {r2_PgXS:.4f}",
+                "expect < 0.01 KEY",
+            )
+        # Inferred-physics parallel checks (same thresholds as GT)
+        if residual_results.get("r2_P_inf_given_X") is not None:
+            r2_PinfgX = float(np.asarray(residual_results["r2_P_inf_given_X"]).mean())
+            check(
+                "r2_P_inf | X > 0 (inferred physics survives X-only residualization)",
+                r2_PinfgX > 0.01,
+                f"R² = {r2_PinfgX:.4f}",
+                "expect > 0.01 (same threshold as GT; asymmetry is the finding)",
+            )
+        if residual_results.get("r2_P_inf_given_XS") is not None:
+            r2_PinfgXS = float(np.asarray(residual_results["r2_P_inf_given_XS"]).mean())
+            check(
+                "r2_P_inf | X,S ≈ 0 (KEY: inferred physics collapses after X+S residualization)",
+                r2_PinfgXS < 0.01,
+                f"R² = {r2_PinfgXS:.4f}",
                 "expect < 0.01 KEY",
             )
 
@@ -155,6 +198,32 @@ def evaluate(
             "Partial neural↔physics | X,S ≈ 0 (KEY)",
             abs(partial_XS) < 0.05,
             f"r = {partial_XS:.4f}",
+            "expect |r| < 0.05 KEY",
+        )
+
+    # Inferred-physics parallel RSA checks (same thresholds as GT)
+    if rsa_results.get("corr_neural_P_inf") is not None:
+        corr_P_inf = rsa_results["corr_neural_P_inf"]
+        check(
+            "Neural ↔ inferred-physics correlation present",
+            corr_P_inf > 0.05,
+            f"r = {corr_P_inf:.4f}",
+            "expect > 0.05 (same threshold as GT; asymmetry is the finding)",
+        )
+    if rsa_results.get("partial_P_inf_given_X") is not None:
+        partial_inf_X = rsa_results["partial_P_inf_given_X"]
+        check(
+            "Partial neural↔inferred-physics | X > 0 (naive positive)",
+            partial_inf_X > 0.02,
+            f"r = {partial_inf_X:.4f}",
+            "expect > 0.02",
+        )
+    if rsa_results.get("partial_P_inf_given_XS") is not None:
+        partial_inf_XS = rsa_results["partial_P_inf_given_XS"]
+        check(
+            "Partial neural↔inferred-physics | X,S ≈ 0 (KEY)",
+            abs(partial_inf_XS) < 0.05,
+            f"r = {partial_inf_XS:.4f}",
             "expect |r| < 0.05 KEY",
         )
 
