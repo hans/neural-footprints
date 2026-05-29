@@ -14,6 +14,7 @@ _ALL_FIGURES = [
     "figures/{norm}/pp_frames.pdf",
     "figures/{norm}/residual_analysis.pdf",
     "figures/{norm}/sample_scenes.pdf",
+    "figures/{norm}/p_block_contribution.pdf",
 ]
 
 
@@ -22,6 +23,7 @@ rule all:
         expand("outputs/{norm}/evaluation.json", norm=config["block_norms"]),
         expand(_ALL_FIGURES, norm=config["block_norms"]),
         expand("paper/{norm}_results_macros.tex", norm=config["block_norms"]),
+        "figures/p_block_contribution_compare.pdf",
 
 
 rule figures:
@@ -285,3 +287,39 @@ rule evaluate:
         "outputs/{norm}/evaluation.json",
     script:
         "scripts/run_evaluate.py"
+
+
+# ---------------------------------------------------------------------------
+# Per-block P contribution diagnostic (scientific analysis, not evaluation)
+# ---------------------------------------------------------------------------
+
+rule p_block_contribution:
+    input:
+        scenes="data/scenes.npz",
+        neural="data/{norm}/neural.npz",
+        pp_activations="data/pp_activations.npz",
+        forward_renders="data/forward_renders.npz",
+    output:
+        results="outputs/{norm}/p_block_contribution.json",
+        plot_data="data/{norm}/p_block_plot_data.npz",
+    script:
+        "scripts/run_p_block_contribution.py"
+
+
+rule plot_p_block_contribution:
+    input:
+        plot_data="data/{norm}/p_block_plot_data.npz",
+    output:
+        figure="figures/{norm}/p_block_contribution.pdf",
+    script:
+        "scripts/plot_p_block_contribution.py"
+
+
+rule plot_p_block_compare:
+    input:
+        zscore="data/zscore/p_block_plot_data.npz",
+        truncated_svd="data/truncated_svd/p_block_plot_data.npz",
+    output:
+        figure="figures/p_block_contribution_compare.pdf",
+    script:
+        "scripts/plot_p_block_compare.py"

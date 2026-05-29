@@ -68,8 +68,7 @@ def load_scenes(path):
 
 def save_neural(neural_activity, meta, path):
     """Save neural activity and metadata to compressed .npz."""
-    np.savez_compressed(
-        path,
+    arrays = dict(
         neural_activity=neural_activity,
         W=meta["W"],
         means=meta["means"],
@@ -78,12 +77,45 @@ def save_neural(neural_activity, meta, path):
         var_per_dim=meta["var_per_dim"],
         total_var=np.array(meta["total_var"]),
     )
+    # Optional block-structure fields added for p_block_contribution diagnostic.
+    # Stored as JSON string (block_names) or int array (block_sizes, block_k_values).
+    import json as _json
+    block_sizes = meta.get("block_sizes")
+    block_names = meta.get("block_names")
+    block_k_values = meta.get("block_k_values")
+    block_norm = meta.get("block_norm")
+    if block_sizes is not None:
+        arrays["block_sizes"] = np.array(block_sizes, dtype=np.int64)
+    if block_names is not None:
+        arrays["block_names_json"] = np.array(_json.dumps(block_names))
+    if block_k_values is not None:
+        arrays["block_k_values"] = np.array(block_k_values, dtype=np.int64)
+    if block_norm is not None:
+        arrays["block_norm"] = np.array(block_norm)
+    np.savez_compressed(path, **arrays)
 
 
 def load_neural(path):
-    """Load neural activity and metadata from .npz. Returns (neural_activity, meta)."""
+    """Load neural activity and metadata from .npz. Returns (neural_activity, meta).
+
+    Backward-compat: older NPZs without block structure fields return None for
+    those keys.
+    """
     data = np.load(path, allow_pickle=False)
     neural_activity = data["neural_activity"]
+
+    block_sizes = (
+        data["block_sizes"].tolist() if "block_sizes" in data else None
+    )
+    block_k_values = (
+        data["block_k_values"].tolist() if "block_k_values" in data else None
+    )
+    import json as _json
+    block_names = None
+    if "block_names_json" in data:
+        block_names = _json.loads(str(data["block_names_json"]))
+    block_norm = str(data["block_norm"]) if "block_norm" in data else None
+
     meta = {
         "W": data["W"],
         "means": data["means"],
@@ -91,6 +123,10 @@ def load_neural(path):
         "signal_std": float(data["signal_std"]),
         "var_per_dim": data["var_per_dim"],
         "total_var": float(data["total_var"]),
+        "block_sizes": block_sizes,
+        "block_names": block_names,
+        "block_k_values": block_k_values,
+        "block_norm": block_norm,
     }
     return neural_activity, meta
 

@@ -11,6 +11,80 @@ import numpy as np
 from config import N_NEURONS as _CFG_N_NEURONS, NOISE_LEVEL as _CFG_NOISE_LEVEL
 
 
+# ---------------------------------------------------------------------------
+# Per-block normalization helpers
+# (used by generate_neural_activity and by analyses/p_block_contribution.py)
+# ---------------------------------------------------------------------------
+
+def normalize_block_zscore(block_centered):
+    """
+    Per-dimension z-scoring for one centered block.
+
+    Parameters
+    ----------
+    block_centered : ndarray [n_scenes x d]
+        Already mean-subtracted block (float32 or float64).
+
+    Returns
+    -------
+    normalized : ndarray [n_scenes x d]  (same shape; stds divided out)
+    stds : ndarray [d]  (per-dimension stds, clipped to >= 1e-8)
+    block_norm_scalar : float  (mean of stds — for metadata/diagnostics)
+    """
+    stds = block_centered.std(axis=0)
+    stds = np.where(stds < 1e-8, 1.0, stds)
+    normalized = block_centered / stds
+    return normalized, stds, float(stds.mean())
+
+
+def normalize_block_truncated_svd(block_centered):
+    """
+    Stable-rank truncated SVD normalization for one centered block.
+
+    Parameters
+    ----------
+    block_centered : ndarray [n_scenes x d]
+        Already mean-subtracted block (will be cast to float64 internally).
+
+    Returns
+    -------
+    U_k : ndarray [n_scenes x k]  (float32; whitened scores in top-k subspace)
+    k : int  (stable rank)
+    stable_rank : float
+    block_norm_scalar : float  (sqrt(max_eigval) — for metadata/diagnostics)
+    """
+    block = block_centered.astype(np.float64)
+    n, d = block.shape
+
+    if min(n, d) <= 1:
+        norm = float(np.linalg.norm(block))
+        if norm == 0.0:
+            norm = 1.0
+        return (block / norm).astype(np.float32), 1, 1.0, norm
+
+    if n <= d:
+        # n×n Gram matrix — eigvecs are left singular vectors U.
+        gram = (block @ block.T).astype(np.float64)
+        eigvals, eigvecs = np.linalg.eigh(gram)  # ascending order
+        sr = float(eigvals.sum() / eigvals.max()) if eigvals.max() > 0 else 1.0
+        k = max(1, round(sr))
+        U_k = eigvecs[:, -k:].astype(np.float32)
+    else:
+        # d×d Gram matrix — eigvecs are right singular vectors V.
+        # Recover U = X V / S for unit-norm columns.
+        gram = (block.T @ block).astype(np.float64)
+        eigvals, eigvecs = np.linalg.eigh(gram)  # ascending order
+        sr = float(eigvals.sum() / eigvals.max()) if eigvals.max() > 0 else 1.0
+        k = max(1, round(sr))
+        V_k = eigvecs[:, -k:]  # (d, k)
+        S_k = np.sqrt(np.maximum(eigvals[-k:], 0.0))  # (k,)
+        S_k = np.where(S_k > 0, S_k, 1.0)
+        U_k = (block @ V_k / S_k[None, :]).astype(np.float32)  # (n, k)
+
+    block_norm_scalar = float(np.sqrt(eigvals.max())) if eigvals.max() > 0 else 1.0
+    return U_k, k, sr, block_norm_scalar
+
+
 def generate_neural_activity(
     program_states,
     seed,
@@ -101,15 +175,14 @@ def generate_neural_activity(
 
     elif normalization == "stable_rank_trunc":
         # Truncate each block to its stable rank via Gram-matrix eigendecomposition.
-        # Uses U[:, :k] (unit-norm columns = whitened scores within subspace).
-        # W is then sized (n_neurons, sum_of_ks).
+        # Uses normalize_block_truncated_svd for each block — also used by analysis.
         blocks_reduced = []
         block_stable_ranks = []
         block_k_values = []
         block_norms = []
         start = 0
         for size in block_sizes:
-            block = centered[:, start : start + size].astype(np.float64)
+            block = centered[:, start : start + size]
             if size == 0:
                 block_stable_ranks.append(0.0)
                 block_k_values.append(0)
@@ -117,54 +190,19 @@ def generate_neural_activity(
                 start += size
                 continue
 
-            n, d = block.shape
-            if min(n, d) <= 1:
-                # Trivially rank-1: normalise to unit norm and keep.
-                norm = float(np.linalg.norm(block))
-                if norm == 0.0:
-                    norm = 1.0
-                blocks_reduced.append((block / norm).astype(np.float32))
-                block_stable_ranks.append(1.0)
-                block_k_values.append(1)
-                block_norms.append(norm)
-                start += size
-                continue
-
-            if n <= d:
-                # n×n Gram matrix — eigvecs are left singular vectors U.
-                gram = (block @ block.T).astype(np.float64)
-                eigvals, eigvecs = np.linalg.eigh(gram)  # ascending order
-                sr = float(eigvals.sum() / eigvals.max()) if eigvals.max() > 0 else 1.0
-                k = max(1, round(sr))
-                # Top-k eigvecs (last k columns in ascending-order output).
-                U_k = eigvecs[:, -k:].astype(np.float32)
-                blocks_reduced.append(U_k)
-            else:
-                # d×d Gram matrix — eigvecs are right singular vectors V.
-                # Recover U = X V / S for unit-norm columns.
-                gram = (block.T @ block).astype(np.float64)
-                eigvals, eigvecs = np.linalg.eigh(gram)  # ascending order
-                sr = float(eigvals.sum() / eigvals.max()) if eigvals.max() > 0 else 1.0
-                k = max(1, round(sr))
-                V_k = eigvecs[:, -k:]  # (d, k) — top-k right singular vectors
-                S_k = np.sqrt(np.maximum(eigvals[-k:], 0.0))  # (k,)
-                # Guard divide-by-zero for near-zero singular values
-                S_k = np.where(S_k > 0, S_k, 1.0)
-                U_k = (block @ V_k / S_k[None, :]).astype(np.float32)  # (n, k)
-                blocks_reduced.append(U_k)
-
+            U_k, k, sr, bn = normalize_block_truncated_svd(block)
+            blocks_reduced.append(U_k)
             block_stable_ranks.append(sr)
             block_k_values.append(k)
-            block_norms.append(
-                float(np.sqrt(eigvals.max())) if eigvals.max() > 0 else 1.0
-            )
+            block_norms.append(bn)
             start += size
 
         normalized = np.concatenate(blocks_reduced, axis=1)  # (n_scenes, sum_of_ks)
         D_proj = normalized.shape[1]
 
     elif normalization == "zscore":
-        # Per-dimension z-scoring within each block (divide each column by its std).
+        # Per-dimension z-scoring within each block.
+        # Uses normalize_block_zscore for each block — also used by analysis.
         block_norms = []
         start = 0
         for size in block_sizes:
@@ -173,10 +211,9 @@ def generate_neural_activity(
                 block_norms.append(1.0)
                 start += size
                 continue
-            stds = block.std(axis=0)
-            stds = np.where(stds < 1e-8, 1.0, stds)
-            centered[:, start : start + size] /= stds
-            block_norms.append(float(stds.mean()))
+            normalized_block, stds, bn = normalize_block_zscore(block)
+            centered[:, start : start + size] = normalized_block
+            block_norms.append(bn)
             start += size
 
         normalized = centered

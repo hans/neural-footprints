@@ -62,4 +62,9 @@ if block_norm == "truncated_svd":
 print(f"D_proj={neural_meta['W'].shape[1]}")
 print(f"  blocks: {dict(zip(block_names, block_sizes))}")
 
+# Persist block structure for downstream diagnostics (p_block_contribution).
+neural_meta["block_sizes"] = block_sizes
+neural_meta["block_names"] = block_names
+# block_k_values is set by generate_neural_activity under truncated_svd;
+# under zscore it is None (block_sizes serve as k values directly).
 save_neural(neural, neural_meta, snakemake.output.neural)
