@@ -41,6 +41,9 @@ results = run_rsa_analysis(
     rsa_subsample=cfg["rsa_subsample"],
     predicted_pixel_pca=predicted_pixel_pca,
     inferred_physics_labels=inferred_physics_labels,
+    compute_null=cfg.get("rsa_compute_null", True),
+    n_null_permutations=cfg.get("rsa_n_null_permutations", 300),
+    null_seed=0,
 )
 
 # Separate large arrays from JSON results
