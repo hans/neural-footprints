@@ -124,3 +124,47 @@ def test_empty_rsa_null_results_keys():
     ):
         assert f"null_{prefix}_pvalue" in result
         assert np.isnan(result[f"null_{prefix}_pvalue"])
+
+
+from analyses.rsa import run_rsa_analysis
+
+
+def _make_run_rsa_inputs(n_scenes=60, n_neurons=20, n_phys=3, n_pix=8, seed=42):
+    rng = np.random.default_rng(seed)
+    neural_activity = rng.standard_normal((n_scenes, n_neurons)).astype(np.float32)
+    physics_labels = rng.standard_normal((n_scenes, n_phys)).astype(np.float32)
+    scenes = {"physics_labels": physics_labels}
+    raw_pixel_pca = rng.standard_normal((n_scenes, n_pix)).astype(np.float32)
+    predicted_pixel_pca = rng.standard_normal((n_scenes, n_pix)).astype(np.float32)
+    inferred_physics_labels = rng.standard_normal((n_scenes, n_phys)).astype(np.float32)
+    return neural_activity, scenes, {}, raw_pixel_pca, predicted_pixel_pca, inferred_physics_labels
+
+
+def test_run_rsa_analysis_includes_null_pvalues():
+    neural, scenes, meta, raw_pca, pred_pca, inf_phys = _make_run_rsa_inputs()
+    result = run_rsa_analysis(
+        neural, scenes, meta,
+        raw_pixel_pca=raw_pca,
+        rsa_subsample=40,
+        predicted_pixel_pca=pred_pca,
+        inferred_physics_labels=inf_phys,
+        compute_null=True,
+        n_null_permutations=5,
+        null_seed=0,
+    )
+    for prefix in ("corr_neural_P", "partial_P_given_X", "partial_P_given_XS",
+                   "corr_neural_P_inf", "partial_P_inf_given_X", "partial_P_inf_given_XS"):
+        key = f"null_{prefix}_pvalue"
+        assert key in result, f"missing {key}"
+        assert not np.isnan(result[key]), f"{key} is NaN but compute_null=True"
+
+
+def test_run_rsa_analysis_no_null_when_disabled():
+    neural, scenes, meta, raw_pca, pred_pca, inf_phys = _make_run_rsa_inputs()
+    result = run_rsa_analysis(
+        neural, scenes, meta,
+        raw_pixel_pca=raw_pca,
+        rsa_subsample=40,
+        compute_null=False,
+    )
+    assert np.isnan(result["null_corr_neural_P_pvalue"])

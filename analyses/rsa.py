@@ -194,6 +194,9 @@ def run_rsa_analysis(
     rsa_subsample=None,
     predicted_pixel_pca=None,
     inferred_physics_labels=None,
+    compute_null=True,
+    n_null_permutations=300,
+    null_seed=0,
 ):
     """
     Run RSA analysis on a subsample of scenes.
@@ -330,5 +333,26 @@ def run_rsa_analysis(
                 f"  Partial neural<->physics(inf) | X,S: r={partial_P_inf_given_XS:.4f}"
             )
             result["partial_P_inf_given_XS"] = partial_P_inf_given_XS
+
+    # --- Permutation null ---
+    if compute_null:
+        null_results = _compute_rsa_null_distribution(
+            physics_scaled,
+            rdm_neural,
+            rdm_X,
+            rdm_S=result.get("rdm_S"),
+            physics_inf_scaled_sub=physics_inf_scaled,
+            observed_corr_P=corr_neural_P,
+            observed_partial_P_given_X=partial_P_given_X,
+            observed_partial_P_given_XS=result.get("partial_P_given_XS"),
+            observed_corr_P_inf=result.get("corr_neural_P_inf"),
+            observed_partial_P_inf_given_X=result.get("partial_P_inf_given_X"),
+            observed_partial_P_inf_given_XS=result.get("partial_P_inf_given_XS"),
+            n_permutations=n_null_permutations,
+            seed=null_seed,
+        )
+    else:
+        null_results = _empty_rsa_null_results()
+    result.update(null_results)
 
     return result
