@@ -282,6 +282,9 @@ def plot_dissociation(plot_data, fig_dir="figures"):
 
     keys = plot_data.files if hasattr(plot_data, "files") else plot_data
     has_predicted = "r2_predicted_pixel" in keys and "predicted_pixel_score" in keys
+    has_inferred = "inferred_physics_score" in keys and not np.isnan(
+        float(plot_data["inferred_physics_score"])
+    )
     physics_null_ci = (
         _null_ci_from_perm_array(plot_data["r2_physics_null"])
         if "r2_physics_null" in keys
@@ -291,28 +294,47 @@ def plot_dissociation(plot_data, fig_dir="figures"):
         r2_predicted = plot_data["r2_predicted_pixel"]
         predicted_score = float(plot_data["predicted_pixel_score"])
         mean_r2_predicted = r2_predicted.mean()
+    if has_inferred:
+        inferred_physics_score = float(plot_data["inferred_physics_score"])
 
     with paper_style():
         fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(COL_WIDTH, 2.0))
 
         bar_width = 0.5
-        colors = [COLORS["sensory"], COLORS["physics"]]
-        labels = [LABEL_SENSORY, LABEL_PHYSICS]
+        r2_colors = [COLORS["sensory"], COLORS["physics"]]
+        r2_labels = [LABEL_SENSORY, LABEL_PHYSICS]
         r2_heights = [mean_r2_pixel, mean_r2_physics]
         r2_errs = [
             r2_pixel.std() / np.sqrt(n_neurons),
             r2_physics.std() / np.sqrt(n_neurons),
         ]
+        behav_colors = [COLORS["sensory"], COLORS["physics"]]
+        behav_labels = [LABEL_SENSORY, LABEL_PHYSICS]
         behav_heights = [pixel_score, physics_score]
         if has_predicted:
-            colors.append("#E67E22")
-            labels.append("Predicted S")
+            r2_colors.append("#E67E22")
+            r2_labels.append("Predicted S")
             r2_heights.append(mean_r2_predicted)
             r2_errs.append(r2_predicted.std() / np.sqrt(n_neurons))
+            behav_colors.append("#E67E22")
+            behav_labels.append("Predicted S")
             behav_heights.append(predicted_score)
+        if has_inferred:
+            # Inferred physics has no separate neural R² in dissociation data
+            # (it's the injected feature; neural R² lives in PP analysis), so
+            # the bar appears only on the behavioral panel — a hatched fill
+            # distinguishes it visually from the GT-physics oracle bar.
+            behav_colors.append(COLORS["physics"])
+            behav_labels.append("Physics\n(inferred)")
+            behav_heights.append(inferred_physics_score)
 
         bars1 = ax1.bar(
-            labels, r2_heights, width=bar_width, color=colors, yerr=r2_errs, capsize=3
+            r2_labels,
+            r2_heights,
+            width=bar_width,
+            color=r2_colors,
+            yerr=r2_errs,
+            capsize=3,
         )
         ax1.set_ylabel("Neural R\u00b2")
         ax1.set_title("Encoding performance")
@@ -338,7 +360,18 @@ def plot_dissociation(plot_data, fig_dir="figures"):
                 fontweight="bold",
             )
 
-        bars2 = ax2.bar(labels, behav_heights, width=bar_width, color=colors, capsize=3)
+        bars2 = ax2.bar(
+            behav_labels,
+            behav_heights,
+            width=bar_width,
+            color=behav_colors,
+            capsize=3,
+        )
+        if has_inferred:
+            # Hatch the inferred-physics bar to distinguish it from the GT
+            # oracle (same color, different surface).
+            bars2[-1].set_hatch("//")
+            bars2[-1].set_edgecolor("white")
         if chance is not None:
             ax2.axhline(chance, color="gray", linestyle="--", alpha=0.5, label="Chance")
             ax2.set_ylim(0, 1.1)
