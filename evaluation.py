@@ -280,6 +280,9 @@ def evaluate(
     r2_phys = dissociation_results["mean_r2_physics"]
     beh_pix = dissociation_results["pixel_behavioral_score"]
     beh_phys = dissociation_results["physics_behavioral_score"]
+    beh_phys_inf = dissociation_results.get(
+        "inferred_physics_behavioral_score", float("nan")
+    )
     metric = dissociation_results["metric_label"]
     obj = dissociation_results["objective"]
 
@@ -312,6 +315,14 @@ def evaluate(
             f"{metric} = {beh_phys:.4f}",
             "expect > 0.90 (oracle re-renders the held-out target)",
         )
+        if beh_phys_inf == beh_phys_inf:  # not nan
+            check(
+                "Inferred-physics behavioral score is high",
+                beh_phys_inf > 0.70,
+                f"inferred {metric} = {beh_phys_inf:.4f}  "
+                f"(GT oracle = {beh_phys:.4f}, gap = {beh_phys - beh_phys_inf:+.4f})",
+                "expect > 0.70 — inferred physics + PyBullet should approach the GT oracle",
+            )
         delta_pix = dissociation_results.get(
             "delta_pixel_behavioral_score", float("nan")
         )

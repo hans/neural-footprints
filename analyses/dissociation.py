@@ -104,6 +104,7 @@ def _score_next_frame_pixels(
     n_oracle=200,
     target_raw=None,
     initial_raw=None,
+    inferred_physics_labels=None,
 ):
     """
     Behavioral sufficiency for next-frame pixel prediction.
@@ -168,6 +169,25 @@ def _score_next_frame_pixels(
         oracle_raw, target_pixel_pca[:n], scaler_target, pca_target
     )
 
+    inferred_physics_r2 = None
+    if inferred_physics_labels is not None:
+        inferred_raw = np.stack(
+            [
+                resimulate_scene(
+                    scene_configs[i],
+                    inferred_physics_labels[i],
+                    pillar_gray=pillar_grays[i] if pillar_grays is not None else 0.5,
+                    lighting=lightings[i] if lightings is not None else None,
+                )
+                .reshape(-1)
+                .astype(np.float32)
+                for i in range(n)
+            ]
+        )
+        inferred_physics_r2 = _pixel_prediction_r2(
+            inferred_raw, target_pixel_pca[:n], scaler_target, pca_target
+        )
+
     fg_pixel_r2 = None
     fg_physics_r2 = None
     pixel_pred_raw = None
@@ -200,6 +220,7 @@ def _score_next_frame_pixels(
     return (
         pixel_r2,
         physics_r2,
+        inferred_physics_r2,
         "Next-frame pred. R²",
         None,
         fg_pixel_r2,
@@ -345,6 +366,7 @@ def run_dissociation_analysis(
     predicted_pixel_pca=None,
     predicted_brain_pixels=None,
     forward_program_states=None,
+    inferred_physics_labels=None,
 ):
     """
     Compute and plot the R² vs. behavioral sufficiency dissociation.
@@ -441,6 +463,7 @@ def run_dissociation_analysis(
         (
             pixel_score,
             physics_score,
+            inferred_physics_score,
             metric_label,
             chance,
             fg_pixel_score,
@@ -458,6 +481,7 @@ def run_dissociation_analysis(
             lightings=lightings,
             target_raw=target_rgba,
             initial_raw=initial_rgba,
+            inferred_physics_labels=inferred_physics_labels,
         )
         # Combined model: same oracle as physics-only — if you have the
         # physics state you can re-simulate deterministically.
@@ -467,6 +491,7 @@ def run_dissociation_analysis(
         pixel_score, physics_score, metric_label, chance = _score_kinetic_energy(
             pixel_pca, physics_scaled, behavior_labels
         )
+        inferred_physics_score = None
         fg_pixel_score = None
         fg_physics_score = None
         delta_pixel_score = None
@@ -559,7 +584,12 @@ def run_dissociation_analysis(
         )
 
     print(f"  Pixel          → {metric_label}: {pixel_score:.4f}")
-    print(f"  Physics        → {metric_label}: {physics_score:.4f}")
+    print(f"  Physics (GT)   → {metric_label}: {physics_score:.4f}")
+    if inferred_physics_score is not None:
+        print(
+            f"  Physics (inf)  → {metric_label}: {inferred_physics_score:.4f}  "
+            f"(gap from oracle: {physics_score - inferred_physics_score:+.4f})"
+        )
     print(f"  Pixel+physics  → {metric_label}: {combined_score:.4f}")
     if fg_pixel_score is not None:
         print(f"  Foreground-masked pixel  R²:  {fg_pixel_score:.4f}")
@@ -595,6 +625,11 @@ def run_dissociation_analysis(
         "delta_r2_null": delta_r2_null,
         "pixel_behavioral_score": pixel_score,
         "physics_behavioral_score": physics_score,
+        "inferred_physics_behavioral_score": (
+            float(inferred_physics_score)
+            if inferred_physics_score is not None
+            else float("nan")
+        ),
         "combined_behavioral_score": combined_score,
         "fg_pixel_behavioral_score": (
             float(fg_pixel_score) if fg_pixel_score is not None else float("nan")

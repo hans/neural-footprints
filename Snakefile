@@ -132,6 +132,8 @@ rule dissociation:
         neural="data/{norm}/neural.npz",
         encoder="data/{norm}/encoder.joblib",
         forward_renders="data/forward_renders.npz",
+        inferred="data/{norm}/inferred_physics.npz",
+        model="data/inverse_model.pt",
     output:
         results="outputs/{norm}/dissociation_results.json",
         plot_data="data/{norm}/dissociation_plot_data.npz",
