@@ -35,3 +35,92 @@ def test_rsa_null_summary_two_sided_none_exceed():
     perm_values = np.array([0.01, 0.02, 0.03])
     result = _rsa_null_summary("partial_P_given_XS", perm_values, observed=0.99, two_sided=True)
     assert result["null_partial_P_given_XS_pvalue"] == pytest.approx(0.0)
+
+
+from analyses.rsa import _compute_rsa_null_distribution, _empty_rsa_null_results, _compute_rdm
+from scipy.stats import spearmanr
+
+
+def _make_rsa_fixtures(n_sub=30, n_phys=3, seed=99):
+    rng = np.random.default_rng(seed)
+    physics_scaled_sub = rng.standard_normal((n_sub, n_phys))
+    neural_sub = rng.standard_normal((n_sub, 10))
+    X_sub = rng.standard_normal((n_sub, 5))
+    S_sub = rng.standard_normal((n_sub, 5))
+    rdm_neural = _compute_rdm(neural_sub)
+    rdm_X = _compute_rdm(X_sub)
+    rdm_S = _compute_rdm(S_sub)
+    rdm_neural[np.isnan(rdm_neural)] = 0.0
+    rdm_X[np.isnan(rdm_X)] = 0.0
+    rdm_S[np.isnan(rdm_S)] = 0.0
+    obs_corr_P = spearmanr(rdm_neural, _compute_rdm(physics_scaled_sub))[0]
+    return physics_scaled_sub, rdm_neural, rdm_X, rdm_S, obs_corr_P
+
+
+def test_compute_rsa_null_keys_gt_only():
+    physics_scaled_sub, rdm_neural, rdm_X, rdm_S, obs_corr_P = _make_rsa_fixtures()
+    result = _compute_rsa_null_distribution(
+        physics_scaled_sub,
+        rdm_neural,
+        rdm_X,
+        rdm_S=rdm_S,
+        physics_inf_scaled_sub=None,
+        observed_corr_P=obs_corr_P,
+        observed_partial_P_given_X=0.1,
+        observed_partial_P_given_XS=0.01,
+        n_permutations=10,
+        seed=0,
+    )
+    for prefix in ("corr_neural_P", "partial_P_given_X", "partial_P_given_XS"):
+        assert f"null_{prefix}_pvalue" in result, f"missing null_{prefix}_pvalue"
+        assert f"null_{prefix}_perm_values" in result
+    # No inf keys expected
+    assert "null_corr_neural_P_inf_pvalue" not in result
+
+
+def test_compute_rsa_null_keys_with_inf():
+    rng = np.random.default_rng(7)
+    physics_scaled_sub, rdm_neural, rdm_X, rdm_S, obs_corr_P = _make_rsa_fixtures()
+    physics_inf_sub = rng.standard_normal((30, 3))
+    result = _compute_rsa_null_distribution(
+        physics_scaled_sub,
+        rdm_neural,
+        rdm_X,
+        rdm_S=rdm_S,
+        physics_inf_scaled_sub=physics_inf_sub,
+        observed_corr_P=obs_corr_P,
+        observed_partial_P_given_X=0.1,
+        observed_partial_P_given_XS=0.01,
+        observed_corr_P_inf=0.05,
+        observed_partial_P_inf_given_X=0.08,
+        observed_partial_P_inf_given_XS=0.01,
+        n_permutations=10,
+        seed=0,
+    )
+    for prefix in ("corr_neural_P_inf", "partial_P_inf_given_X", "partial_P_inf_given_XS"):
+        assert f"null_{prefix}_pvalue" in result, f"missing null_{prefix}_pvalue"
+
+
+def test_compute_rsa_null_perm_length():
+    physics_scaled_sub, rdm_neural, rdm_X, rdm_S, obs_corr_P = _make_rsa_fixtures()
+    n_perms = 7
+    result = _compute_rsa_null_distribution(
+        physics_scaled_sub,
+        rdm_neural,
+        rdm_X,
+        observed_corr_P=obs_corr_P,
+        observed_partial_P_given_X=0.1,
+        n_permutations=n_perms,
+        seed=0,
+    )
+    assert len(result["null_corr_neural_P_perm_values"]) == n_perms
+
+
+def test_empty_rsa_null_results_keys():
+    result = _empty_rsa_null_results()
+    for prefix in (
+        "corr_neural_P", "partial_P_given_X", "partial_P_given_XS",
+        "corr_neural_P_inf", "partial_P_inf_given_X", "partial_P_inf_given_XS",
+    ):
+        assert f"null_{prefix}_pvalue" in result
+        assert np.isnan(result[f"null_{prefix}_pvalue"])

@@ -84,6 +84,107 @@ def _rsa_null_summary(prefix, perm_values, observed, two_sided=False):
     }
 
 
+def _compute_rsa_null_distribution(
+    physics_scaled_sub,
+    rdm_neural,
+    rdm_X,
+    *,
+    rdm_S=None,
+    physics_inf_scaled_sub=None,
+    observed_corr_P,
+    observed_partial_P_given_X,
+    observed_partial_P_given_XS=None,
+    observed_corr_P_inf=None,
+    observed_partial_P_inf_given_X=None,
+    observed_partial_P_inf_given_XS=None,
+    n_permutations=300,
+    seed=0,
+):
+    """Mantel permutation null for RSA partial correlations.
+
+    Permutes scene rows of physics_scaled_sub (not RDM cells), re-derives the
+    physics RDM, then recomputes partial Spearman correlations against the fixed
+    rdm_neural / rdm_X / rdm_S. The same row permutation is applied to
+    physics_inf_scaled_sub for apples-to-apples inferred-physics comparison.
+    """
+    n_sub = physics_scaled_sub.shape[0]
+    has_S = rdm_S is not None
+    has_inf = physics_inf_scaled_sub is not None
+
+    rng = np.random.default_rng(seed)
+
+    corr_P_null = np.empty(n_permutations)
+    partial_X_null = np.empty(n_permutations)
+    partial_XS_null = np.empty(n_permutations) if has_S else None
+    corr_P_inf_null = np.empty(n_permutations) if has_inf else None
+    partial_inf_X_null = np.empty(n_permutations) if has_inf else None
+    partial_inf_XS_null = np.empty(n_permutations) if (has_inf and has_S) else None
+
+    print(f"\nComputing RSA permutation null ({n_permutations} shuffles)...")
+    for p in range(n_permutations):
+        perm = rng.permutation(n_sub)
+        physics_perm = physics_scaled_sub[perm]
+        rdm_physics_perm = _compute_rdm(physics_perm)
+        rdm_physics_perm[np.isnan(rdm_physics_perm)] = 0.0
+
+        corr_P_null[p] = spearmanr(rdm_neural, rdm_physics_perm)[0]
+        partial_X_null[p] = _partial_spearman(rdm_neural, rdm_physics_perm, rdm_X)[0]
+        if has_S:
+            partial_XS_null[p] = _partial_spearman_2(
+                rdm_neural, rdm_physics_perm, rdm_X, rdm_S
+            )[0]
+
+        if has_inf:
+            inf_perm = physics_inf_scaled_sub[perm]
+            rdm_physics_inf_perm = _compute_rdm(inf_perm)
+            rdm_physics_inf_perm[np.isnan(rdm_physics_inf_perm)] = 0.0
+            corr_P_inf_null[p] = spearmanr(rdm_neural, rdm_physics_inf_perm)[0]
+            partial_inf_X_null[p] = _partial_spearman(
+                rdm_neural, rdm_physics_inf_perm, rdm_X
+            )[0]
+            if has_S:
+                partial_inf_XS_null[p] = _partial_spearman_2(
+                    rdm_neural, rdm_physics_inf_perm, rdm_X, rdm_S
+                )[0]
+
+        if (p + 1) % 50 == 0 or p == 0:
+            print(f"  perm {p + 1}/{n_permutations}: corr_P_null = {corr_P_null[p]:.4f}")
+
+    out = {}
+    out.update(_rsa_null_summary("corr_neural_P", corr_P_null, observed_corr_P, two_sided=False))
+    out.update(_rsa_null_summary("partial_P_given_X", partial_X_null, observed_partial_P_given_X, two_sided=False))
+    if has_S and observed_partial_P_given_XS is not None:
+        out.update(_rsa_null_summary("partial_P_given_XS", partial_XS_null, observed_partial_P_given_XS, two_sided=True))
+    if has_inf:
+        out.update(_rsa_null_summary("corr_neural_P_inf", corr_P_inf_null, observed_corr_P_inf, two_sided=False))
+        out.update(_rsa_null_summary("partial_P_inf_given_X", partial_inf_X_null, observed_partial_P_inf_given_X, two_sided=False))
+        if has_S and observed_partial_P_inf_given_XS is not None:
+            out.update(_rsa_null_summary("partial_P_inf_given_XS", partial_inf_XS_null, observed_partial_P_inf_given_XS, two_sided=True))
+    return out
+
+
+def _empty_rsa_null_results():
+    nan = float("nan")
+    out = {}
+    for prefix in (
+        "corr_neural_P",
+        "partial_P_given_X",
+        "partial_P_given_XS",
+        "corr_neural_P_inf",
+        "partial_P_inf_given_X",
+        "partial_P_inf_given_XS",
+    ):
+        out.update({
+            f"null_{prefix}_perm_values": np.empty(0),
+            f"null_{prefix}_ci_lo": nan,
+            f"null_{prefix}_ci_hi": nan,
+            f"null_{prefix}_mean": nan,
+            f"null_{prefix}_pvalue": nan,
+            f"null_{prefix}_observed": nan,
+        })
+    return out
+
+
 def run_rsa_analysis(
     neural_activity,
     scenes,
