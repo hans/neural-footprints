@@ -28,7 +28,7 @@ pixel_pca_dim: 500
 # Encoding analysis: permutation null on physics-only and combined R²s.
 # Shuffles scene→physics association; refits ridge to get null R² distribution.
 encoding_compute_null: true
-encoding_n_null_permutations: 50
+encoding_n_null_permutations: 300
 
 behavioral_pca_dim: 0.90
 dynamics_pca_dim: 50
