@@ -63,6 +63,27 @@ def _partial_spearman_2(x, y, z1, z2):
     return corr, pval
 
 
+def _rsa_null_summary(prefix, perm_values, observed, two_sided=False):
+    """Per-perm scalar null → 95% CI + p-value.
+
+    two_sided: use |perm| >= |observed| (for KEY ≈-0 tests);
+               else one-sided (perm >= observed, for expected-positive tests).
+    """
+    lo, hi = np.percentile(perm_values, [2.5, 97.5])
+    if two_sided:
+        pvalue = float((np.abs(perm_values) >= abs(observed)).mean())
+    else:
+        pvalue = float((perm_values >= observed).mean())
+    return {
+        f"null_{prefix}_perm_values": perm_values,
+        f"null_{prefix}_ci_lo": float(lo),
+        f"null_{prefix}_ci_hi": float(hi),
+        f"null_{prefix}_mean": float(perm_values.mean()),
+        f"null_{prefix}_pvalue": pvalue,
+        f"null_{prefix}_observed": float(observed),
+    }
+
+
 def run_rsa_analysis(
     neural_activity,
     scenes,
