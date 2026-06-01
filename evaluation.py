@@ -233,12 +233,28 @@ def evaluate(
         f"r = {corr_P:.4f}",
         "expect > 0.05",
     )
+    if not np.isnan(rsa_results.get("null_corr_neural_P_pvalue", float("nan"))):
+        pval = float(rsa_results["null_corr_neural_P_pvalue"])
+        check(
+            "corr_neural_P significantly above null (p < 0.05, one-sided)",
+            pval < 0.05,
+            f"p = {pval:.3f}",
+            "PASS iff p < 0.05 one-sided vs Mantel permutation null",
+        )
     check(
         "Partial neural↔physics | X > 0 (naive positive)",
         partial_X > 0.02,
         f"r = {partial_X:.4f}",
         "expect > 0.02",
     )
+    if not np.isnan(rsa_results.get("null_partial_P_given_X_pvalue", float("nan"))):
+        pval = float(rsa_results["null_partial_P_given_X_pvalue"])
+        check(
+            "partial_P_given_X significantly above null (p < 0.05, one-sided)",
+            pval < 0.05,
+            f"p = {pval:.3f}",
+            "PASS iff p < 0.05 one-sided vs Mantel permutation null",
+        )
 
     if rsa_results.get("partial_P_given_XS") is not None:
         partial_XS = rsa_results["partial_P_given_XS"]
@@ -248,6 +264,14 @@ def evaluate(
             f"r = {partial_XS:.4f}",
             "expect |r| < 0.05 KEY",
         )
+        if not np.isnan(rsa_results.get("null_partial_P_given_XS_pvalue", float("nan"))):
+            pval = float(rsa_results["null_partial_P_given_XS_pvalue"])
+            check(
+                "partial_P_given_XS significantly above null (KEY, p < 0.05, two-sided)",
+                pval < 0.05,
+                f"p = {pval:.3f}",
+                "PASS iff p < 0.05; PASS means physics distinguishable from random pairing (bad news)",
+            )
 
     # Inferred-physics parallel RSA checks (same thresholds as GT)
     if rsa_results.get("corr_neural_P_inf") is not None:
@@ -258,6 +282,14 @@ def evaluate(
             f"r = {corr_P_inf:.4f}",
             "expect > 0.05 (same threshold as GT; asymmetry is the finding)",
         )
+        if not np.isnan(rsa_results.get("null_corr_neural_P_inf_pvalue", float("nan"))):
+            pval = float(rsa_results["null_corr_neural_P_inf_pvalue"])
+            check(
+                "corr_neural_P_inf significantly above null (p < 0.05, one-sided)",
+                pval < 0.05,
+                f"p = {pval:.3f}",
+                "PASS iff p < 0.05 one-sided vs Mantel permutation null",
+            )
     if rsa_results.get("partial_P_inf_given_X") is not None:
         partial_inf_X = rsa_results["partial_P_inf_given_X"]
         check(
@@ -266,6 +298,14 @@ def evaluate(
             f"r = {partial_inf_X:.4f}",
             "expect > 0.02",
         )
+        if not np.isnan(rsa_results.get("null_partial_P_inf_given_X_pvalue", float("nan"))):
+            pval = float(rsa_results["null_partial_P_inf_given_X_pvalue"])
+            check(
+                "partial_P_inf_given_X significantly above null (p < 0.05, one-sided)",
+                pval < 0.05,
+                f"p = {pval:.3f}",
+                "PASS iff p < 0.05 one-sided vs Mantel permutation null",
+            )
     if rsa_results.get("partial_P_inf_given_XS") is not None:
         partial_inf_XS = rsa_results["partial_P_inf_given_XS"]
         check(
@@ -274,6 +314,14 @@ def evaluate(
             f"r = {partial_inf_XS:.4f}",
             "expect |r| < 0.05 KEY",
         )
+        if not np.isnan(rsa_results.get("null_partial_P_inf_given_XS_pvalue", float("nan"))):
+            pval = float(rsa_results["null_partial_P_inf_given_XS_pvalue"])
+            check(
+                "partial_P_inf_given_XS significantly above null (KEY, p < 0.05, two-sided)",
+                pval < 0.05,
+                f"p = {pval:.3f}",
+                "PASS iff p < 0.05; PASS means inferred physics distinguishable from random pairing (bad news)",
+            )
 
     # --- Dissociation ---
     r2_pix = dissociation_results["mean_r2_pixel"]
