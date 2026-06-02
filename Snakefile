@@ -13,6 +13,7 @@ _ALL_FIGURES = [
     "figures/{norm}/predictive_processing.pdf",
     "figures/{norm}/pp_frames.pdf",
     "figures/{norm}/residual_analysis.pdf",
+    "figures/{norm}/residualized_pca.pdf",
     "figures/{norm}/sample_scenes.pdf",
     "figures/{norm}/p_block_contribution.pdf",
 ]
@@ -180,6 +181,18 @@ rule residual:
         "scripts/run_residual.py"
 
 
+rule residualized_pca:
+    input:
+        scenes="data/scenes.npz",
+        neural="data/{norm}/neural.npz",
+        forward_renders="data/forward_renders.npz",
+    output:
+        results="outputs/{norm}/residualized_pca_results.json",
+        plot_data="data/{norm}/residualized_pca_plot_data.npz",
+    script:
+        "scripts/run_residualized_pca.py"
+
+
 # ---------------------------------------------------------------------------
 # Plotting (fast — only reads cached plot_data NPZ files)
 # ---------------------------------------------------------------------------
@@ -264,6 +277,15 @@ rule plot_residual:
         "scripts/plot_residual.py"
 
 
+rule plot_residualized_pca:
+    input:
+        plot_data="data/{norm}/residualized_pca_plot_data.npz",
+    output:
+        figure="figures/{norm}/residualized_pca.pdf",
+    script:
+        "scripts/plot_residualized_pca.py"
+
+
 # ---------------------------------------------------------------------------
 # Evaluation & paper macros
 # ---------------------------------------------------------------------------
@@ -274,6 +296,7 @@ rule paper_macros:
         rsa="outputs/{norm}/rsa_results.json",
         dynamics="outputs/{norm}/dynamics_results.json",
         pca="outputs/{norm}/pca_results.json",
+        residualized_pca="outputs/{norm}/residualized_pca_results.json",
         evaluation="outputs/{norm}/evaluation.json",
     output:
         "paper/{norm}_results_macros.tex",
@@ -288,6 +311,7 @@ rule evaluate:
         dissociation="outputs/{norm}/dissociation_results.json",
         dynamics="outputs/{norm}/dynamics_results.json",
         residual="outputs/{norm}/residual_results.json",
+        residualized_pca="outputs/{norm}/residualized_pca_results.json",
     output:
         "outputs/{norm}/evaluation.json",
     script:
@@ -328,3 +352,26 @@ rule plot_p_block_compare:
         figure="figures/p_block_contribution_compare.pdf",
     script:
         "scripts/plot_p_block_compare.py"
+
+
+# ---------------------------------------------------------------------------
+# Scene animations (optional — NOT part of `rule all`; run on request via
+# `snakemake animations` or by requesting the montage target directly)
+# ---------------------------------------------------------------------------
+
+rule render_animations:
+    input:
+        scenes="data/scenes.npz",
+    output:
+        scenes_dir=directory("figures/scene_animations"),
+        montage="figures/scene_animations_grid.mp4",
+        montage_loop="figures/scene_animations_grid_loop.mp4",
+    script:
+        "scripts/render_scene_animations.py"
+
+
+rule animations:
+    input:
+        "figures/scene_animations",
+        "figures/scene_animations_grid.mp4",
+        "figures/scene_animations_grid_loop.mp4",

@@ -12,6 +12,8 @@ dependencies = [
     "pyyaml",
     "seaborn>=0.13.2",
     "torch>=2.11.0",
+    "imageio>=2.34",
+    "imageio-ffmpeg>=0.5",   # bundles a static ffmpeg binary — no system ffmpeg needed
 ]
 
 [dependency-groups]

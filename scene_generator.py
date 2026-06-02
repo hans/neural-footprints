@@ -660,54 +660,30 @@ def generate_scenes(n_scenes, seed, *, n_timesteps=None, use_gui=False):
     }
 
 
-def resimulate_scene(
+def _build_scene_model(
     shape_configs,
     initial_physics_row,
-    *,
-    n_timesteps=None,
-    return_program_state=False,
-    pillar_gray=0.5,
-    lighting=None,
-    render_size=None,
-    use_gui=False,
-    physics_client=None,
+    pillar_gray,
+    lighting,
+    offscreen=None,
 ):
+    """Rebuild and compile the MjModel/MjData for a stored scene.
+
+    Extracted verbatim from resimulate_scene's spec-building block so the same
+    deterministic reconstruction can be reused for full-animation rendering.
+    Returns (model, data, body_id, qvel_offset), with the object's initial
+    linear velocity applied and mj_forward called.
+
+    offscreen: if not None, raise spec.visual.global_.offwidth/offheight to this
+        many pixels before compile, so render sizes above MuJoCo's default
+        640x480 offscreen framebuffer cap are supported.
     """
-    Rebuild a scene from stored shape configs + initial physics state, step
-    N_TIMESTEPS, and return the rendered result.
-
-    Used for oracle physics-model prediction: given the full initial state
-    (position, velocity, mass, friction, shape, color), the simulation is
-    deterministic.
-
-    Args:
-        shape_configs:       list of dicts (one per object) with keys
-                             'shape' ('sphere'|'box'), 'params', 'color'
-        initial_physics_row: 1-D array of length 16*N_OBJECTS:
-                             per object: pos(3), orn(4), lin_vel(3), ang_vel(3), mass(1), friction(1), x_accel(1)
-        return_program_state: if True, return full program_state float32 vector
-                             (3-frame render buffers + physics labels + scene config + lighting).
-        physics_client:      accepted and silently ignored (backward compat).
-
-    Returns:
-        If return_program_state=False: RGBA uint8 [IMAGE_SIZE, IMAGE_SIZE, 4]
-            of the BEHAVIORAL TARGET frame (rendered at t=n_timesteps).
-        If return_program_state=True: float32 [D] program_state vector with
-            three brain-input frames concatenated (t=0, t=PP_EARLY_FRAME,
-            t=PP_LATE_FRAME).
-    """
-    if n_timesteps is None:
-        n_timesteps = _CFG_N_TIMESTEPS
-    if lighting is None:
-        lighting = _DEFAULT_LIGHTING
-
     # Extract initial state from physics row (single object, off=0)
     off = 0
     pos = initial_physics_row[off : off + 3].tolist()
     lin_vel = initial_physics_row[off + 7 : off + 10].tolist()
     mass = float(initial_physics_row[off + 13])
     friction = float(initial_physics_row[off + 14])
-    x_accel = float(initial_physics_row[off + 15])
     cfg = shape_configs[0]
 
     # Build spec (same as _build_mjspec but with fixed params from initial_physics_row)
@@ -836,6 +812,13 @@ def resimulate_scene(
     geom.friction = [friction, 0.005, 0.0001]
     geom.mass = mass
 
+    # MuJoCo's default offscreen framebuffer is 640x480, which already covers
+    # render sizes <=480 (e.g. the 384/256 animation defaults). Only raise the
+    # cap when a larger render is requested.
+    if offscreen is not None and offscreen > 480:
+        spec.visual.global_.offwidth = offscreen
+        spec.visual.global_.offheight = offscreen
+
     model = spec.compile()
     data = mujoco.MjData(model)
     body_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, "object")
@@ -845,6 +828,58 @@ def resimulate_scene(
 
     data.qvel[qvel_offset : qvel_offset + 3] = lin_vel
     mujoco.mj_forward(model, data)
+    return model, data, body_id, qvel_offset
+
+
+def resimulate_scene(
+    shape_configs,
+    initial_physics_row,
+    *,
+    n_timesteps=None,
+    return_program_state=False,
+    pillar_gray=0.5,
+    lighting=None,
+    render_size=None,
+    use_gui=False,
+    physics_client=None,
+):
+    """
+    Rebuild a scene from stored shape configs + initial physics state, step
+    N_TIMESTEPS, and return the rendered result.
+
+    Used for oracle physics-model prediction: given the full initial state
+    (position, velocity, mass, friction, shape, color), the simulation is
+    deterministic.
+
+    Args:
+        shape_configs:       list of dicts (one per object) with keys
+                             'shape' ('sphere'|'box'), 'params', 'color'
+        initial_physics_row: 1-D array of length 16*N_OBJECTS:
+                             per object: pos(3), orn(4), lin_vel(3), ang_vel(3), mass(1), friction(1), x_accel(1)
+        return_program_state: if True, return full program_state float32 vector
+                             (3-frame render buffers + physics labels + scene config + lighting).
+        physics_client:      accepted and silently ignored (backward compat).
+
+    Returns:
+        If return_program_state=False: RGBA uint8 [IMAGE_SIZE, IMAGE_SIZE, 4]
+            of the BEHAVIORAL TARGET frame (rendered at t=n_timesteps).
+        If return_program_state=True: float32 [D] program_state vector with
+            three brain-input frames concatenated (t=0, t=PP_EARLY_FRAME,
+            t=PP_LATE_FRAME).
+    """
+    if n_timesteps is None:
+        n_timesteps = _CFG_N_TIMESTEPS
+    if lighting is None:
+        lighting = _DEFAULT_LIGHTING
+
+    # Scalars needed for the render loop and physics-label collection.
+    mass = float(initial_physics_row[13])
+    friction = float(initial_physics_row[14])
+    x_accel = float(initial_physics_row[15])
+
+    model, data, body_id, qvel_offset = _build_scene_model(
+        shape_configs, initial_physics_row, pillar_gray, lighting
+    )
 
     render_h = render_w = render_size if render_size is not None else IMAGE_SIZE
     renderer = mujoco.Renderer(model, height=render_h, width=render_w)
@@ -888,3 +923,62 @@ def resimulate_scene(
     except:
         del renderer
         raise
+
+
+def render_scene_frames(
+    shape_configs,
+    initial_physics_row,
+    *,
+    n_timesteps=None,
+    pillar_gray=0.5,
+    lighting=None,
+    render_size=384,
+    stride=1,
+):
+    """Re-simulate a stored scene and render RGB at every captured timestep.
+
+    Unlike resimulate_scene (which only renders the 3 brain-input frames or the
+    single behavioral-target frame), this captures the full motion: t=0 plus
+    every `stride`-th physics step, for slide-deck animations. RGB-only — it
+    skips the depth/segmentation passes that _render_frame does.
+
+    Args:
+        shape_configs:       list of dicts (one per object), as stored in
+                             scenes['scene_configs'].
+        initial_physics_row: 1-D array length 16*N_OBJECTS, as stored in
+                             scenes['initial_physics_labels'] (true initial state).
+        render_size:         output frame size in px (square). Values >480 raise
+                             MuJoCo's offscreen framebuffer cap automatically.
+        stride:              capture every Nth step (1 = all intermediate frames).
+
+    Returns:
+        uint8 array [T, render_size, render_size, 3], T = 1 + n_timesteps // stride.
+    """
+    if n_timesteps is None:
+        n_timesteps = _CFG_N_TIMESTEPS
+    if lighting is None:
+        lighting = _DEFAULT_LIGHTING
+
+    mass = float(initial_physics_row[13])
+    x_accel = float(initial_physics_row[15])
+
+    model, data, body_id, qvel_offset = _build_scene_model(
+        shape_configs, initial_physics_row, pillar_gray, lighting, offscreen=render_size
+    )
+
+    renderer = mujoco.Renderer(model, height=render_size, width=render_size)
+    frames = []
+    try:
+        renderer.update_scene(data, camera="scene_cam")
+        frames.append(renderer.render().copy())  # t=0
+        for t in range(n_timesteps):
+            data.xfrc_applied[body_id, 0] = x_accel * mass
+            mujoco.mj_step(model, data)
+            data.xfrc_applied[body_id, 0] = 0.0
+            if (t + 1) % stride == 0:
+                renderer.update_scene(data, camera="scene_cam")
+                frames.append(renderer.render().copy())
+    finally:
+        del renderer
+
+    return np.stack(frames)

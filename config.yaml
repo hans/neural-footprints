@@ -74,3 +74,15 @@ pp_softmax:
   min_epochs: 60
   lr: 3.0e-3
   batch_size: 64
+
+# Scene animation rendering (optional pipeline step; NOT part of `rule all`).
+# Renders a random sample of scenes as mp4s through all intermediate physics
+# frames, for slide decks. Run with `uv run snakemake -j1 animations`.
+animation_n_scenes: 16        # random sample size
+animation_seed: 7             # reproducible sampling
+animation_resolution: 384     # native render px per frame (square; <=480 avoids offscreen-cap bump)
+animation_fps: 30
+animation_stride: 1           # render every Nth timestep (1 = all intermediate frames)
+animation_grid_cols: 4        # montage columns (rows derived from sample size)
+animation_montage_decimate: 2 # integer downscale factor for montage cells (384 -> 192px)
+animation_loop_seconds: 30        # target duration (s) of the looped *_loop.mp4 variants

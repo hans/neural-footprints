@@ -40,3 +40,13 @@ pp_softmax:
   min_epochs: 5
   lr: 1.0e-3
   batch_size: 32
+
+# Scene animation rendering (optional; see config.yaml for docs).
+animation_n_scenes: 4
+animation_seed: 7
+animation_resolution: 256
+animation_fps: 30
+animation_stride: 2
+animation_grid_cols: 2
+animation_montage_decimate: 2
+animation_loop_seconds: 6        # target duration (s) of the looped *_loop.mp4 variants
