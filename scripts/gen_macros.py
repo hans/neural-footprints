@@ -11,6 +11,7 @@ encoding = load_results(snakemake.input.encoding)
 rsa = load_results(snakemake.input.rsa)
 dynamics = load_results(snakemake.input.dynamics)
 pca = load_results(snakemake.input.pca)
+residualized_pca = load_results(snakemake.input.residualized_pca)
 config = snakemake.config
 
 # --- helpers ---
@@ -147,6 +148,27 @@ for k, acc in zip(pc_counts, decode_accs):
         add("pcaDecodeThresholdAcc", pct(acc))
         add("pcaDecodeThresholdVar", pct(cumvar[k - 1]))
         break
+
+# --- residualized PCA (motion decodability is a render confound) ---
+# All-PC motion-direction decoding accuracy per residualization condition.
+_resid_pca_macros = [
+    ("raw", "pcaMotionRawAllPC"),
+    ("resid_X", "pcaMotionResidXAllPC"),
+    ("resid_XS", "pcaMotionResidXSAllPC"),
+    ("pixel", "pcaMotionPixelAllPC"),
+]
+for cond, latex_name in _resid_pca_macros:
+    block = residualized_pca.get(cond)
+    if block is None:
+        continue
+    motion_accs = block["decode_accs_per_target"]["motion_dir"]
+    add(latex_name, pct(motion_accs[-1]))
+
+if "residual_variance_fraction_XS" in residualized_pca:
+    add(
+        "pcaResidVarKeptXS",
+        pct(residualized_pca["residual_variance_fraction_XS"]),
+    )
 
 # --- evaluation summary ---
 evaluation = load_results(snakemake.input.evaluation)

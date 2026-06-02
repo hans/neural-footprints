@@ -29,6 +29,7 @@ def evaluate(
     pp_results=None,
     dynamics_results=None,
     residual_results=None,
+    residualized_pca_results=None,
 ):
     """Run all checks and print colored evaluation report. Returns (n_passed, n_total)."""
 
@@ -213,6 +214,57 @@ def evaluate(
                 r2_PinfgXS < 0.01,
                 f"R² = {r2_PinfgXS:.4f}",
                 "expect < 0.01 KEY",
+            )
+
+    # --- Residualized PCA (motion decodability is a render confound) ---
+    if residualized_pca_results is not None:
+        lines.append(f"\n{BOLD}Residualized PCA{RESET}")
+
+        def _all_pc(cond, target="motion_dir"):
+            block = residualized_pca_results[cond]
+            acc = float(block["decode_accs_per_target"][target][-1])
+            hi = float(block["chance_per_target"][target]["hi"][-1])
+            return acc, hi
+
+        if "raw" in residualized_pca_results:
+            acc, hi = _all_pc("raw")
+            check(
+                "Motion decodable from raw neural PCs (phenomenon exists)",
+                acc > hi,
+                f"acc = {acc:.1%} (null ≤ {hi:.1%})",
+                "expect above permutation null",
+            )
+        if "resid_XS" in residualized_pca_results:
+            acc, hi = _all_pc("resid_XS")
+            check(
+                "KEY: motion collapses to chance after X+S residualization",
+                acc <= hi,
+                f"acc = {acc:.1%} (null ≤ {hi:.1%})",
+                "expect within permutation null KEY",
+            )
+        elif "resid_X" in residualized_pca_results:
+            acc, hi = _all_pc("resid_X")
+            check(
+                "KEY: motion collapses to chance after X residualization",
+                acc <= hi,
+                f"acc = {acc:.1%} (null ≤ {hi:.1%})",
+                "expect within permutation null KEY",
+            )
+        if "pixel" in residualized_pca_results:
+            acc, hi = _all_pc("pixel")
+            check(
+                "Positive control: motion decodable from pixel PCs (renders carry motion)",
+                acc > hi,
+                f"acc = {acc:.1%} (null ≤ {hi:.1%})",
+                "expect above permutation null",
+            )
+        var_x = residualized_pca_results.get("residual_variance_fraction_X")
+        if var_x is not None:
+            check(
+                "Neural retains non-degenerate variance after X-residualization",
+                0.0 < float(var_x) < 1.0,
+                f"var kept = {float(var_x):.4f}",
+                "expect in (0, 1)",
             )
 
     # --- RSA ---

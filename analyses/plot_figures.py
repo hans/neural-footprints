@@ -940,6 +940,94 @@ def plot_residual(plot_data, fig_dir="figures"):
         plt.close()
 
 
+# Condition styling for the residualized-PCA motion decoding figure.
+RESIDUALIZED_PCA_STYLE = [
+    ("raw", "Neural (raw)", "physics", "-"),
+    ("resid_X", "Neural | X-residual", "control", "--"),
+    ("resid_XS", "Neural | X+S-residual", "neutral", ":"),
+    ("pixel", "Pixels (positive control)", "sensory", "-"),
+]
+
+
+def plot_residualized_pca(plot_data, fig_dir="figures"):
+    """Motion decodability across residualization conditions.
+
+    Shows that motion decoding from neural PCs (which rises with #PCs) collapses
+    to chance once the pixel-explainable component is regressed out, while a
+    direct pixel-PC decode stays high — i.e. the decodability was a render
+    confound. See analyses/residualized_pca.py.
+    """
+    keys = plot_data.files if hasattr(plot_data, "files") else plot_data
+    present = [c for (c, _, _, _) in RESIDUALIZED_PCA_STYLE
+               if f"decode__{c}__motion_dir" in keys]
+
+    with paper_style():
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(FULL_WIDTH, 2.4))
+
+        # Panel A: motion decoding vs #PCs, one curve per condition.
+        # Reference chance band from the raw-neural permutation null.
+        if "chance_lo__raw__motion_dir" in keys:
+            ax1.fill_between(
+                plot_data["pc_counts__raw"],
+                plot_data["chance_lo__raw__motion_dir"],
+                plot_data["chance_hi__raw__motion_dir"],
+                color="gray",
+                alpha=0.15,
+                linewidth=0,
+                label="Chance (null)",
+            )
+        for cond, label, color_key, linestyle in RESIDUALIZED_PCA_STYLE:
+            key = f"decode__{cond}__motion_dir"
+            if key not in keys:
+                continue
+            ax1.plot(
+                plot_data[f"pc_counts__{cond}"],
+                plot_data[key],
+                marker="o",
+                markersize=3,
+                color=COLORS[color_key],
+                linestyle=linestyle,
+                label=label,
+            )
+        ax1.set_xscale("log")
+        ax1.set_ylim(0.4, 1.02)
+        ax1.yaxis.set_major_formatter(mticker.PercentFormatter(xmax=1.0))
+        ax1.set_xlabel("Number of principal components")
+        ax1.set_ylabel("Motion decoding accuracy")
+        ax1.set_title("Motion decodability is a render confound")
+        ax1.legend(loc="upper left", frameon=False, fontsize=5)
+
+        # Panel B: all-PC motion accuracy per condition (headline bars).
+        labels, means, bar_colors = [], [], []
+        for cond, label, color_key, _ in RESIDUALIZED_PCA_STYLE:
+            key = f"decode__{cond}__motion_dir"
+            if key not in keys:
+                continue
+            labels.append(label.replace(" ", "\n"))
+            means.append(float(plot_data[key][-1]))
+            bar_colors.append(COLORS[color_key])
+        bars = ax2.bar(labels, means, color=bar_colors, width=0.6)
+        ax2.axhline(0.5, color="gray", linestyle="--", linewidth=0.6, label="Chance")
+        ax2.set_ylim(0.4, 1.02)
+        ax2.yaxis.set_major_formatter(mticker.PercentFormatter(xmax=1.0))
+        ax2.set_ylabel("Motion accuracy (all PCs)")
+        ax2.set_title("All-PC motion decoding")
+        for bar, val in zip(bars, means):
+            ax2.text(
+                bar.get_x() + bar.get_width() / 2,
+                bar.get_height() + 0.005,
+                f"{val:.1%}",
+                ha="center",
+                va="bottom",
+                fontsize=6,
+            )
+
+        plt.tight_layout()
+        fig_path = f"{fig_dir}/residualized_pca.pdf"
+        plt.savefig(fig_path)
+        plt.close()
+
+
 def plot_pp(plot_data, fig_dir="figures"):
     """Bar charts summarizing the predictive processing analysis."""
     prior_r2 = float(plot_data["prior_r2"])

@@ -44,12 +44,17 @@ if hasattr(snakemake.input, "residual"):
         if key in residual_results and residual_results[key] is not None:
             residual_results[key] = np.array(residual_results[key])
 
+residualized_pca_results = None
+if hasattr(snakemake.input, "residualized_pca"):
+    residualized_pca_results = load_results(snakemake.input.residualized_pca)
+
 n_passed, n_total, checks = evaluate(
     encoding,
     rsa,
     dissociation,
     dynamics_results=dynamics,
     residual_results=residual_results,
+    residualized_pca_results=residualized_pca_results,
 )
 
 save_results(

@@ -34,6 +34,75 @@ def _build_targets(scenes):
     }
 
 
+def _pc_counts_for(n_components):
+    """Standard log-spaced PC counts used by the decoding sweeps."""
+    counts = sorted(set(list(range(1, 11)) + [15, 25, 50, 100, 200, n_components]))
+    return [k for k in counts if k <= n_components]
+
+
+def _decode_pc_sweep(
+    feature_matrix, targets, *, n_permutations=50, compute_null=True, random_state=0
+):
+    """StandardScaler -> PCA -> LogisticRegressionCV decode of each target from
+    the top-k PCs, with an optional permutation null.
+
+    Returns (pc_counts, cumulative_variance, decode_accs_per_target,
+    chance_per_target). The PCA basis is that of ``feature_matrix`` itself, so
+    callers pass raw neural activity, residualized neural activity, or pixel
+    features depending on the condition they want to characterise.
+    """
+    n_components = feature_matrix.shape[1]
+    scaled = StandardScaler().fit_transform(feature_matrix)
+    pca = PCA(n_components=n_components, random_state=42)
+    scores_pca = pca.fit_transform(scaled)
+    cumvar = np.cumsum(pca.explained_variance_ratio_)
+
+    pc_counts = _pc_counts_for(n_components)
+
+    decode_accs_per_target = {}
+    chance_per_target = {}
+    rng = np.random.default_rng(random_state)
+    for name, y in targets.items():
+        print(f"  Decoding '{name}':")
+        accs = []
+        for k in pc_counts:
+            acc = cross_val_score(
+                LogisticRegressionCV(cv=5, max_iter=1000, random_state=42),
+                scores_pca[:, :k],
+                y,
+                cv=5,
+                scoring="accuracy",
+            ).mean()
+            accs.append(acc)
+            print(f"    Top {k:>3d} PCs: accuracy = {acc:.2%}")
+        decode_accs_per_target[name] = accs
+
+        if compute_null:
+            print(f"    Computing null for '{name}' ({n_permutations} shuffles)...")
+            perm_accs = np.zeros((len(pc_counts), n_permutations))
+            for p in range(n_permutations):
+                shuffled = rng.permutation(y)
+                for i, k in enumerate(pc_counts):
+                    perm_accs[i, p] = cross_val_score(
+                        LogisticRegressionCV(cv=5, max_iter=1000, random_state=42),
+                        scores_pca[:, :k],
+                        shuffled,
+                        cv=5,
+                        scoring="accuracy",
+                    ).mean()
+            chance_per_target[name] = {
+                "lo": np.percentile(perm_accs, 2.5, axis=1).tolist(),
+                "hi": np.percentile(perm_accs, 97.5, axis=1).tolist(),
+            }
+        else:
+            chance_per_target[name] = {
+                "lo": [0.5] * len(pc_counts),
+                "hi": [0.5] * len(pc_counts),
+            }
+
+    return pc_counts, cumvar, scores_pca, decode_accs_per_target, chance_per_target
+
+
 def run_pca_analysis(
     neural_activity, scenes, neural_meta, n_permutations=50, compute_null=True
 ):
@@ -48,55 +117,14 @@ def run_pca_analysis(
         n_pos = int(y.sum())
         print(f"  {name}: {n_scenes - n_pos} class-0 / {n_pos} class-1")
 
-    neural_scaled = StandardScaler().fit_transform(neural_activity)
-    pca = PCA(n_components=n_neurons, random_state=42)
-    neural_pca = pca.fit_transform(neural_scaled)
-    cumvar = np.cumsum(pca.explained_variance_ratio_)
-
-    pc_counts = sorted(set(list(range(1, 11)) + [15, 25, 50, 100, 200, n_neurons]))
-    pc_counts = [k for k in pc_counts if k <= n_neurons]
-
-    decode_accs_per_target = {}
-    chance_per_target = {}
-    rng = np.random.default_rng(0)
-    for name, y in targets.items():
-        print(f"  Decoding '{name}':")
-        accs = []
-        for k in pc_counts:
-            scores = cross_val_score(
-                LogisticRegressionCV(cv=5, max_iter=1000, random_state=42),
-                neural_pca[:, :k],
-                y,
-                cv=5,
-                scoring="accuracy",
-            )
-            acc = scores.mean()
-            accs.append(acc)
-            print(f"    Top {k:>3d} PCs: accuracy = {acc:.2%}")
-        decode_accs_per_target[name] = accs
-
-        if compute_null:
-            print(f"    Computing null for '{name}' ({n_permutations} shuffles)...")
-            perm_accs = np.zeros((len(pc_counts), n_permutations))
-            for p in range(n_permutations):
-                shuffled = rng.permutation(y)
-                for i, k in enumerate(pc_counts):
-                    perm_accs[i, p] = cross_val_score(
-                        LogisticRegressionCV(cv=5, max_iter=1000, random_state=42),
-                        neural_pca[:, :k],
-                        shuffled,
-                        cv=5,
-                        scoring="accuracy",
-                    ).mean()
-            chance_per_target[name] = {
-                "lo": np.percentile(perm_accs, 2.5, axis=1).tolist(),
-                "hi": np.percentile(perm_accs, 97.5, axis=1).tolist(),
-            }
-        else:
-            chance_per_target[name] = {
-                "lo": [0.5] * len(pc_counts),
-                "hi": [0.5] * len(pc_counts),
-            }
+    pc_counts, cumvar, neural_pca, decode_accs_per_target, chance_per_target = (
+        _decode_pc_sweep(
+            neural_activity,
+            targets,
+            n_permutations=n_permutations,
+            compute_null=compute_null,
+        )
+    )
 
     motion_dir = targets["motion_dir"]
 
