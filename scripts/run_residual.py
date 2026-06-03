@@ -42,6 +42,8 @@ results = run_residual_analysis(
     raw_pixel_pca=raw_pixel_pca,
     predicted_pixel_pca=predicted_pixel_pca,
     inferred_physics_labels=inferred_physics_labels,
+    compute_null=cfg.get("residual_compute_null", True),
+    n_null_permutations=cfg.get("residual_n_null_permutations", 300),
 )
 save_results(results, snakemake.output.results)
 

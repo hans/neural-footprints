@@ -182,6 +182,31 @@ def evaluate(
     # --- Residualization ---
     if residual_results is not None:
         lines.append(f"\n{BOLD}Residualization{RESET}")
+        def _residual_null_check(prefix, label, key_test=False):
+            """Matched-null significance check for a residualization R².
+
+            PASS iff observed is significantly ABOVE its own matched permutation
+            null (p < 0.05) — i.e. physics genuinely survives residualization.
+            For the KEY collapse conditions a PASS is the bad-news outcome.
+            """
+            pkey = f"null_{prefix}_pvalue"
+            if residual_results.get(pkey) is None:
+                return
+            pval = float(residual_results[pkey])
+            lo = float(residual_results[f"null_{prefix}_ci_lo"])
+            hi = float(residual_results[f"null_{prefix}_ci_hi"])
+            help_txt = (
+                "PASS here means physics genuinely survives beyond X+S (bad news)"
+                if key_test
+                else "PASS iff p < 0.05 one-sided vs matched permutation null"
+            )
+            check(
+                f"{label} significantly above matched null (p < 0.05)",
+                pval < 0.05,
+                f"p = {pval:.3f}, null95% = [{lo:+.4f}, {hi:+.4f}]",
+                help_txt,
+            )
+
         if residual_results.get("r2_P_given_X") is not None:
             r2_PgX = float(np.asarray(residual_results["r2_P_given_X"]).mean())
             check(
@@ -190,6 +215,7 @@ def evaluate(
                 f"R² = {r2_PgX:.4f}",
                 "expect > 0.01",
             )
+            _residual_null_check("r2_P_given_X", "r2_P | X")
         if residual_results.get("r2_P_given_XS") is not None:
             r2_PgXS = float(np.asarray(residual_results["r2_P_given_XS"]).mean())
             check(
@@ -198,6 +224,7 @@ def evaluate(
                 f"R² = {r2_PgXS:.4f}",
                 "expect < 0.01 KEY",
             )
+            _residual_null_check("r2_P_given_XS", "r2_P | X,S", key_test=True)
         # Inferred-physics parallel checks (same thresholds as GT)
         if residual_results.get("r2_P_inf_given_X") is not None:
             r2_PinfgX = float(np.asarray(residual_results["r2_P_inf_given_X"]).mean())
@@ -207,6 +234,7 @@ def evaluate(
                 f"R² = {r2_PinfgX:.4f}",
                 "expect > 0.01 (same threshold as GT; asymmetry is the finding)",
             )
+            _residual_null_check("r2_P_inf_given_X", "r2_P_inf | X")
         if residual_results.get("r2_P_inf_given_XS") is not None:
             r2_PinfgXS = float(np.asarray(residual_results["r2_P_inf_given_XS"]).mean())
             check(
@@ -215,6 +243,7 @@ def evaluate(
                 f"R² = {r2_PinfgXS:.4f}",
                 "expect < 0.01 KEY",
             )
+            _residual_null_check("r2_P_inf_given_XS", "r2_P_inf | X,S", key_test=True)
 
     # --- Residualized PCA (motion decodability is a render confound) ---
     if residualized_pca_results is not None:

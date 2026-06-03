@@ -32,6 +32,12 @@ pixel_pca_dim: 500
 encoding_compute_null: true
 encoding_n_null_permutations: 300
 
+# Residualization analysis: matched permutation null on the residual R²s.
+# Stage-1 residuals are fixed; shuffles physics through the stage-2 decoder so
+# each r2_P|X / r2_P|X,S gets its own chance band (its proper reference).
+residual_compute_null: true
+residual_n_null_permutations: 500
+
 behavioral_pca_dim: 0.90
 dynamics_pca_dim: 50
 behavioral_objective: "next_frame_pixels"
