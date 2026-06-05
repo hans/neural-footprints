@@ -88,9 +88,9 @@ animation_n_scenes: 4         # random sample size
 animation_seed: 7             # reproducible sampling
 animation_resolution: 384     # native render px per frame (square; <=480 avoids offscreen-cap bump)
 animation_fps: 30
-animation_stride: 3           # render every Nth timestep (3 = 3× faster apparent motion)
+animation_stride: 8           # render every Nth timestep (compress longer run into same clip)
 animation_grid_cols: 2        # montage columns (rows derived from sample size)
 animation_montage_decimate: 2 # integer downscale factor for montage cells (384 -> 192px)
 animation_loop_seconds: 30    # target duration (s) of the looped *_loop.mp4 variants
-animation_camera_fov: 60      # animation-only FOV (narrower than global 90°; zooms in on object)
-animation_n_timesteps: 360    # simulate 3× the model's 120-step window for visible motion
+animation_camera_fov: 75      # animation-only FOV (slightly narrower than global 90°)
+animation_n_timesteps: 960    # simulate 8× the model's 120-step window; stride=8 compresses to same frame count
