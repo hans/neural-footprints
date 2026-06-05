@@ -84,6 +84,8 @@ stride = int(cfg["animation_stride"])
 cols = int(cfg["animation_grid_cols"])
 decimate = int(cfg["animation_montage_decimate"])
 loop_seconds = int(cfg["animation_loop_seconds"])
+camera_fov = cfg.get("animation_camera_fov", cfg.get("camera_fov", 90))
+anim_n_timesteps = cfg.get("animation_n_timesteps", None)
 
 scene_configs = scenes["scene_configs"]
 initial_physics = scenes["initial_physics_labels"]
@@ -112,6 +114,8 @@ for i in idx:
         lighting=lightings[i],
         render_size=res,
         stride=stride,
+        n_timesteps=anim_n_timesteps,
+        camera_fov=camera_fov,
     )
     reps = _reps_for_duration(frames.shape[0], fps, loop_seconds)
     path = os.path.join(out_dir, f"scene_{int(i):04d}.mp4")

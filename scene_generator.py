@@ -666,6 +666,7 @@ def _build_scene_model(
     pillar_gray,
     lighting,
     offscreen=None,
+    camera_fov=None,
 ):
     """Rebuild and compile the MjModel/MjData for a stored scene.
 
@@ -744,7 +745,7 @@ def _build_scene_model(
     cam.name = "scene_cam"
     cam.pos = eye
     cam.quat = _look_at_quat(eye, target_pt)
-    cam.fovy = _CFG_CAMERA_FOV
+    cam.fovy = camera_fov if camera_fov is not None else _CFG_CAMERA_FOV
 
     # Background spheres (visual only) — must match _build_mjspec order
     bg_objects = lighting.get("backgroundObjects", [])
@@ -934,6 +935,7 @@ def render_scene_frames(
     lighting=None,
     render_size=384,
     stride=1,
+    camera_fov=None,
 ):
     """Re-simulate a stored scene and render RGB at every captured timestep.
 
@@ -963,7 +965,8 @@ def render_scene_frames(
     x_accel = float(initial_physics_row[15])
 
     model, data, body_id, qvel_offset = _build_scene_model(
-        shape_configs, initial_physics_row, pillar_gray, lighting, offscreen=render_size
+        shape_configs, initial_physics_row, pillar_gray, lighting,
+        offscreen=render_size, camera_fov=camera_fov,
     )
 
     renderer = mujoco.Renderer(model, height=render_size, width=render_size)

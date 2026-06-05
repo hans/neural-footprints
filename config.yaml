@@ -84,11 +84,13 @@ pp_softmax:
 # Scene animation rendering (optional pipeline step; NOT part of `rule all`).
 # Renders a random sample of scenes as mp4s through all intermediate physics
 # frames, for slide decks. Run with `uv run snakemake -j1 animations`.
-animation_n_scenes: 16        # random sample size
+animation_n_scenes: 4         # random sample size
 animation_seed: 7             # reproducible sampling
 animation_resolution: 384     # native render px per frame (square; <=480 avoids offscreen-cap bump)
 animation_fps: 30
-animation_stride: 1           # render every Nth timestep (1 = all intermediate frames)
-animation_grid_cols: 4        # montage columns (rows derived from sample size)
+animation_stride: 3           # render every Nth timestep (3 = 3× faster apparent motion)
+animation_grid_cols: 2        # montage columns (rows derived from sample size)
 animation_montage_decimate: 2 # integer downscale factor for montage cells (384 -> 192px)
-animation_loop_seconds: 30        # target duration (s) of the looped *_loop.mp4 variants
+animation_loop_seconds: 30    # target duration (s) of the looped *_loop.mp4 variants
+animation_camera_fov: 60      # animation-only FOV (narrower than global 90°; zooms in on object)
+animation_n_timesteps: 360    # simulate 3× the model's 120-step window for visible motion
