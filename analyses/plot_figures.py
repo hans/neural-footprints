@@ -54,6 +54,182 @@ def _draw_null_marker(ax, bar, null_ci, *, label=None):
     return proxy
 
 
+def plot_encoding_bars(plot_data, fig_dir="figures"):
+    """Five encoding bar plots focused on inferred-physics variance partitioning.
+
+    Requires r2_P_inf and delta_P_inf_given_X in plot_data (produced when
+    run_encoding.py has inferred_physics_labels). Silently skips if absent.
+    """
+    keys = plot_data.files if hasattr(plot_data, "files") else plot_data
+    if "r2_P_inf" not in keys:
+        return
+
+    r2_X = plot_data["r2_X"]
+    r2_P_inf = plot_data["r2_P_inf"]
+    delta_P_inf = plot_data["delta_P_inf_given_X"]
+    n_neurons = len(r2_X)
+    sem = lambda x: float(x.std() / np.sqrt(n_neurons))
+
+    mean_r2_X = float(r2_X.mean())
+    mean_r2_P_inf = float(r2_P_inf.mean())
+    mean_delta = float(delta_P_inf.mean())
+
+    # Per-perm null means (n_perms,) derived from raw null arrays
+    r2_P_inf_null_means = delta_null_means = None
+    r2_P_inf_null_ci = delta_null_ci = None
+
+    if "r2_P_inf_null" in keys:
+        r2_P_inf_null = plot_data["r2_P_inf_null"]  # (n_perms, n_neurons)
+        r2_P_inf_null_means = r2_P_inf_null.mean(axis=1)
+        r2_P_inf_null_ci = np.percentile(r2_P_inf_null_means, [2.5, 97.5])
+
+    if "delta_P_inf_given_X_null" in keys:
+        delta_P_inf_null = plot_data["delta_P_inf_given_X_null"]
+        delta_null_means = delta_P_inf_null.mean(axis=1)
+        delta_null_ci = np.percentile(delta_null_means, [2.5, 97.5])
+
+    bar_w = 0.5
+    null_color = "#888888"
+
+    def _bar_label(ax, bar, val, fmt="{:.3f}"):
+        ylo, yhi = ax.get_ylim()
+        ax.text(
+            bar.get_x() + bar.get_width() / 2,
+            bar.get_height() + 0.005 * (yhi - ylo),
+            fmt.format(val),
+            ha="center", va="bottom", fontweight="bold",
+        )
+
+    # --- Plot 1: r2_X vs r2_P_inf with permutation null ---
+    with paper_style():
+        fig, ax = plt.subplots(figsize=(COL_WIDTH * 0.65, 2.0))
+        labels = [LABEL_SENSORY, "Inferred\nphysics"]
+        heights = [mean_r2_X, mean_r2_P_inf]
+        errs = [sem(r2_X), sem(r2_P_inf)]
+        colors = [COLORS["sensory"], COLORS["control"]]
+        bars = ax.bar(labels, heights, yerr=errs, color=colors, capsize=3, width=bar_w)
+        if r2_P_inf_null_ci is not None:
+            null_ci_full = (
+                float(r2_P_inf_null_ci[0]),
+                float(r2_P_inf_null_means.mean()),
+                float(r2_P_inf_null_ci[1]),
+            )
+            _draw_null_marker(ax, bars[1], null_ci_full, label="Permutation null")
+            ax.legend(loc="upper right", frameon=False, fontsize=5, handlelength=1.5)
+        ax.set_ylabel("Mean R²")
+        ax.set_title("Encoding R²: sensory vs. inferred physics")
+        ax.set_ylim(0, max(heights) * 1.18)
+        for bar, val in zip(bars, heights):
+            _bar_label(ax, bar, val)
+        plt.tight_layout()
+        plt.savefig(f"{fig_dir}/encoding_r2_physics_null.pdf")
+        plt.close()
+
+    # --- Plot 2: r2_X vs delta_P_inf (unique inferred physics) ---
+    with paper_style():
+        fig, ax = plt.subplots(figsize=(COL_WIDTH * 0.65, 2.0))
+        labels = [LABEL_SENSORY, "Unique\ninferred physics"]
+        heights = [mean_r2_X, mean_delta]
+        errs = [sem(r2_X), sem(delta_P_inf)]
+        colors = [COLORS["sensory"], COLORS["control"]]
+        bars = ax.bar(labels, heights, yerr=errs, color=colors, capsize=3, width=bar_w)
+        ax.set_ylabel("Mean R²")
+        ax.set_title("R²: sensory vs. unique inferred physics")
+        ax.set_ylim(0, max(heights) * 1.18)
+        for bar, val in zip(bars, heights):
+            _bar_label(ax, bar, val)
+        plt.tight_layout()
+        plt.savefig(f"{fig_dir}/encoding_r2_unique_physics.pdf")
+        plt.close()
+
+    # --- Plot 3: unique inferred physics zoomed in, with null axhspan ---
+    with paper_style():
+        fig, ax = plt.subplots(figsize=(COL_WIDTH * 0.5, 2.0))
+        ax.bar(
+            ["Unique\ninferred physics"],
+            [mean_delta],
+            yerr=[sem(delta_P_inf)],
+            color=COLORS["control"],
+            capsize=3,
+            width=bar_w,
+            zorder=3,
+        )
+        if delta_null_ci is not None:
+            lo, hi = float(delta_null_ci[0]), float(delta_null_ci[1])
+            ax.axhspan(lo, hi, color=null_color, alpha=0.20, label="Null 95% CI", zorder=0)
+            ax.axhline(
+                float(delta_null_means.mean()),
+                color=null_color, linewidth=0.8, linestyle="--", zorder=1,
+            )
+            ax.legend(loc="upper right", frameon=False, fontsize=5)
+            pad = abs(hi - lo) * 0.8
+            y_lo = min(lo, 0, mean_delta) - pad
+            y_hi = max(hi, mean_delta + sem(delta_P_inf)) + pad * 3
+            ax.set_ylim(y_lo, y_hi)
+        ax.axhline(0, color="gray", linewidth=0.5, linestyle=":")
+        ax.set_ylabel("Mean ΔR²")
+        ax.set_title("Unique inferred-physics R²\nvs. permutation null")
+        ax.text(
+            0, mean_delta + sem(delta_P_inf) * 1.5,
+            f"{mean_delta:.2e}", ha="center", va="bottom", fontsize=6,
+        )
+        plt.tight_layout()
+        plt.savefig(f"{fig_dir}/encoding_r2_unique_physics_zoomed.pdf")
+        plt.close()
+
+    # --- Plot 4: density of r2_P_inf null + observed ---
+    if r2_P_inf_null_means is not None:
+        with paper_style():
+            fig, ax = plt.subplots(figsize=(COL_WIDTH, 1.9))
+            ax.hist(
+                r2_P_inf_null_means,
+                bins=12,
+                color=null_color,
+                alpha=0.65,
+                density=True,
+                label="Null distribution",
+            )
+            ax.axvline(
+                mean_r2_P_inf,
+                color=COLORS["control"],
+                linewidth=1.2,
+                label=f"Observed = {mean_r2_P_inf:.3f}",
+            )
+            ax.set_xlabel("Mean R² per permutation")
+            ax.set_ylabel("Density")
+            ax.set_title("Null distribution: R²(Pᴵⁿᶠ)")
+            ax.legend(frameon=False, fontsize=5)
+            plt.tight_layout()
+            plt.savefig(f"{fig_dir}/encoding_null_r2_physics_density.pdf")
+            plt.close()
+
+    # --- Plot 5: density of delta_P_inf null + observed ---
+    if delta_null_means is not None:
+        with paper_style():
+            fig, ax = plt.subplots(figsize=(COL_WIDTH, 1.9))
+            ax.hist(
+                delta_null_means,
+                bins=12,
+                color=null_color,
+                alpha=0.65,
+                density=True,
+                label="Null distribution",
+            )
+            ax.axvline(
+                mean_delta,
+                color=COLORS["control"],
+                linewidth=1.2,
+                label=f"Observed = {mean_delta:.2e}",
+            )
+            ax.set_xlabel("Mean ΔR² per permutation")
+            ax.set_ylabel("Density")
+            ax.set_title("Null distribution: unique R²(Pᴵⁿᶠ)")
+            ax.legend(frameon=False, fontsize=5)
+            plt.tight_layout()
+            plt.savefig(f"{fig_dir}/encoding_null_delta_density.pdf")
+            plt.close()
+
+
 def plot_encoding(plot_data, fig_dir="figures"):
     r2_pixel_only = plot_data["r2_pixel_only"]
     r2_combined = plot_data["r2_combined"]
@@ -83,11 +259,11 @@ def plot_encoding(plot_data, fig_dir="figures"):
             r2_combined.std() / np.sqrt(n_neurons),
         ]
         bar_colors = [COLORS["sensory"], COLORS["physics"]]
-        if has_predicted:
-            bar_labels.append("Predicted S")
-            bar_heights.append(float(r2_predicted.mean()))
-            bar_errs.append(float(r2_predicted.std() / np.sqrt(n_neurons)))
-            bar_colors.append(COLORS["control"])
+        # if has_predicted:
+        #     bar_labels.append("Predicted S")
+        #     bar_heights.append(float(r2_predicted.mean()))
+        #     bar_errs.append(float(r2_predicted.std() / np.sqrt(n_neurons)))
+        #     bar_colors.append(COLORS["control"])
         ax.bar(
             bar_labels,
             bar_heights,
@@ -311,14 +487,14 @@ def plot_dissociation(plot_data, fig_dir="figures"):
         behav_colors = [COLORS["sensory"], COLORS["physics"]]
         behav_labels = [LABEL_SENSORY, LABEL_PHYSICS]
         behav_heights = [pixel_score, physics_score]
-        if has_predicted:
-            r2_colors.append("#E67E22")
-            r2_labels.append("Predicted S")
-            r2_heights.append(mean_r2_predicted)
-            r2_errs.append(r2_predicted.std() / np.sqrt(n_neurons))
-            behav_colors.append("#E67E22")
-            behav_labels.append("Predicted S")
-            behav_heights.append(predicted_score)
+        # if has_predicted:
+        #     r2_colors.append("#E67E22")
+        #     r2_labels.append("Predicted S")
+        #     r2_heights.append(mean_r2_predicted)
+        #     r2_errs.append(r2_predicted.std() / np.sqrt(n_neurons))
+        #     behav_colors.append("#E67E22")
+        #     behav_labels.append("Predicted S")
+        #     behav_heights.append(predicted_score)
         if has_inferred:
             # Inferred physics has no separate neural R² in dissociation data
             # (it's the injected feature; neural R² lives in PP analysis), so
@@ -336,20 +512,22 @@ def plot_dissociation(plot_data, fig_dir="figures"):
             yerr=r2_errs,
             capsize=3,
         )
-        ax1.set_ylabel("Neural R\u00b2")
+        ax1.set_ylabel("Neural\nR\u00b2", rotation=0, labelpad=20)
         ax1.set_title("Encoding performance")
-        _draw_null_marker(ax1, bars1[1], physics_null_ci, label="Permutation null")
-        if physics_null_ci is not None:
-            ax1.legend(
-                loc="center right",
-                frameon=False,
-                fontsize=5,
-                handlelength=1.5,
-                borderpad=0.2,
-            )
-            ymin, ymax = ax1.get_ylim()
-            if physics_null_ci[0] < ymin:
-                ax1.set_ylim(physics_null_ci[0] - 0.02 * (ymax - ymin), ymax)
+        print(physics_null_ci)
+        # ax1.axvspan(physics_null_ci[0], physics_null_ci[2], color="#222222", alpha=0.15)
+        # _draw_null_marker(ax1, bars1[1], physics_null_ci, label="Permutation null")
+        # if physics_null_ci is not None:
+        #     ax1.legend(
+        #         loc="center right",
+        #         frameon=False,
+        #         fontsize=5,
+        #         handlelength=1.5,
+        #         borderpad=0.2,
+        #     )
+        #     ymin, ymax = ax1.get_ylim()
+        #     if physics_null_ci[0] < ymin:
+        #         ax1.set_ylim(physics_null_ci[0] - 0.02 * (ymax - ymin), ymax)
         for bar, val in zip(bars1, r2_heights):
             ax1.text(
                 bar.get_x() + bar.get_width() / 2,
@@ -841,9 +1019,37 @@ def plot_residual(plot_data, fig_dir="figures"):
     with paper_style():
         fig, axes = plt.subplots(1, 2, figsize=(FULL_WIDTH, 2.4))
 
-        # Panel A: per-neuron scatter — X-residual vs X+S-residual physics R²
+        # Panel A: per-neuron scatter — raw R²(P) vs R²(P|X,S)
         ax = axes[0]
-        if has_XS:
+        if has_pre and has_XS:
+            x_vals, y_vals = r2_P_neural, r2_P_given_XS
+            ax.scatter(
+                x_vals,
+                y_vals,
+                s=6,
+                alpha=0.5,
+                color=COLORS["physics"],
+                edgecolors="none",
+            )
+            lo = float(min(x_vals.min(), y_vals.min()))
+            hi = float(max(x_vals.max(), y_vals.max()))
+            pad = 0.05 * (hi - lo if hi > lo else 1.0)
+            ax.plot(
+                [lo - pad, hi + pad],
+                [lo - pad, hi + pad],
+                color="gray",
+                linestyle="--",
+                linewidth=0.8,
+                label="y = x",
+            )
+            ax.axhline(0, color="gray", linestyle=":", linewidth=0.6)
+            ax.set_xlim(lo - pad, hi + pad)
+            ax.set_ylim(lo - pad, hi + pad)
+            ax.set_xlabel("R² (P, raw)")
+            ax.set_ylabel("R² (P | X+S-residual neural)")
+            ax.set_title("Physics collapses after removing X+S")
+            ax.legend(loc="upper left")
+        elif has_XS:
             ax.scatter(
                 r2_P_given_X,
                 r2_P_given_XS,
@@ -880,23 +1086,18 @@ def plot_residual(plot_data, fig_dir="figures"):
                 f"Physics R² after X-residualization\n(var kept={var_kept_X:.2f})"
             )
 
-        # Panel B: mean physics R² — raw → X-residual → X+S-residual
+        # Panel B: mean physics R² — R²(P|X), R²(P) raw, R²(P|X,S)
         ax = axes[1]
-        labels = []
-        means = []
-        sems = []
-        bar_colors = []
+        labels = ["R²(P|X)"]
+        means = [r2_P_given_X.mean()]
+        sems = [r2_P_given_X.std() / np.sqrt(n)]
+        bar_colors = [COLORS["sensory"]]
 
         if has_pre:
             labels.append("R²(P)")
             means.append(r2_P_neural.mean())
             sems.append(r2_P_neural.std() / np.sqrt(n))
             bar_colors.append(COLORS["physics"])
-
-        labels.append("R²(P|X)")
-        means.append(r2_P_given_X.mean())
-        sems.append(r2_P_given_X.std() / np.sqrt(n))
-        bar_colors.append(COLORS["sensory"])
 
         if has_XS:
             labels.append("R²(P|X,S)")
@@ -915,7 +1116,8 @@ def plot_residual(plot_data, fig_dir="figures"):
 
         title_parts = []
         if has_pre:
-            title_parts.append(f"R²(P)={means[0]:.4f}")
+            raw_mean = float(r2_P_neural.mean())
+            title_parts.append(f"R²(P)={raw_mean:.4f}")
         if has_XS:
             title_parts.append(f"var kept: X={var_kept_X:.2f}, XS={var_kept_XS:.2f}")
         else:
