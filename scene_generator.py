@@ -667,6 +667,7 @@ def _build_scene_model(
     lighting,
     offscreen=None,
     camera_fov=None,
+    gravity=None,
 ):
     """Rebuild and compile the MjModel/MjData for a stored scene.
 
@@ -689,7 +690,7 @@ def _build_scene_model(
 
     # Build spec (same as _build_mjspec but with fixed params from initial_physics_row)
     spec = mujoco.MjSpec()
-    spec.option.gravity = [0, 0, -9.81]
+    spec.option.gravity = [0, 0, -9.81] if gravity is None else list(gravity)
 
     sky_tex = spec.add_texture()
     sky_tex.name = "sky"
@@ -936,6 +937,7 @@ def render_scene_frames(
     render_size=384,
     stride=1,
     camera_fov=None,
+    gravity=None,
 ):
     """Re-simulate a stored scene and render RGB at every captured timestep.
 
@@ -966,7 +968,7 @@ def render_scene_frames(
 
     model, data, body_id, qvel_offset = _build_scene_model(
         shape_configs, initial_physics_row, pillar_gray, lighting,
-        offscreen=render_size, camera_fov=camera_fov,
+        offscreen=render_size, camera_fov=camera_fov, gravity=gravity,
     )
 
     renderer = mujoco.Renderer(model, height=render_size, width=render_size)

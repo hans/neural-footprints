@@ -92,5 +92,6 @@ animation_stride: 8           # render every Nth timestep (compress longer run i
 animation_grid_cols: 2        # montage columns (rows derived from sample size)
 animation_montage_decimate: 2 # integer downscale factor for montage cells (384 -> 192px)
 animation_loop_seconds: 30    # target duration (s) of the looped *_loop.mp4 variants
-animation_camera_fov: 75      # animation-only FOV (slightly narrower than global 90°)
+animation_camera_fov: 90      # animation-only FOV (match global; widen if still too narrow)
 animation_n_timesteps: 960    # simulate 8× the model's 120-step window; stride=8 compresses to same frame count
+animation_gravity: [0, 0, 0]  # zero gravity so objects fly indefinitely (floor/friction won't stop them)
