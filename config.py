@@ -23,6 +23,6 @@ PP_EARLY_FRAME = _cfg['pp_early_frame']
 PP_LATE_FRAME = _cfg['pp_late_frame']
 PP_DROPOUT_RATE = _cfg['pp_dropout_rate']
 
-CAMERA_FOV = _cfg['camera_fov']
+CAMERA_FOV = _cfg.get('camera_fov', 90)
 LINVEL_X_MAX = _cfg.get('linvel_x_max', 8.0)
 X_ACCEL_MAX = _cfg.get('x_accel_max', 15.0)

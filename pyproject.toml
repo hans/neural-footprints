@@ -12,3 +12,14 @@ dependencies = [
     "pyyaml",
     "seaborn>=0.13.2",
 ]
+
+[dependency-groups]
+dev = [
+    "hypothesis",
+    "pytest",
+]
+
+[tool.pytest.ini_options]
+markers = [
+    "slow: tests that exercise PyBullet end-to-end",
+]
