@@ -83,8 +83,8 @@ def plot_encoding_bars(plot_data, fig_dir="figures"):
         r2_P_inf_null_means = r2_P_inf_null.mean(axis=1)
         r2_P_inf_null_ci = np.percentile(r2_P_inf_null_means, [2.5, 97.5])
 
-    if "delta_P_inf_given_X_null" in keys:
-        delta_P_inf_null = plot_data["delta_P_inf_given_X_null"]
+    if "delta_P_inf_given_XS_null" in keys:
+        delta_P_inf_null = plot_data["delta_P_inf_given_XS_null"]
         delta_null_means = delta_P_inf_null.mean(axis=1)
         delta_null_ci = np.percentile(delta_null_means, [2.5, 97.5])
 

@@ -83,7 +83,8 @@ plot_kwargs = dict(
 for key in ("r2_S", "r2_XS", "r2_XPS", "delta_P_given_XS",
             "r2_P_inf", "r2_XP_inf", "delta_P_inf_given_X",
             "r2_XPS_inf", "delta_P_inf_given_XS",
-            "r2_P_inf_null", "delta_P_inf_given_X_null"):
+            "r2_P_inf_null", "delta_P_inf_given_X_null",
+            "delta_P_inf_given_XS_null"):
     if key in results:
         plot_kwargs[key] = results[key]
 np.savez_compressed(snakemake.output.plot_data, **plot_kwargs)
