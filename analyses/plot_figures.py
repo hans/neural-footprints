@@ -133,7 +133,7 @@ def plot_encoding_bars(plot_data, fig_dir="figures"):
         errs = [sem(r2_X), sem(delta_P_inf)]
         colors = [COLORS["sensory"], COLORS["control"]]
         bars = ax.bar(labels, heights, yerr=errs, color=colors, capsize=3, width=bar_w)
-        ax.set_ylabel("Mean R²")
+        ax.set_ylabel("Neural\nR²", rotation=0, labelpad=20)
         ax.set_title("R²: sensory vs. unique inferred physics")
         ax.set_ylim(0, max(heights) * 1.18)
         for bar, val in zip(bars, heights):
@@ -167,7 +167,7 @@ def plot_encoding_bars(plot_data, fig_dir="figures"):
             y_hi = max(hi, mean_delta + sem(delta_P_inf)) + pad * 3
             ax.set_ylim(y_lo, y_hi)
         ax.axhline(0, color="gray", linewidth=0.5, linestyle=":")
-        ax.set_ylabel("Mean ΔR²")
+        ax.set_ylabel("Neural\nΔR²", rotation=0, labelpad=20)
         ax.set_title("Unique inferred-physics R²\nvs. permutation null")
         ax.text(
             0, mean_delta + sem(delta_P_inf) * 1.5,
@@ -484,25 +484,13 @@ def plot_dissociation(plot_data, fig_dir="figures"):
             r2_pixel.std() / np.sqrt(n_neurons),
             r2_physics.std() / np.sqrt(n_neurons),
         ]
-        behav_colors = [COLORS["sensory"], COLORS["physics"]]
-        behav_labels = [LABEL_SENSORY, LABEL_PHYSICS]
-        behav_heights = [pixel_score, physics_score]
-        # if has_predicted:
-        #     r2_colors.append("#E67E22")
-        #     r2_labels.append("Predicted S")
-        #     r2_heights.append(mean_r2_predicted)
-        #     r2_errs.append(r2_predicted.std() / np.sqrt(n_neurons))
-        #     behav_colors.append("#E67E22")
-        #     behav_labels.append("Predicted S")
-        #     behav_heights.append(predicted_score)
-        if has_inferred:
-            # Inferred physics has no separate neural R² in dissociation data
-            # (it's the injected feature; neural R² lives in PP analysis), so
-            # the bar appears only on the behavioral panel — a hatched fill
-            # distinguishes it visually from the GT-physics oracle bar.
-            behav_colors.append(COLORS["physics"])
-            behav_labels.append("Physics\n(inferred)")
-            behav_heights.append(inferred_physics_score)
+        behav_colors = [COLORS["sensory"]]
+        behav_labels = [LABEL_SENSORY]
+        behav_heights = [pixel_score]
+
+        behav_colors.append(COLORS["physics"])
+        behav_labels.append(LABEL_PHYSICS)
+        behav_heights.append(inferred_physics_score if has_inferred else physics_score)
 
         bars1 = ax1.bar(
             r2_labels,
@@ -545,11 +533,6 @@ def plot_dissociation(plot_data, fig_dir="figures"):
             color=behav_colors,
             capsize=3,
         )
-        if has_inferred:
-            # Hatch the inferred-physics bar to distinguish it from the GT
-            # oracle (same color, different surface).
-            bars2[-1].set_hatch("//")
-            bars2[-1].set_edgecolor("white")
         if chance is not None:
             ax2.axhline(chance, color="gray", linestyle="--", alpha=0.5, label="Chance")
             ax2.set_ylim(0, 1.1)
@@ -800,7 +783,7 @@ def plot_dynamics(plot_data, fig_dir="figures"):
 # top), negative control (motion) last in physics red.
 PCA_TARGET_STYLE = [
     ("cam_height", "Camera height", "#6ACC65"),  # green
-    ("pillar_gray", "Pillar gray", "#9B59B6"),  # purple
+    ("pillar_gray", "Occluding wall color", "#9B59B6"),  # purple
     ("motion_dir", "Motion direction", "#D65F5F"),  # physics red
 ]
 
@@ -863,7 +846,7 @@ def plot_pca(plot_data, fig_dir="figures"):
         )
         ax1.axhline(0.5, color="gray", linestyle=":", alpha=0.5, label="Chance (50%)")
         ax1.set_xlabel("Number of principal components")
-        ax1.set_ylabel("Cumulative explained variance")
+        ax1.set_ylabel("Cumulative\nexplained variance")
         ax1.set_title("PCA elbow plot + motion decoding")
         ax1.legend()
         ax1.set_xlim(1, n_neurons)
@@ -930,7 +913,7 @@ def plot_pca(plot_data, fig_dir="figures"):
             label="Cumulative variance",
         )
         ax_var.set_xlabel("Number of principal components")
-        ax_var.set_ylabel("Cumulative explained variance", color=COLORS["neutral"])
+        ax_var.set_ylabel("Cumulative\nexplained variance", color=COLORS["neutral"])
         ax_var.tick_params(axis="y", labelcolor=COLORS["neutral"])
         ax_var.set_xlim(1, n_neurons)
         ax_var.set_ylim(0, 1.05)
@@ -1187,9 +1170,7 @@ def plot_residual(plot_data, fig_dir="figures"):
 # Condition styling for the residualized-PCA motion decoding figure.
 RESIDUALIZED_PCA_STYLE = [
     ("raw", "Neural (raw)", "physics", "-"),
-    ("resid_X", "Neural | X-residual", "control", "--"),
-    ("resid_XS", "Neural | X+S-residual", "neutral", ":"),
-    ("pixel", "Pixels (positive control)", "sensory", "-"),
+    ("resid_XS", "Neural (residualized)", "sensory", ":"),
 ]
 
 
@@ -1237,7 +1218,7 @@ def plot_residualized_pca(plot_data, fig_dir="figures"):
         ax1.set_ylim(0.4, 1.02)
         ax1.yaxis.set_major_formatter(mticker.PercentFormatter(xmax=1.0))
         ax1.set_xlabel("Number of principal components")
-        ax1.set_ylabel("Motion decoding accuracy")
+        ax1.set_ylabel("Motion\ndecoding\naccuracy", rotation=0, labelpad=20)
         ax1.set_title("Motion decodability is a render confound")
         ax1.legend(loc="upper left", frameon=False, fontsize=5)
 
