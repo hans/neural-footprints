@@ -185,6 +185,76 @@ def _empty_rsa_null_results():
     return out
 
 
+def _build_rsa_rdms(
+    neural_activity,
+    scenes,
+    *,
+    raw_pixel_pca,
+    rsa_subsample,
+    predicted_pixel_pca=None,
+    inferred_physics_labels=None,
+    subsample_seed=123,
+):
+    """Subsample scenes and build the fixed RDMs used by RSA.
+
+    Shared by run_rsa_analysis and scripts/run_rsa_null_intervention.py so both
+    analyze the identical subsample (seed 123) with identical scaling/RDMs. Only
+    the neural RDM changes under the intervention null; X / S / physics(inf) RDMs
+    are computed here once and reused across draws.
+
+    Returns a dict with sub_idx, neural_sub, the scaled physics regressors, and
+    the correlation-distance RDMs (rdm_S / rdm_physics_inf are None when their
+    inputs are absent). NaN cells are zeroed exactly as the legacy inline code did.
+    """
+    physics_labels = scenes["physics_labels"]
+    n_scenes = neural_activity.shape[0]
+    n_sub = min(rsa_subsample, n_scenes)
+
+    rng = np.random.default_rng(subsample_seed)
+    sub_idx = rng.choice(n_scenes, size=n_sub, replace=False)
+    sub_idx.sort()
+
+    neural_sub = neural_activity[sub_idx]
+    X_sub = raw_pixel_pca[sub_idx]
+    physics_sub = physics_labels[sub_idx]
+    S_sub = predicted_pixel_pca[sub_idx] if predicted_pixel_pca is not None else None
+    physics_inf_sub = (
+        inferred_physics_labels[sub_idx] if inferred_physics_labels is not None else None
+    )
+
+    physics_scaled = StandardScaler().fit_transform(physics_sub)
+    physics_inf_scaled = (
+        StandardScaler().fit_transform(physics_inf_sub)
+        if physics_inf_sub is not None
+        else None
+    )
+
+    def _rdm(data):
+        r = _compute_rdm(data)
+        r[np.isnan(r)] = 0.0
+        return r
+
+    rdm_neural = _rdm(neural_sub)
+    rdm_X = _rdm(X_sub)
+    rdm_physics = _rdm(physics_scaled)
+    rdm_S = _rdm(S_sub) if S_sub is not None else None
+    rdm_physics_inf = _rdm(physics_inf_scaled) if physics_inf_scaled is not None else None
+
+    return {
+        "n_sub": n_sub,
+        "sub_idx": sub_idx,
+        "neural_sub": neural_sub,
+        "S_sub": S_sub,
+        "physics_scaled": physics_scaled,
+        "physics_inf_scaled": physics_inf_scaled,
+        "rdm_neural": rdm_neural,
+        "rdm_X": rdm_X,
+        "rdm_physics": rdm_physics,
+        "rdm_S": rdm_S,
+        "rdm_physics_inf": rdm_physics_inf,
+    }
+
+
 def run_rsa_analysis(
     neural_activity,
     scenes,
@@ -217,43 +287,24 @@ def run_rsa_analysis(
     print("SIMULATION 2: RSA — Variance Partitioning")
     print("=" * 60)
 
-    physics_labels = scenes["physics_labels"]
-
-    n_scenes = neural_activity.shape[0]
-    n_sub = min(rsa_subsample, n_scenes)
-
-    # Subsample scenes for tractability
-    rng = np.random.default_rng(123)
-    sub_idx = rng.choice(n_scenes, size=n_sub, replace=False)
-    sub_idx.sort()
-
-    neural_sub = neural_activity[sub_idx]
-    X_sub = raw_pixel_pca[sub_idx]
-    physics_sub = physics_labels[sub_idx]
-    S_sub = predicted_pixel_pca[sub_idx] if predicted_pixel_pca is not None else None
-    physics_inf_sub = (
-        inferred_physics_labels[sub_idx] if inferred_physics_labels is not None else None
+    rdms = _build_rsa_rdms(
+        neural_activity,
+        scenes,
+        raw_pixel_pca=raw_pixel_pca,
+        rsa_subsample=rsa_subsample,
+        predicted_pixel_pca=predicted_pixel_pca,
+        inferred_physics_labels=inferred_physics_labels,
     )
+    n_sub = rdms["n_sub"]
+    S_sub = rdms["S_sub"]
+    physics_scaled = rdms["physics_scaled"]
+    physics_inf_scaled = rdms["physics_inf_scaled"]
+    rdm_neural = rdms["rdm_neural"]
+    rdm_X = rdms["rdm_X"]
+    rdm_physics = rdms["rdm_physics"]
 
-    # Standardize physics for RDM
-    scaler_phys = StandardScaler()
-    physics_scaled = scaler_phys.fit_transform(physics_sub)
-
-    # Standardize inferred physics for RDM
-    physics_inf_scaled = None
-    if physics_inf_sub is not None:
-        scaler_inf = StandardScaler()
-        physics_inf_scaled = scaler_inf.fit_transform(physics_inf_sub)
-
-    # Compute RDMs
     print(f"\nSubsampled {n_sub} scenes for RSA.")
     print("Computing RDMs...")
-    rdm_neural = _compute_rdm(neural_sub)
-    rdm_X = _compute_rdm(X_sub)
-    rdm_physics = _compute_rdm(physics_scaled)
-
-    for rdm in [rdm_neural, rdm_X, rdm_physics]:
-        rdm[np.isnan(rdm)] = 0.0
 
     # Spearman correlations (GT physics)
     corr_neural_X, p_nX = spearmanr(rdm_neural, rdm_X)
@@ -282,11 +333,8 @@ def run_rsa_analysis(
     }
 
     # Inferred-physics RDM and correlations
-    rdm_physics_inf = None
+    rdm_physics_inf = rdms["rdm_physics_inf"]
     if physics_inf_scaled is not None:
-        rdm_physics_inf = _compute_rdm(physics_inf_scaled)
-        rdm_physics_inf[np.isnan(rdm_physics_inf)] = 0.0
-
         corr_neural_P_inf, p_nPinf = spearmanr(rdm_neural, rdm_physics_inf)
         corr_X_P_inf, _ = spearmanr(rdm_X, rdm_physics_inf)
         print(
@@ -307,8 +355,7 @@ def run_rsa_analysis(
 
     # Predicted-S RDM and partial controlling for both X and S
     if S_sub is not None:
-        rdm_S = _compute_rdm(S_sub)
-        rdm_S[np.isnan(rdm_S)] = 0.0
+        rdm_S = rdms["rdm_S"]
         corr_neural_S, _ = spearmanr(rdm_neural, rdm_S)
         print(f"  Spearman neural<->S:           r={corr_neural_S:.4f}")
 

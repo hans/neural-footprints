@@ -23,6 +23,7 @@ _ALL_FIGURES = [
 rule all:
     input:
         expand("outputs/{norm}/evaluation.json", norm=config["block_norms"]),
+        expand("outputs/{norm}/rsa_null_intervention.json", norm=config["block_norms"]),
         expand(_ALL_FIGURES, norm=config["block_norms"]),
         expand("paper/{norm}_results_macros.tex", norm=config["block_norms"]),
         "figures/p_block_contribution_compare.pdf",
@@ -126,6 +127,22 @@ rule rsa:
         plot_data="data/{norm}/rsa_plot_data.npz",
     script:
         "scripts/run_rsa.py"
+
+
+rule rsa_null_intervention:
+    input:
+        scenes="data/scenes.npz",
+        neural="data/{norm}/neural.npz",
+        forward_renders="data/forward_renders.npz",
+        pp_activations="data/pp_activations.npz",
+        inferred="data/{norm}/inferred_physics.npz",
+        rsa_results="outputs/{norm}/rsa_results.json",
+    output:
+        results="outputs/{norm}/rsa_null_intervention.json",
+    params:
+        n_draws=config.get("rsa_null_intervention_n_draws", 100),
+    script:
+        "scripts/run_rsa_null_intervention.py"
 
 
 rule dissociation:
