@@ -13,6 +13,7 @@ _ALL_FIGURES = [
     "figures/{norm}/predictive_processing.pdf",
     "figures/{norm}/pp_frames.pdf",
     "figures/{norm}/residual_analysis.pdf",
+    "figures/{norm}/residual_null_zoomed.pdf",
     "figures/{norm}/residualized_pca.pdf",
     "figures/{norm}/sample_scenes.pdf",
     "figures/{norm}/p_block_contribution.pdf",
@@ -273,6 +274,7 @@ rule plot_residual:
         plot_data="data/{norm}/residual_plot_data.npz",
     output:
         figure="figures/{norm}/residual_analysis.pdf",
+        figure_null_zoomed="figures/{norm}/residual_null_zoomed.pdf",
     script:
         "scripts/plot_residual.py"
 

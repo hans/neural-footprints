@@ -1086,18 +1086,21 @@ def plot_residual(plot_data, fig_dir="figures"):
                 f"Physics R² after X-residualization\n(var kept={var_kept_X:.2f})"
             )
 
-        # Panel B: mean physics R² — R²(P|X), R²(P) raw, R²(P|X,S)
+        # Panel B: R²(pixels) baseline vs R²(P|X,S) after residualization
         ax = axes[1]
-        labels = ["R²(P|X)"]
-        means = [r2_P_given_X.mean()]
-        sems = [r2_P_given_X.std() / np.sqrt(n)]
-        bar_colors = [COLORS["sensory"]]
+        labels = []
+        means = []
+        sems = []
+        bar_colors = []
 
-        if has_pre:
-            labels.append("R²(P)")
-            means.append(r2_P_neural.mean())
-            sems.append(r2_P_neural.std() / np.sqrt(n))
-            bar_colors.append(COLORS["physics"])
+        has_pixel = "r2_pixel_neural" in keys
+        r2_pixel_neural = plot_data["r2_pixel_neural"] if has_pixel else None
+
+        if has_pixel:
+            labels.append("R²(pixels)")
+            means.append(r2_pixel_neural.mean())
+            sems.append(r2_pixel_neural.std() / np.sqrt(len(r2_pixel_neural)))
+            bar_colors.append(COLORS["sensory"])
 
         if has_XS:
             labels.append("R²(P|X,S)")
@@ -1115,9 +1118,6 @@ def plot_residual(plot_data, fig_dir="figures"):
         )
 
         title_parts = []
-        if has_pre:
-            raw_mean = float(r2_P_neural.mean())
-            title_parts.append(f"R²(P)={raw_mean:.4f}")
         if has_XS:
             title_parts.append(f"var kept: X={var_kept_X:.2f}, XS={var_kept_XS:.2f}")
         else:
@@ -1140,6 +1140,48 @@ def plot_residual(plot_data, fig_dir="figures"):
         fig_path = f"{fig_dir}/residual_analysis.pdf"
         plt.savefig(fig_path)
         plt.close()
+
+    # Zoomed null plot: R²(P|X,S) bar with permutation null CI band
+    null_ci_lo = float(plot_data["null_r2_P_given_XS_ci_lo"]) if "null_r2_P_given_XS_ci_lo" in keys else None
+    null_ci_hi = float(plot_data["null_r2_P_given_XS_ci_hi"]) if "null_r2_P_given_XS_ci_hi" in keys else None
+    null_mean = float(plot_data["null_r2_P_given_XS_mean"]) if "null_r2_P_given_XS_mean" in keys else None
+    null_observed = float(plot_data["null_r2_P_given_XS_observed"]) if "null_r2_P_given_XS_observed" in keys else None
+
+    if has_XS and null_ci_lo is not None:
+        obs = null_observed if null_observed is not None else float(r2_P_given_XS.mean())
+        obs_sem = float(r2_P_given_XS.std() / np.sqrt(n))
+        null_color = "#888888"
+        bar_w = 0.5
+
+        with paper_style():
+            fig, ax = plt.subplots(figsize=(COL_WIDTH * 0.5, 2.0))
+            ax.bar(
+                ["R²(P|X,S)"],
+                [obs],
+                yerr=[obs_sem],
+                color=COLORS["control"],
+                capsize=3,
+                width=bar_w,
+                zorder=3,
+            )
+            ax.axhspan(null_ci_lo, null_ci_hi, color=null_color, alpha=0.20,
+                       label="Null 95% CI", zorder=0)
+            ax.axhline(null_mean, color=null_color, linewidth=0.8, linestyle="--", zorder=1)
+            ax.legend(loc="upper right", frameon=False, fontsize=5)
+            pad = abs(null_ci_hi - null_ci_lo) * 0.8
+            y_lo = min(null_ci_lo, 0, obs) - pad
+            y_hi = max(0, max(null_ci_hi, obs + obs_sem) + pad * 3)
+            ax.set_ylim(y_lo, y_hi)
+            ax.axhline(0, color="gray", linewidth=0.5, linestyle=":")
+            ax.set_ylabel("Mean R²")
+            ax.set_title("Physics R² after X+S residualization\nvs. permutation null")
+            ax.text(
+                0, obs + obs_sem * 1.5,
+                f"{obs:.2e}", ha="center", va="bottom", fontsize=6,
+            )
+            plt.tight_layout()
+            plt.savefig(f"{fig_dir}/residual_null_zoomed.pdf")
+            plt.close()
 
 
 # Condition styling for the residualized-PCA motion decoding figure.

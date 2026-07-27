@@ -53,8 +53,9 @@ save_results(results, snakemake.output.results)
 with open(snakemake.input.encoding) as f:
     enc = json.load(f)
 r2_P_neural = np.array(enc["r2_P"])
+r2_pixel_neural = np.array(enc["r2_pixel_only"])
 
-plot_arrays = {"r2_P_neural": r2_P_neural}
+plot_arrays = {"r2_P_neural": r2_P_neural, "r2_pixel_neural": r2_pixel_neural}
 for key in ("r2_P_given_X", "r2_P_given_XS",
             "r2_P_inf_given_X", "r2_P_inf_given_XS"):
     if key in results:
@@ -63,4 +64,11 @@ for key in ("r2_P_given_X", "r2_P_given_XS",
 for key in ("residual_variance_fraction_X", "residual_variance_fraction_XS"):
     if key in results:
         plot_arrays[key] = np.array(results[key])
+# Null CI scalars for zoomed plot (present when compute_null=True)
+for key in (
+    "null_r2_P_given_XS_ci_lo", "null_r2_P_given_XS_ci_hi",
+    "null_r2_P_given_XS_mean", "null_r2_P_given_XS_observed",
+):
+    if key in results:
+        plot_arrays[key] = np.array(float(results[key]))
 np.savez_compressed(snakemake.output.plot_data, **plot_arrays)

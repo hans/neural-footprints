@@ -153,3 +153,17 @@ def report(label, observed, null):
 
 report("r2_P | X (matched null)", obs_X, null_X)
 report("r2_P | X,S (matched null)", obs_XS, null_XS)
+
+# Patch null CI scalars into the residual plot_data npz so the zoomed plot works.
+npz_path = f"data/{NORM}/residual_plot_data.npz"
+if os.path.exists(npz_path):
+    existing = dict(np.load(npz_path, allow_pickle=False))
+    lo_XS, hi_XS = np.percentile(null_XS, [2.5, 97.5])
+    existing["null_r2_P_given_XS_ci_lo"] = np.array(float(lo_XS))
+    existing["null_r2_P_given_XS_ci_hi"] = np.array(float(hi_XS))
+    existing["null_r2_P_given_XS_mean"] = np.array(float(null_XS.mean()))
+    existing["null_r2_P_given_XS_observed"] = np.array(float(obs_XS))
+    np.savez_compressed(npz_path, **existing)
+    print(f"\nPatched null CI into {npz_path}")
+    print(f"  95% CI = [{lo_XS:+.4f}, {hi_XS:+.4f}], mean = {null_XS.mean():+.4f}, observed = {obs_XS:+.4f}")
+    print("Run: snakemake --touch figures/{norm}/residual_null_zoomed.pdf")
