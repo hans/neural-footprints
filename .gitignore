@@ -9,8 +9,11 @@ outputs/
 
 figures
 
-paper/results_macros.tex
+paper/*results_macros.tex
 .DS_Store
 
 .claude/
 .superset/
+
+MUJOCO_LOG.TXT
+logs/
