@@ -14,6 +14,8 @@ dependencies = [
     "torch>=2.11.0",
     "imageio>=2.34",
     "imageio-ffmpeg>=0.5",   # bundles a static ffmpeg binary — no system ffmpeg needed
+    "pip>=26.1.2",
+    "ipywidgets>=8.1.8",
 ]
 
 [dependency-groups]
