@@ -6,6 +6,7 @@ a colored report.
 """
 
 import numpy as np
+from scipy.stats import norm as _norm
 
 # ANSI color codes
 GREEN = "\033[92m"
@@ -294,6 +295,105 @@ def evaluate(
                 0.0 < float(var_x) < 1.0,
                 f"var kept = {float(var_x):.4f}",
                 "expect in (0, 1)",
+            )
+
+        def _at_pc(cond, k, target="motion_dir"):
+            block = residualized_pca_results[cond]
+            pc_counts = block["pc_counts"]
+            if k not in pc_counts:
+                return None, None, None
+            idx = pc_counts.index(k)
+            acc = float(block["decode_accs_per_target"][target][idx])
+            lo = float(block["chance_per_target"][target]["lo"][idx])
+            hi = float(block["chance_per_target"][target]["hi"][idx])
+            return acc, lo, hi
+
+        def _pval_from_ci(acc, lo, hi):
+            """One-sided p-value (acc > null) via Gaussian approx to permutation CI."""
+            mean_null = (lo + hi) / 2.0
+            std_null = (hi - lo) / 3.92  # 95% CI ≈ ±1.96σ
+            if std_null <= 0:
+                return float("nan")
+            return float(_norm.sf((acc - mean_null) / std_null))
+
+        def _first_above_chance(cond, target="motion_dir"):
+            block = residualized_pca_results[cond]
+            pc_counts = block["pc_counts"]
+            accs = block["decode_accs_per_target"][target]
+            his = block["chance_per_target"][target]["hi"]
+            for k, acc, hi in zip(pc_counts, accs, his):
+                if float(acc) > float(hi):
+                    return k
+            return None
+
+        if "raw" in residualized_pca_results:
+            acc5, lo5, hi5 = _at_pc("raw", 5)
+            if acc5 is not None:
+                p5 = _pval_from_ci(acc5, lo5, hi5)
+                check(
+                    "Top-5 PCs: motion decoding not sig. above chance (raw neural)",
+                    p5 >= 0.05,
+                    f"acc@5PCs = {acc5:.1%}, p = {p5:.3f}",
+                    "PASS iff p ≥ 0.05 one-sided vs permutation null (Gaussian approx)",
+                )
+            acc10, lo10, hi10 = _at_pc("raw", 10)
+            if acc10 is not None:
+                p10 = _pval_from_ci(acc10, lo10, hi10)
+                check(
+                    "Top-10 PCs: motion decoding not sig. above chance (raw neural)",
+                    p10 >= 0.05,
+                    f"acc@10PCs = {acc10:.1%}, p = {p10:.3f}",
+                    "PASS iff p ≥ 0.05 one-sided vs permutation null (Gaussian approx)",
+                )
+            first_raw = _first_above_chance("raw")
+            msg = (
+                f"PC {first_raw}" if first_raw is not None else "never"
+            )
+            lines.append(
+                f"  {DIM}[raw] motion first exceeds chance at: {msg}{RESET}"
+            )
+
+        resid_cond = (
+            "resid_XS" if "resid_XS" in residualized_pca_results
+            else "resid_X" if "resid_X" in residualized_pca_results
+            else None
+        )
+        if resid_cond is not None:
+            acc5, lo5, hi5 = _at_pc(resid_cond, 5)
+            if acc5 is not None:
+                p5 = _pval_from_ci(acc5, lo5, hi5)
+                check(
+                    f"Top-5 PCs: motion not sig. above chance after residualization ({resid_cond})",
+                    p5 >= 0.05,
+                    f"acc@5PCs = {acc5:.1%}, p = {p5:.3f}",
+                    "PASS iff p ≥ 0.05 one-sided vs permutation null (Gaussian approx)",
+                )
+            acc10, lo10, hi10 = _at_pc(resid_cond, 10)
+            if acc10 is not None:
+                p10 = _pval_from_ci(acc10, lo10, hi10)
+                check(
+                    f"Top-10 PCs: motion not sig. above chance after residualization ({resid_cond})",
+                    p10 >= 0.05,
+                    f"acc@10PCs = {acc10:.1%}, p = {p10:.3f}",
+                    "PASS iff p ≥ 0.05 one-sided vs permutation null (Gaussian approx)",
+                )
+            acc_end, hi_end = _all_pc(resid_cond)
+            lo_end = float(
+                residualized_pca_results[resid_cond]["chance_per_target"]["motion_dir"]["lo"][-1]
+            )
+            p_end = _pval_from_ci(acc_end, lo_end, hi_end)
+            check(
+                f"All PCs: motion not sig. above chance after residualization ({resid_cond})",
+                p_end >= 0.05,
+                f"acc@allPCs = {acc_end:.1%}, p = {p_end:.3f}",
+                "PASS iff p ≥ 0.05 one-sided vs permutation null (Gaussian approx)",
+            )
+            first_resid = _first_above_chance(resid_cond)
+            msg = (
+                f"PC {first_resid}" if first_resid is not None else "never"
+            )
+            lines.append(
+                f"  {DIM}[{resid_cond}] motion first exceeds chance at: {msg}{RESET}"
             )
 
     # --- RSA ---
