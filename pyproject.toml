@@ -1,9 +1,9 @@
 [project]
 name = "neural-footprints"
 version = "0.1.0"
-requires-python = ">=3.14"
+requires-python = ">=3.12"
 dependencies = [
-    "pybullet",
+    "mujoco>=3.2",
     "numpy",
     "scipy",
     "scikit-learn",
@@ -12,4 +12,22 @@ dependencies = [
     "pyyaml",
     "seaborn>=0.13.2",
     "torch>=2.11.0",
+    "imageio>=2.34",
+    "imageio-ffmpeg>=0.5",   # bundles a static ffmpeg binary — no system ffmpeg needed
+    "pip>=26.1.2",
+    "ipywidgets>=8.1.8",
 ]
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "hypothesis>=6",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "slow: integration tests that boot the physics engine (deselect with -m 'not slow')",
+]
+addopts = "-m 'not slow'"
+

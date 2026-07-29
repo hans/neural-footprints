@@ -24,53 +24,55 @@ def _build_targets(scenes):
     All targets are balanced ~50/50: median splits are exact (uniform
     samples have no ties); motion direction is symmetric by sampling.
     """
-    pillar_grays = np.asarray(scenes['pillar_grays'])
-    cam_height = np.array([
-        float(lt['camJitter'][2]) for lt in scenes['lightings']
-    ])
-    vx = scenes['initial_physics_labels'][:, 7]
+    pillar_grays = np.asarray(scenes["pillar_grays"])
+    cam_height = np.array([float(lt["camJitter"][2]) for lt in scenes["lightings"]])
+    vx = scenes["initial_physics_labels"][:, 7]
     return {
-        'cam_height':  (cam_height > np.median(cam_height)).astype(int),
-        'pillar_gray': (pillar_grays > np.median(pillar_grays)).astype(int),
-        'motion_dir':  (vx > 0).astype(int),
+        "cam_height": (cam_height > np.median(cam_height)).astype(int),
+        "pillar_gray": (pillar_grays > np.median(pillar_grays)).astype(int),
+        "motion_dir": (vx > 0).astype(int),
     }
 
 
-def run_pca_analysis(neural_activity, scenes, neural_meta,
-                     n_permutations=50, compute_null=True):
-    print("\n" + "=" * 60)
-    print("PCA NEGATIVE ANALYSIS: Variance ≠ Information")
-    print("=" * 60)
+def _pc_counts_for(n_components):
+    """Standard log-spaced PC counts used by the decoding sweeps."""
+    counts = sorted(set(list(range(1, 11)) + [15, 25, 50, 100, 200, n_components]))
+    return [k for k in counts if k <= n_components]
 
-    n_scenes, n_neurons = neural_activity.shape
 
-    targets = _build_targets(scenes)
-    for name, y in targets.items():
-        n_pos = int(y.sum())
-        print(f"  {name}: {n_scenes - n_pos} class-0 / {n_pos} class-1")
+def _decode_pc_sweep(
+    feature_matrix, targets, *, n_permutations=50, compute_null=True, random_state=0
+):
+    """StandardScaler -> PCA -> LogisticRegressionCV decode of each target from
+    the top-k PCs, with an optional permutation null.
 
-    neural_scaled = StandardScaler().fit_transform(neural_activity)
-    pca = PCA(n_components=n_neurons, random_state=42)
-    neural_pca = pca.fit_transform(neural_scaled)
+    Returns (pc_counts, cumulative_variance, decode_accs_per_target,
+    chance_per_target). The PCA basis is that of ``feature_matrix`` itself, so
+    callers pass raw neural activity, residualized neural activity, or pixel
+    features depending on the condition they want to characterise.
+    """
+    n_components = feature_matrix.shape[1]
+    scaled = StandardScaler().fit_transform(feature_matrix)
+    pca = PCA(n_components=n_components, random_state=42)
+    scores_pca = pca.fit_transform(scaled)
     cumvar = np.cumsum(pca.explained_variance_ratio_)
 
-    pc_counts = sorted(set(
-        list(range(1, 11)) + [15, 25, 50, 100, 200, n_neurons]
-    ))
-    pc_counts = [k for k in pc_counts if k <= n_neurons]
+    pc_counts = _pc_counts_for(n_components)
 
     decode_accs_per_target = {}
     chance_per_target = {}
-    rng = np.random.default_rng(0)
+    rng = np.random.default_rng(random_state)
     for name, y in targets.items():
         print(f"  Decoding '{name}':")
         accs = []
         for k in pc_counts:
-            scores = cross_val_score(
+            acc = cross_val_score(
                 LogisticRegressionCV(cv=5, max_iter=1000, random_state=42),
-                neural_pca[:, :k], y, cv=5, scoring='accuracy',
-            )
-            acc = scores.mean()
+                scores_pca[:, :k],
+                y,
+                cv=5,
+                scoring="accuracy",
+            ).mean()
             accs.append(acc)
             print(f"    Top {k:>3d} PCs: accuracy = {acc:.2%}")
         decode_accs_per_target[name] = accs
@@ -83,31 +85,60 @@ def run_pca_analysis(neural_activity, scenes, neural_meta,
                 for i, k in enumerate(pc_counts):
                     perm_accs[i, p] = cross_val_score(
                         LogisticRegressionCV(cv=5, max_iter=1000, random_state=42),
-                        neural_pca[:, :k], shuffled, cv=5, scoring='accuracy',
+                        scores_pca[:, :k],
+                        shuffled,
+                        cv=5,
+                        scoring="accuracy",
                     ).mean()
             chance_per_target[name] = {
-                'lo': np.percentile(perm_accs, 2.5, axis=1).tolist(),
-                'hi': np.percentile(perm_accs, 97.5, axis=1).tolist(),
+                "lo": np.percentile(perm_accs, 2.5, axis=1).tolist(),
+                "hi": np.percentile(perm_accs, 97.5, axis=1).tolist(),
             }
         else:
             chance_per_target[name] = {
-                'lo': [0.5] * len(pc_counts),
-                'hi': [0.5] * len(pc_counts),
+                "lo": [0.5] * len(pc_counts),
+                "hi": [0.5] * len(pc_counts),
             }
 
-    motion_dir = targets['motion_dir']
+    return pc_counts, cumvar, scores_pca, decode_accs_per_target, chance_per_target
+
+
+def run_pca_analysis(
+    neural_activity, scenes, neural_meta, n_permutations=50, compute_null=True
+):
+    print("\n" + "=" * 60)
+    print("PCA NEGATIVE ANALYSIS: Variance ≠ Information")
+    print("=" * 60)
+
+    n_scenes, n_neurons = neural_activity.shape
+
+    targets = _build_targets(scenes)
+    for name, y in targets.items():
+        n_pos = int(y.sum())
+        print(f"  {name}: {n_scenes - n_pos} class-0 / {n_pos} class-1")
+
+    pc_counts, cumvar, neural_pca, decode_accs_per_target, chance_per_target = (
+        _decode_pc_sweep(
+            neural_activity,
+            targets,
+            n_permutations=n_permutations,
+            compute_null=compute_null,
+        )
+    )
+
+    motion_dir = targets["motion_dir"]
 
     return {
-        'cumulative_variance': cumvar.tolist(),
-        'pc_counts': pc_counts,
-        'target_names': list(targets.keys()),
-        'decode_accs_per_target': {
+        "cumulative_variance": cumvar.tolist(),
+        "pc_counts": pc_counts,
+        "target_names": list(targets.keys()),
+        "decode_accs_per_target": {
             name: [float(a) for a in accs]
             for name, accs in decode_accs_per_target.items()
         },
-        'chance_per_target': chance_per_target,
-        'all_pc_decoding_accuracy': float(decode_accs_per_target['motion_dir'][-1]),
-        'neural_pca_2d': neural_pca[:, :2],
-        'motion_dir': motion_dir,
-        'n_neurons': n_neurons,
+        "chance_per_target": chance_per_target,
+        "all_pc_decoding_accuracy": float(decode_accs_per_target["motion_dir"][-1]),
+        "neural_pca_2d": neural_pca[:, :2],
+        "motion_dir": motion_dir,
+        "n_neurons": n_neurons,
     }

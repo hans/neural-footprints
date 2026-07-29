@@ -29,12 +29,19 @@ from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 from analyses.dissociation import _make_mlp
 from config import DYNAMICS_PCA_DIM as _CFG_DYNAMICS_PCA_DIM
-from scene_generator import extract_brain_pixels, extract_frame_pixels
+from scene_generator import extract_frame_pixels
 
 
-def run_dynamics_analysis(neural_activity, scenes, neural_meta,
-                          encoding_delta_r2, encoder, *,
-                          dynamics_pca_dim=None):
+def run_dynamics_analysis(
+    neural_activity,
+    scenes,
+    neural_meta,
+    encoding_delta_r2,
+    encoder,
+    *,
+    inferred_physics=None,
+    dynamics_pca_dim=None,
+):
     """
     Future brain state prediction via physics vs. pixel forward models.
 
@@ -65,21 +72,20 @@ def run_dynamics_analysis(neural_activity, scenes, neural_meta,
     print("SIMULATION 4: Future Brain State Prediction")
     print("=" * 60)
 
-    from scene_generator import resimulate_scene, open_render_client
-    import pybullet as p
+    from scene_generator import resimulate_scene
 
-    program_states = scenes['program_states']
-    initial_physics_labels = scenes['initial_physics_labels']
-    initial_renders = scenes['initial_renders']
-    scene_configs = scenes['scene_configs']
-    pillar_grays = scenes['pillar_grays']
-    lightings = scenes['lightings']
-    metadata = scenes['metadata']
+    program_states = scenes["program_states"]
+    initial_physics_labels = scenes["initial_physics_labels"]
+    initial_renders = scenes["initial_renders"]
+    scene_configs = scenes["scene_configs"]
+    pillar_grays = scenes["pillar_grays"]
+    lightings = scenes["lightings"]
+    metadata = scenes["metadata"]
     initial_rgba = extract_frame_pixels(initial_renders, metadata)
 
-    enc_scaler = encoder['scaler']
-    enc_pca = encoder['pca']
-    enc_ridge = encoder['ridge']
+    enc_scaler = encoder["scaler"]
+    enc_pca = encoder["pca"]
+    enc_ridge = encoder["ridge"]
 
     n_scenes, n_neurons = neural_activity.shape
 
@@ -88,24 +94,30 @@ def run_dynamics_analysis(neural_activity, scenes, neural_meta,
     # ------------------------------------------------------------------
     print("\nPhysics forward model: resimulating scenes from initial state...")
     resim_program_states = np.zeros_like(program_states)
-    pc = open_render_client(use_gui=True)
-    try:
-        for i in range(n_scenes):
-            if (i + 1) % 100 == 0 or i == 0:
-                print(f"  Resimulating scene {i+1}/{n_scenes}...")
-            resim_program_states[i] = resimulate_scene(
-                scene_configs[i], initial_physics_labels[i],
-                return_program_state=True,
-                pillar_gray=pillar_grays[i],
-                lighting=lightings[i],
-                use_gui=True,
-                physics_client=pc,
-            )
-    finally:
-        p.disconnect(pc)
+    for i in range(n_scenes):
+        if (i + 1) % 100 == 0 or i == 0:
+            print(f"  Resimulating scene {i+1}/{n_scenes}...")
+        resim_program_states[i] = resimulate_scene(
+            scene_configs[i],
+            initial_physics_labels[i],
+            return_program_state=True,
+            pillar_gray=pillar_grays[i],
+            lighting=lightings[i],
+        )
 
-    pixel_data = extract_brain_pixels(program_states, metadata)
-    resim_pixels = extract_brain_pixels(resim_program_states, metadata)
+    pixel_data = np.concatenate(
+        [scenes["initial_renders"], scenes["early_renders"], scenes["late_renders"]],
+        axis=1,
+    )
+    fri = metadata["frame_render_indices"]
+    resim_pixels = np.concatenate(
+        [
+            resim_program_states[:, fri["initial"]],
+            resim_program_states[:, fri["early"]],
+            resim_program_states[:, fri["late"]],
+        ],
+        axis=1,
+    )
 
     print("  Cross-validating encoder on resimulated pixels (5-fold)...")
     kf = KFold(n_splits=5, shuffle=False)
@@ -123,6 +135,52 @@ def run_dynamics_analysis(neural_activity, scenes, neural_meta,
     r2_physics_forward = _r2_per_neuron(pred_neural_physics, neural_activity)
     mean_r2_physics = r2_physics_forward.mean()
     print(f"  Physics forward model mean R² (CV): {mean_r2_physics:.4f}")
+
+    # ------------------------------------------------------------------
+    # Inferred-physics forward model (cognitive PP): same resimulation
+    # path, driven by the InverseModel's per-scene output instead of GT.
+    # Mean-fill of non-observable dims (mass/friction/orientation/ang_vel)
+    # is dynamically safe in this scene generator — see InverseModel docstring.
+    # ------------------------------------------------------------------
+    r2_inferred_forward = None
+    mean_r2_inferred = None
+    if inferred_physics is not None:
+        print("\nInferred-physics forward model: resimulating from PP estimates...")
+        resim_inferred_states = np.zeros_like(program_states)
+        for i in range(n_scenes):
+            if (i + 1) % 100 == 0 or i == 0:
+                print(f"  Resimulating scene {i+1}/{n_scenes}...")
+            resim_inferred_states[i] = resimulate_scene(
+                scene_configs[i],
+                inferred_physics[i],
+                return_program_state=True,
+                pillar_gray=pillar_grays[i],
+                lighting=lightings[i],
+            )
+        resim_inferred_pixels = np.concatenate(
+            [
+                resim_inferred_states[:, fri["initial"]],
+                resim_inferred_states[:, fri["early"]],
+                resim_inferred_states[:, fri["late"]],
+            ],
+            axis=1,
+        )
+
+        print("  Cross-validating encoder on inferred-resimulated pixels (5-fold)...")
+        pred_neural_inferred = np.zeros_like(neural_activity)
+        for fold, (train_idx, test_idx) in enumerate(kf.split(pixel_data), 1):
+            pipe = make_pipeline(
+                StandardScaler(),
+                PCA(n_components=enc_pca.n_components_, random_state=42),
+                RidgeCV(alphas=np.logspace(-2, 6, 20), alpha_per_target=True),
+            )
+            pipe.fit(pixel_data[train_idx], neural_activity[train_idx])
+            pred_neural_inferred[test_idx] = pipe.predict(
+                resim_inferred_pixels[test_idx]
+            )
+        r2_inferred_forward = _r2_per_neuron(pred_neural_inferred, neural_activity)
+        mean_r2_inferred = r2_inferred_forward.mean()
+        print(f"  Inferred forward model mean R² (CV): {mean_r2_inferred:.4f}")
 
     # ------------------------------------------------------------------
     # Pixel forward model: MLP predicts 3-frame pixels from initial → encoder
@@ -144,8 +202,9 @@ def run_dynamics_analysis(neural_activity, scenes, neural_meta,
     init_pixel_pca = pca_init.fit_transform(init_scaled)
 
     # Cross-validated MLP predictions (out-of-fold to avoid double-dipping)
-    pred_target_pca = cross_val_predict(_make_mlp(), init_pixel_pca,
-                                        target_pixel_pca, cv=5)
+    pred_target_pca = cross_val_predict(
+        _make_mlp(), init_pixel_pca, target_pixel_pca, cv=5
+    )
 
     # Inverse-transform back to raw 3-frame pixel space, then through the encoder.
     pred_target_scaled = pca_target.inverse_transform(pred_target_pca)
@@ -163,18 +222,22 @@ def run_dynamics_analysis(neural_activity, scenes, neural_meta,
     # ------------------------------------------------------------------
     gap = mean_r2_physics - mean_r2_pixel
     print(f"\n  FUTURE BRAIN STATE DISSOCIATION:")
-    print(f"    Physics forward model R²: {mean_r2_physics:.4f}")
-    print(f"    Pixel forward model R²:   {mean_r2_pixel:.4f}")
-    print(f"    Gap:                      {gap:.4f}")
+    print(f"    Physics forward model R²:   {mean_r2_physics:.4f}")
+    if mean_r2_inferred is not None:
+        print(f"    Inferred forward model R²:  {mean_r2_inferred:.4f}")
+    print(f"    Pixel forward model R²:     {mean_r2_pixel:.4f}")
+    print(f"    Gap (physics − pixel):      {gap:.4f}")
     print(f"    (cf. encoding ΔR² for current brain: {encoding_delta_r2:.4f})")
 
     return {
-        'r2_physics_forward': r2_physics_forward,
-        'r2_pixel_forward': r2_pixel_forward,
-        'mean_r2_physics_forward': mean_r2_physics,
-        'mean_r2_pixel_forward': mean_r2_pixel,
-        'encoding_delta_r2': encoding_delta_r2,
-        'forward_gap': gap,
+        "r2_physics_forward": r2_physics_forward,
+        "r2_pixel_forward": r2_pixel_forward,
+        "r2_inferred_forward": r2_inferred_forward,
+        "mean_r2_physics_forward": mean_r2_physics,
+        "mean_r2_pixel_forward": mean_r2_pixel,
+        "mean_r2_inferred_forward": mean_r2_inferred,
+        "encoding_delta_r2": encoding_delta_r2,
+        "forward_gap": gap,
     }
 
 

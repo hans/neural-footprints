@@ -5,6 +5,9 @@ Defines explicit pass/fail criteria for each analysis and prints
 a colored report.
 """
 
+import numpy as np
+from scipy.stats import norm as _norm
+
 # ANSI color codes
 GREEN = "\033[92m"
 RED = "\033[91m"
@@ -20,8 +23,15 @@ def _check(name, passed, actual_str, threshold_str):
     return f"  [{icon}] {name}: {actual_str}  {DIM}({threshold_str}){RESET}"
 
 
-def evaluate(encoding_results, rsa_results, dissociation_results,
-             pp_results=None, dynamics_results=None, residual_results=None):
+def evaluate(
+    encoding_results,
+    rsa_results,
+    dissociation_results,
+    pp_results=None,
+    dynamics_results=None,
+    residual_results=None,
+    residualized_pca_results=None,
+):
     """Run all checks and print colored evaluation report. Returns (n_passed, n_total)."""
 
     lines = []
@@ -35,56 +45,41 @@ def evaluate(encoding_results, rsa_results, dissociation_results,
         if passed:
             passed_total += 1
         lines.append(_check(name, passed, actual_str, threshold_str))
-        checks.append({'name': name, 'passed': passed, 'actual': actual_str, 'threshold': threshold_str})
-
-    # --- Predictive Processing (prerequisite: inverse model quality) ---
-    inverse_ok = True
-    if pp_results is not None:
-        lines.append(f"\n{BOLD}Predictive Processing{RESET}")
-        inverse_ok = pp_results['inverse_mean_r2'] > 0.30
-        check(
-            "Inverse model recovers physics from pixels",
-            inverse_ok,
-            f"R² = {pp_results['inverse_mean_r2']:.4f}",
-            "expect > 0.30 — prerequisite for PP chain and inferred-physics checks",
-        )
-        check(
-            "PP chain predicts better than pixel-only",
-            pp_results['pp_r2'] > pp_results['pixel_r2'],
-            f"PP R² = {pp_results['pp_r2']:.4f} vs pixel-only R² = {pp_results['pixel_r2']:.4f}",
-            "expect PP > pixel-only" + ("" if inverse_ok else " (depends on inverse model)"),
-        )
-        check(
-            "Inferred physics invisible to neural regression",
-            pp_results['neural_r2_inferred_physics'] < 0.10,
-            f"R² = {pp_results['neural_r2_inferred_physics']:.4f}",
-            "expect < 0.10",
-        )
-        check(
-            "Pixel PCA explains neural activity at t=0",
-            pp_results['neural_r2_t0'] > 0.20,
-            f"R² = {pp_results['neural_r2_t0']:.4f}",
-            "expect > 0.20",
+        checks.append(
+            {
+                "name": name,
+                "passed": passed,
+                "actual": actual_str,
+                "threshold": threshold_str,
+            }
         )
 
-    # --- Encoding Model ---
-    dr2 = encoding_results['delta_r2'].mean()
-    ctrl = encoding_results['control_accuracy']
-    r2_pixel = encoding_results['r2_pixel_only'].mean()
+    # --- Variance Partitioning (Encoding Model) ---
+    r2_X = np.asarray(encoding_results["r2_X"]).mean()
+    r2_P = np.asarray(encoding_results["r2_P"]).mean()
+    ctrl = encoding_results["control_accuracy"]
 
-    lines.append(f"\n{BOLD}Encoding Model{RESET}")
+    lines.append(f"\n{BOLD}Variance Partitioning{RESET}")
     check(
-        "Physics adds negligible variance (ΔR²)",
-        dr2 < 0.03,
-        f"ΔR² = {dr2:.4f}",
-        "expect < 0.03",
-    )
-    check(
-        "Pixel model explains neural activity",
-        r2_pixel > 0.30,
-        f"R² = {r2_pixel:.4f}",
+        "X (raw frames) explains neural activity",
+        r2_X > 0.30,
+        f"R² = {r2_X:.4f}",
         "expect > 0.30",
     )
+    check(
+        "P (physics) explains neural activity",
+        r2_P > 0.10,
+        f"R² = {r2_P:.4f}",
+        "expect > 0.10",
+    )
+    if encoding_results.get("null_r2_P_pvalue") is not None:
+        pval = float(encoding_results["null_r2_P_pvalue"])
+        check(
+            "r2_P significantly above null (p < 0.05)",
+            pval < 0.05,
+            f"p = {pval:.3f}",
+            "PASS iff p < 0.05 one-sided vs permutation null",
+        )
     check(
         "Control: physics predicts behavior",
         ctrl > 0.90,
@@ -92,69 +87,433 @@ def evaluate(encoding_results, rsa_results, dissociation_results,
         "expect > 90%",
     )
 
-    if encoding_results.get('r2_inferred') is not None:
-        dr2_inf = encoding_results['delta_r2_inferred'].mean()
+    if encoding_results.get("r2_S") is not None:
+        r2_S = np.asarray(encoding_results["r2_S"]).mean()
         check(
-            "Inferred physics adds negligible variance",
-            dr2_inf < 0.03,
-            f"ΔR² = {dr2_inf:.6f}",
-            "expect < 0.03" + ("" if inverse_ok else " (depends on inverse model)"),
+            "S (predicted frames) explains neural activity",
+            r2_S > 0.30,
+            f"R² = {r2_S:.4f}",
+            "expect > 0.30",
         )
 
+    if encoding_results.get("delta_P_given_X") is not None:
+        dpx = np.asarray(encoding_results["delta_P_given_X"]).mean()
+        check(
+            "delta_P | X > 0 (naive positive: physics adds beyond raw frames)",
+            dpx > 0.005,
+            f"ΔR² = {dpx:.6f}",
+            "expect > 0.005",
+        )
+        if encoding_results.get("null_delta_P_given_X_pvalue") is not None:
+            pval = float(encoding_results["null_delta_P_given_X_pvalue"])
+            check(
+                "delta_P | X significantly above null (p < 0.05)",
+                pval < 0.05,
+                f"p = {pval:.3f}",
+                "PASS iff p < 0.05 one-sided vs permutation null",
+            )
+
+    if encoding_results.get("delta_P_given_XS") is not None:
+        dpxs = np.asarray(encoding_results["delta_P_given_XS"]).mean()
+        check(
+            "delta_P | X,S ≈ 0 (KEY: physics adds nothing beyond frames + model)",
+            dpxs < 0.005,
+            f"ΔR² = {dpxs:.6f}",
+            "expect < 0.005 KEY",
+        )
+        if encoding_results.get("null_delta_P_given_XS_pvalue") is not None:
+            pval = float(encoding_results["null_delta_P_given_XS_pvalue"])
+            check(
+                "delta_P | X,S significantly above null (KEY significance test, p < 0.05)",
+                pval < 0.05,
+                f"p = {pval:.3f}",
+                "PASS iff p < 0.05; PASS here means physics genuinely adds beyond X+S (bad news)",
+            )
+
+    # Inferred-physics parallel checks (same thresholds as GT)
+    if encoding_results.get("r2_P_inf") is not None:
+        r2_P_inf = np.asarray(encoding_results["r2_P_inf"]).mean()
+        check(
+            "P_inf (inferred physics) explains neural activity",
+            r2_P_inf > 0.10,
+            f"R² = {r2_P_inf:.4f}",
+            "expect > 0.10 (same threshold as GT; pass/fail asymmetry is the finding)",
+        )
+        if encoding_results.get("null_r2_P_inf_pvalue") is not None:
+            pval = float(encoding_results["null_r2_P_inf_pvalue"])
+            check(
+                "r2_P_inf significantly above null (p < 0.05)",
+                pval < 0.05,
+                f"p = {pval:.3f}",
+                "PASS iff p < 0.05 one-sided vs permutation null",
+            )
+    if encoding_results.get("delta_P_inf_given_X") is not None:
+        dpx_inf = np.asarray(encoding_results["delta_P_inf_given_X"]).mean()
+        check(
+            "delta_P_inf | X > 0 (naive positive: inferred physics adds beyond raw frames)",
+            dpx_inf > 0.005,
+            f"ΔR² = {dpx_inf:.6f}",
+            "expect > 0.005",
+        )
+        if encoding_results.get("null_delta_P_inf_given_X_pvalue") is not None:
+            pval = float(encoding_results["null_delta_P_inf_given_X_pvalue"])
+            check(
+                "delta_P_inf | X significantly above null (p < 0.05)",
+                pval < 0.05,
+                f"p = {pval:.3f}",
+                "PASS iff p < 0.05 one-sided vs permutation null",
+            )
+    if encoding_results.get("delta_P_inf_given_XS") is not None:
+        dpxs_inf = np.asarray(encoding_results["delta_P_inf_given_XS"]).mean()
+        check(
+            "delta_P_inf | X,S ≈ 0 (KEY: inferred physics adds nothing beyond frames + model)",
+            dpxs_inf < 0.005,
+            f"ΔR² = {dpxs_inf:.6f}",
+            "expect < 0.005 KEY",
+        )
+        if encoding_results.get("null_delta_P_inf_given_XS_pvalue") is not None:
+            pval = float(encoding_results["null_delta_P_inf_given_XS_pvalue"])
+            check(
+                "delta_P_inf | X,S significantly above null (KEY significance test, p < 0.05)",
+                pval < 0.05,
+                f"p = {pval:.3f}",
+                "PASS iff p < 0.05; PASS here means inferred physics genuinely adds beyond X+S (bad news)",
+            )
+
+    # --- Residualization ---
+    if residual_results is not None:
+        lines.append(f"\n{BOLD}Residualization{RESET}")
+        def _residual_null_check(prefix, label, key_test=False):
+            """Matched-null significance check for a residualization R².
+
+            PASS iff observed is significantly ABOVE its own matched permutation
+            null (p < 0.05) — i.e. physics genuinely survives residualization.
+            For the KEY collapse conditions a PASS is the bad-news outcome.
+            """
+            pkey = f"null_{prefix}_pvalue"
+            if residual_results.get(pkey) is None:
+                return
+            pval = float(residual_results[pkey])
+            lo = float(residual_results[f"null_{prefix}_ci_lo"])
+            hi = float(residual_results[f"null_{prefix}_ci_hi"])
+            help_txt = (
+                "PASS here means physics genuinely survives beyond X+S (bad news)"
+                if key_test
+                else "PASS iff p < 0.05 one-sided vs matched permutation null"
+            )
+            check(
+                f"{label} significantly above matched null (p < 0.05)",
+                pval < 0.05,
+                f"p = {pval:.3f}, null95% = [{lo:+.4f}, {hi:+.4f}]",
+                help_txt,
+            )
+
+        if residual_results.get("r2_P_given_X") is not None:
+            r2_PgX = float(np.asarray(residual_results["r2_P_given_X"]).mean())
+            check(
+                "r2_P | X > 0 (physics survives X-only residualization)",
+                r2_PgX > 0.01,
+                f"R² = {r2_PgX:.4f}",
+                "expect > 0.01",
+            )
+            _residual_null_check("r2_P_given_X", "r2_P | X")
+        if residual_results.get("r2_P_given_XS") is not None:
+            r2_PgXS = float(np.asarray(residual_results["r2_P_given_XS"]).mean())
+            check(
+                "r2_P | X,S ≈ 0 (KEY: physics collapses after X+S residualization)",
+                r2_PgXS < 0.01,
+                f"R² = {r2_PgXS:.4f}",
+                "expect < 0.01 KEY",
+            )
+            _residual_null_check("r2_P_given_XS", "r2_P | X,S", key_test=True)
+        # Inferred-physics parallel checks (same thresholds as GT)
+        if residual_results.get("r2_P_inf_given_X") is not None:
+            r2_PinfgX = float(np.asarray(residual_results["r2_P_inf_given_X"]).mean())
+            check(
+                "r2_P_inf | X > 0 (inferred physics survives X-only residualization)",
+                r2_PinfgX > 0.01,
+                f"R² = {r2_PinfgX:.4f}",
+                "expect > 0.01 (same threshold as GT; asymmetry is the finding)",
+            )
+            _residual_null_check("r2_P_inf_given_X", "r2_P_inf | X")
+        if residual_results.get("r2_P_inf_given_XS") is not None:
+            r2_PinfgXS = float(np.asarray(residual_results["r2_P_inf_given_XS"]).mean())
+            check(
+                "r2_P_inf | X,S ≈ 0 (KEY: inferred physics collapses after X+S residualization)",
+                r2_PinfgXS < 0.01,
+                f"R² = {r2_PinfgXS:.4f}",
+                "expect < 0.01 KEY",
+            )
+            _residual_null_check("r2_P_inf_given_XS", "r2_P_inf | X,S", key_test=True)
+
+    # --- Residualized PCA (motion decodability is a render confound) ---
+    if residualized_pca_results is not None:
+        lines.append(f"\n{BOLD}Residualized PCA{RESET}")
+
+        def _all_pc(cond, target="motion_dir"):
+            block = residualized_pca_results[cond]
+            acc = float(block["decode_accs_per_target"][target][-1])
+            hi = float(block["chance_per_target"][target]["hi"][-1])
+            return acc, hi
+
+        if "raw" in residualized_pca_results:
+            acc, hi = _all_pc("raw")
+            check(
+                "Motion decodable from raw neural PCs (phenomenon exists)",
+                acc > hi,
+                f"acc = {acc:.1%} (null ≤ {hi:.1%})",
+                "expect above permutation null",
+            )
+        if "resid_XS" in residualized_pca_results:
+            acc, hi = _all_pc("resid_XS")
+            check(
+                "KEY: motion collapses to chance after X+S residualization",
+                acc <= hi,
+                f"acc = {acc:.1%} (null ≤ {hi:.1%})",
+                "expect within permutation null KEY",
+            )
+        elif "resid_X" in residualized_pca_results:
+            acc, hi = _all_pc("resid_X")
+            check(
+                "KEY: motion collapses to chance after X residualization",
+                acc <= hi,
+                f"acc = {acc:.1%} (null ≤ {hi:.1%})",
+                "expect within permutation null KEY",
+            )
+        if "pixel" in residualized_pca_results:
+            acc, hi = _all_pc("pixel")
+            check(
+                "Positive control: motion decodable from pixel PCs (renders carry motion)",
+                acc > hi,
+                f"acc = {acc:.1%} (null ≤ {hi:.1%})",
+                "expect above permutation null",
+            )
+        var_x = residualized_pca_results.get("residual_variance_fraction_X")
+        if var_x is not None:
+            check(
+                "Neural retains non-degenerate variance after X-residualization",
+                0.0 < float(var_x) < 1.0,
+                f"var kept = {float(var_x):.4f}",
+                "expect in (0, 1)",
+            )
+
+        def _at_pc(cond, k, target="motion_dir"):
+            block = residualized_pca_results[cond]
+            pc_counts = block["pc_counts"]
+            if k not in pc_counts:
+                return None, None, None
+            idx = pc_counts.index(k)
+            acc = float(block["decode_accs_per_target"][target][idx])
+            lo = float(block["chance_per_target"][target]["lo"][idx])
+            hi = float(block["chance_per_target"][target]["hi"][idx])
+            return acc, lo, hi
+
+        def _pval_from_ci(acc, lo, hi):
+            """One-sided p-value (acc > null) via Gaussian approx to permutation CI."""
+            mean_null = (lo + hi) / 2.0
+            std_null = (hi - lo) / 3.92  # 95% CI ≈ ±1.96σ
+            if std_null <= 0:
+                return float("nan")
+            return float(_norm.sf((acc - mean_null) / std_null))
+
+        def _first_above_chance(cond, target="motion_dir"):
+            block = residualized_pca_results[cond]
+            pc_counts = block["pc_counts"]
+            accs = block["decode_accs_per_target"][target]
+            his = block["chance_per_target"][target]["hi"]
+            for k, acc, hi in zip(pc_counts, accs, his):
+                if float(acc) > float(hi):
+                    return k
+            return None
+
+        if "raw" in residualized_pca_results:
+            acc5, lo5, hi5 = _at_pc("raw", 5)
+            if acc5 is not None:
+                p5 = _pval_from_ci(acc5, lo5, hi5)
+                check(
+                    "Top-5 PCs: motion decoding not sig. above chance (raw neural)",
+                    p5 >= 0.05,
+                    f"acc@5PCs = {acc5:.1%}, p = {p5:.3f}",
+                    "PASS iff p ≥ 0.05 one-sided vs permutation null (Gaussian approx)",
+                )
+            acc10, lo10, hi10 = _at_pc("raw", 10)
+            if acc10 is not None:
+                p10 = _pval_from_ci(acc10, lo10, hi10)
+                check(
+                    "Top-10 PCs: motion decoding not sig. above chance (raw neural)",
+                    p10 >= 0.05,
+                    f"acc@10PCs = {acc10:.1%}, p = {p10:.3f}",
+                    "PASS iff p ≥ 0.05 one-sided vs permutation null (Gaussian approx)",
+                )
+            first_raw = _first_above_chance("raw")
+            msg = (
+                f"PC {first_raw}" if first_raw is not None else "never"
+            )
+            lines.append(
+                f"  {DIM}[raw] motion first exceeds chance at: {msg}{RESET}"
+            )
+
+        resid_cond = (
+            "resid_XS" if "resid_XS" in residualized_pca_results
+            else "resid_X" if "resid_X" in residualized_pca_results
+            else None
+        )
+        if resid_cond is not None:
+            acc5, lo5, hi5 = _at_pc(resid_cond, 5)
+            if acc5 is not None:
+                p5 = _pval_from_ci(acc5, lo5, hi5)
+                check(
+                    f"Top-5 PCs: motion not sig. above chance after residualization ({resid_cond})",
+                    p5 >= 0.05,
+                    f"acc@5PCs = {acc5:.1%}, p = {p5:.3f}",
+                    "PASS iff p ≥ 0.05 one-sided vs permutation null (Gaussian approx)",
+                )
+            acc10, lo10, hi10 = _at_pc(resid_cond, 10)
+            if acc10 is not None:
+                p10 = _pval_from_ci(acc10, lo10, hi10)
+                check(
+                    f"Top-10 PCs: motion not sig. above chance after residualization ({resid_cond})",
+                    p10 >= 0.05,
+                    f"acc@10PCs = {acc10:.1%}, p = {p10:.3f}",
+                    "PASS iff p ≥ 0.05 one-sided vs permutation null (Gaussian approx)",
+                )
+            acc_end, hi_end = _all_pc(resid_cond)
+            lo_end = float(
+                residualized_pca_results[resid_cond]["chance_per_target"]["motion_dir"]["lo"][-1]
+            )
+            p_end = _pval_from_ci(acc_end, lo_end, hi_end)
+            check(
+                f"All PCs: motion not sig. above chance after residualization ({resid_cond})",
+                p_end >= 0.05,
+                f"acc@allPCs = {acc_end:.1%}, p = {p_end:.3f}",
+                "PASS iff p ≥ 0.05 one-sided vs permutation null (Gaussian approx)",
+            )
+            first_resid = _first_above_chance(resid_cond)
+            msg = (
+                f"PC {first_resid}" if first_resid is not None else "never"
+            )
+            lines.append(
+                f"  {DIM}[{resid_cond}] motion first exceeds chance at: {msg}{RESET}"
+            )
+
     # --- RSA ---
-    nr = rsa_results['corr_neural_pixel']
-    np_ = rsa_results['corr_neural_physics']
-    partial = rsa_results['partial_neural_physics']
+    corr_X = rsa_results["corr_neural_X"]
+    corr_P = rsa_results["corr_neural_P"]
+    partial_X = rsa_results["partial_P_given_X"]
 
     lines.append(f"\n{BOLD}RSA{RESET}")
     check(
-        "Neural ↔ Pixel correlation is dominant",
-        nr > 0.10,
-        f"r = {nr:.4f}",
+        "Neural ↔ X correlation is dominant",
+        corr_X > 0.10,
+        f"r = {corr_X:.4f}",
         "expect > 0.10",
     )
     check(
-        "Neural ↔ Physics correlation is small",
-        np_ < 0.10,
-        f"r = {np_:.4f}",
-        "expect < 0.10",
+        "Neural ↔ physics correlation present",
+        corr_P > 0.05,
+        f"r = {corr_P:.4f}",
+        "expect > 0.05",
     )
-    check(
-        "Neural ↔ Physics | Pixel is near zero",
-        abs(partial) < 0.05,
-        f"r = {partial:.4f}",
-        "expect |r| < 0.05",
-    )
-    check(
-        "Pixel dominates physics (ratio > 2×)",
-        nr > 2 * abs(np_),
-        f"ratio = {nr / abs(np_) if np_ != 0 else float('inf'):.1f}×",
-        "expect pixel/physics > 2×",
-    )
-
-    if rsa_results.get('corr_neural_inferred') is not None:
-        ni = rsa_results['corr_neural_inferred']
-        partial_ni = rsa_results['partial_neural_inferred']
-        # Threshold loosened from 0.05 → 0.10 after the scene-gen review:
-        # the better inverse model legitimately puts more physics-relevant
-        # signal into the cognitive-PP layer that feeds neural activity, so
-        # residual correlation with inferred physics rises slightly above 0.05.
-        # The headline finding (pixel dominates) is unchanged — the partial
-        # is small in absolute terms.
+    if not np.isnan(rsa_results.get("null_corr_neural_P_pvalue", float("nan"))):
+        pval = float(rsa_results["null_corr_neural_P_pvalue"])
         check(
-            "Neural ↔ Inferred physics | Pixel near zero",
-            abs(partial_ni) < 0.10,
-            f"r = {partial_ni:.4f}",
-            "expect |r| < 0.10" + ("" if inverse_ok else " (depends on inverse model)"),
+            "corr_neural_P significantly above null (p < 0.05, one-sided)",
+            pval < 0.05,
+            f"p = {pval:.3f}",
+            "PASS iff p < 0.05 one-sided vs Mantel permutation null",
+        )
+    check(
+        "Partial neural↔physics | X > 0 (naive positive)",
+        partial_X > 0.02,
+        f"r = {partial_X:.4f}",
+        "expect > 0.02",
+    )
+    if not np.isnan(rsa_results.get("null_partial_P_given_X_pvalue", float("nan"))):
+        pval = float(rsa_results["null_partial_P_given_X_pvalue"])
+        check(
+            "partial_P_given_X significantly above null (p < 0.05, one-sided)",
+            pval < 0.05,
+            f"p = {pval:.3f}",
+            "PASS iff p < 0.05 one-sided vs Mantel permutation null",
         )
 
+    if rsa_results.get("partial_P_given_XS") is not None:
+        partial_XS = rsa_results["partial_P_given_XS"]
+        check(
+            "Partial neural↔physics | X,S ≈ 0 (KEY)",
+            abs(partial_XS) < 0.05,
+            f"r = {partial_XS:.4f}",
+            "expect |r| < 0.05 KEY",
+        )
+        if not np.isnan(rsa_results.get("null_partial_P_given_XS_pvalue", float("nan"))):
+            pval = float(rsa_results["null_partial_P_given_XS_pvalue"])
+            check(
+                "partial_P_given_XS significantly above null (KEY, p < 0.05, two-sided)",
+                pval < 0.05,
+                f"p = {pval:.3f}",
+                "PASS iff p < 0.05; PASS means physics distinguishable from random pairing (bad news)",
+            )
+
+    # Inferred-physics parallel RSA checks (same thresholds as GT)
+    if rsa_results.get("corr_neural_P_inf") is not None:
+        corr_P_inf = rsa_results["corr_neural_P_inf"]
+        check(
+            "Neural ↔ inferred-physics correlation present",
+            corr_P_inf > 0.05,
+            f"r = {corr_P_inf:.4f}",
+            "expect > 0.05 (same threshold as GT; asymmetry is the finding)",
+        )
+        if not np.isnan(rsa_results.get("null_corr_neural_P_inf_pvalue", float("nan"))):
+            pval = float(rsa_results["null_corr_neural_P_inf_pvalue"])
+            check(
+                "corr_neural_P_inf significantly above null (p < 0.05, one-sided)",
+                pval < 0.05,
+                f"p = {pval:.3f}",
+                "PASS iff p < 0.05 one-sided vs Mantel permutation null",
+            )
+    if rsa_results.get("partial_P_inf_given_X") is not None:
+        partial_inf_X = rsa_results["partial_P_inf_given_X"]
+        check(
+            "Partial neural↔inferred-physics | X > 0 (naive positive)",
+            partial_inf_X > 0.02,
+            f"r = {partial_inf_X:.4f}",
+            "expect > 0.02",
+        )
+        if not np.isnan(rsa_results.get("null_partial_P_inf_given_X_pvalue", float("nan"))):
+            pval = float(rsa_results["null_partial_P_inf_given_X_pvalue"])
+            check(
+                "partial_P_inf_given_X significantly above null (p < 0.05, one-sided)",
+                pval < 0.05,
+                f"p = {pval:.3f}",
+                "PASS iff p < 0.05 one-sided vs Mantel permutation null",
+            )
+    if rsa_results.get("partial_P_inf_given_XS") is not None:
+        partial_inf_XS = rsa_results["partial_P_inf_given_XS"]
+        check(
+            "Partial neural↔inferred-physics | X,S ≈ 0 (KEY)",
+            abs(partial_inf_XS) < 0.05,
+            f"r = {partial_inf_XS:.4f}",
+            "expect |r| < 0.05 KEY",
+        )
+        if not np.isnan(rsa_results.get("null_partial_P_inf_given_XS_pvalue", float("nan"))):
+            pval = float(rsa_results["null_partial_P_inf_given_XS_pvalue"])
+            check(
+                "partial_P_inf_given_XS significantly above null (KEY, p < 0.05, two-sided)",
+                pval < 0.05,
+                f"p = {pval:.3f}",
+                "PASS iff p < 0.05; PASS means inferred physics distinguishable from random pairing (bad news)",
+            )
+
     # --- Dissociation ---
-    r2_pix = dissociation_results['mean_r2_pixel']
-    r2_phys = dissociation_results['mean_r2_physics']
-    beh_pix = dissociation_results['pixel_behavioral_score']
-    beh_phys = dissociation_results['physics_behavioral_score']
-    metric = dissociation_results['metric_label']
-    obj = dissociation_results['objective']
+    r2_pix = dissociation_results["mean_r2_pixel"]
+    r2_phys = dissociation_results["mean_r2_physics"]
+    beh_pix = dissociation_results["pixel_behavioral_score"]
+    beh_phys = dissociation_results["physics_behavioral_score"]
+    beh_phys_inf = dissociation_results.get(
+        "inferred_physics_behavioral_score", float("nan")
+    )
+    metric = dissociation_results["metric_label"]
+    obj = dissociation_results["objective"]
 
     lines.append(f"\n{BOLD}Dissociation (objective: {obj}){RESET}")
     check(
@@ -185,8 +544,20 @@ def evaluate(encoding_results, rsa_results, dissociation_results,
             f"{metric} = {beh_phys:.4f}",
             "expect > 0.90 (oracle re-renders the held-out target)",
         )
-        delta_pix = dissociation_results.get('delta_pixel_behavioral_score', float('nan'))
-        delta_phys = dissociation_results.get('delta_physics_behavioral_score', float('nan'))
+        if beh_phys_inf == beh_phys_inf:  # not nan
+            check(
+                "Inferred-physics behavioral score is high",
+                beh_phys_inf > 0.70,
+                f"inferred {metric} = {beh_phys_inf:.4f}  "
+                f"(GT oracle = {beh_phys:.4f}, gap = {beh_phys - beh_phys_inf:+.4f})",
+                "expect > 0.70 — inferred physics + PyBullet should approach the GT oracle",
+            )
+        delta_pix = dissociation_results.get(
+            "delta_pixel_behavioral_score", float("nan")
+        )
+        delta_phys = dissociation_results.get(
+            "delta_physics_behavioral_score", float("nan")
+        )
         if delta_pix == delta_pix:  # not nan
             check(
                 "Delta-frame: physics oracle near-perfect in delta space",
@@ -201,44 +572,11 @@ def evaluate(encoding_results, rsa_results, dissociation_results,
                 "expect < 0.70 — blurry PCA prediction cannot match sharp object-displacement delta",
             )
 
-    # --- Residual Encoding ---
-    if residual_results is not None:
-        r2_resid_pixel = float(residual_results['r2_resid_pixel'].mean())
-        r2_raw_gt = float(residual_results['r2_raw_physics_gt'].mean())
-        r2_resid_gt = float(residual_results['r2_resid_physics_gt'].mean())
-        var_kept = float(residual_results['residual_variance_fraction'])
-
-        lines.append(f"\n{BOLD}Residual Encoding{RESET}")
-        check(
-            "Stage-1 sanity: pixel does not predict its own residual",
-            abs(r2_resid_pixel) < 0.05,
-            f"R² = {r2_resid_pixel:.4f}",
-            "expect |R²| < 0.05",
-        )
-        check(
-            "Stage-1 leaves substantial residual variance",
-            var_kept > 0.05,
-            f"residual var fraction = {var_kept:.4f}",
-            "expect > 0.05",
-        )
-        check(
-            "Raw neural carries GT-physics signal (pre-residualization)",
-            r2_raw_gt > 0.01,
-            f"R² = {r2_raw_gt:.4f}",
-            "expect > 0.01 — needed for the collapse to be meaningful",
-        )
-        check(
-            "Residualization removes GT-physics signal (false negative)",
-            r2_resid_gt < 0.01,
-            f"R² = {r2_resid_gt:.4f}",
-            "expect < 0.01",
-        )
-
     # --- Dynamics (future brain state) ---
     if dynamics_results is not None:
-        r2_phys_fwd = dynamics_results['mean_r2_physics_forward']
-        r2_pix_fwd = dynamics_results['mean_r2_pixel_forward']
-        fwd_gap = dynamics_results['forward_gap']
+        r2_phys_fwd = dynamics_results["mean_r2_physics_forward"]
+        r2_pix_fwd = dynamics_results["mean_r2_pixel_forward"]
+        fwd_gap = dynamics_results["forward_gap"]
 
         lines.append(f"\n{BOLD}Future Brain State (Dynamics){RESET}")
         check(
@@ -280,9 +618,7 @@ def evaluate(encoding_results, rsa_results, dissociation_results,
 
     lines.append("")
     lines.append(f"{BOLD}{'=' * 50}{RESET}")
-    lines.append(
-        f"{color}{BOLD}{passed_total}/{total} checks passed{RESET}"
-    )
+    lines.append(f"{color}{BOLD}{passed_total}/{total} checks passed{RESET}")
     if passed_total < total:
         lines.append(
             f"{RED}The simulation does not fully demonstrate the expected dissociation.{RESET}"

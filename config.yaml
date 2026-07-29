@@ -1,10 +1,13 @@
+block_norms: [truncated_svd, zscore]
+block_norm: truncated_svd
+
 n_scenes: 2000
 n_objects: 1
 image_size: 64
 n_neurons: 500
 n_timesteps: 120
 noise_level: 0.3
-random_seed: 42
+random_seed: 43
 
 # Generative scene parameters
 # linvel_x is sampled uniformly from [-linvel_x_max, +linvel_x_max].
@@ -13,24 +16,82 @@ random_seed: 42
 # x_accel inference.
 linvel_x_max: 3.0
 # x_accel sampled uniformly from [-x_accel_max, +x_accel_max] m/s².
-# Tightened from 15 → 6: at T=0.5 s, |a|=15 produced ~1.875 m of horizontal
-# drift, which combined with linvel_x*T pushed many target frames off-camera.
-# σ_a noise floor for the {0,40,80}-frame stride is ~6 m/s², so |a|≤6 still
-# leaves the curvature signal recoverable.
-x_accel_max: 6.0
+# Set to 0.0 for no-xaccel experiment: rng.uniform(0, 0) = 0 always, so
+# x_accel is a constant 0 across all scenes. The valid_dims_ mask in
+# InverseModel automatically excludes it (std < 1e-4 check). This lets us
+# measure whether the PP-chain vs pixels-only contrast is preserved without
+# x_accel as a potential confound.
+x_accel_max: 0.0
 rsa_subsample: 500
+rsa_compute_null: true
+rsa_n_null_permutations: 300
 pixel_pca_dim: 500
+
+# Encoding analysis: permutation null on physics-only and combined R²s.
+# Shuffles scene→physics association; refits ridge to get null R² distribution.
+encoding_compute_null: true
+encoding_n_null_permutations: 300
+
+# Residualization analysis: matched permutation null on the residual R²s.
+# Stage-1 residuals are fixed; shuffles physics through the stage-2 decoder so
+# each r2_P|X / r2_P|X,S gets its own chance band (its proper reference).
+residual_compute_null: true
+residual_n_null_permutations: 500
+
 behavioral_pca_dim: 0.90
 dynamics_pca_dim: 50
 behavioral_objective: "next_frame_pixels"
 
-# Camera — wider FOV keeps the moving object on-screen for more frames
 camera_fov: 90
 
 # Predictive processing
+pp_device: "cpu"
 pp_hidden_dim: 256
 pp_pixel_pca_dim: 50
 pp_early_frame: 40
 pp_late_frame: 80
 pp_dropout_rate: 0.05
+
+# Neural generation source: cognitive PP model
+# neural_input = [render_bytes | InverseModel.<pp_neural_layer> | inferred_physics]
+# pp_neural_layer: which hidden layer to tap (h1, h2, h3)
 pp_neural_layer: "h2"
+
+# Inverse-model backbone selector:
+#   'mlp'                  — pixel-PCA → MLP (legacy; uses pp_pixel_pca_dim/pp_hidden_dim)
+#   'softmax_cnn'          — raw 3-frame stack → SpatialSoftmaxV2
+#   'depth_gated_temporal' — RGBA+depth 3-frame stack → SpatialSoftmaxDepthGatedTemporalDelta
+#                            (best on diverse multi-object scenes: mean valid-dim R²=0.355)
+# Code defaults to 'mlp' if the key is missing (back-compat for older branches).
+pp_inverse_backbone: "depth_gated_temporal"
+
+# Knobs for softmax-CNN backbones (softmax_cnn and depth_gated_temporal).
+pp_softmax:
+  n_filters: 128
+  learned_temp: true
+  temp_per_channel: true
+  include_variance: false
+  hidden_dim: 256
+  head_depth: 3
+  dropout_rate: 0.0
+  depth_gamma_init: 2.0  # depth_gated_temporal only: initial foreground-gate sharpness
+  n_epochs: 400
+  patience: 60
+  min_epochs: 60
+  lr: 3.0e-3
+  batch_size: 64
+
+# Scene animation rendering (optional pipeline step; NOT part of `rule all`).
+# Renders a random sample of scenes as mp4s through all intermediate physics
+# frames, for slide decks. Run with `uv run snakemake -j1 animations`.
+animation_n_scenes: 4         # random sample size
+animation_seed: 7             # reproducible sampling
+animation_resolution: 384     # native render px per frame (square; <=480 avoids offscreen-cap bump)
+animation_fps: 30
+animation_stride: 8           # render every Nth timestep (compress longer run into same clip)
+animation_grid_cols: 2        # montage columns (rows derived from sample size)
+animation_montage_decimate: 2 # integer downscale factor for montage cells (384 -> 192px)
+animation_loop_seconds: 30    # target duration (s) of the looped *_loop.mp4 variants
+animation_camera_fov: 90      # animation-only FOV (match global; widen if still too narrow)
+animation_n_timesteps: 960    # simulate 8× the model's 120-step window; stride=8 compresses to same frame count
+animation_gravity: [0, 0, 0]  # zero gravity so objects fly indefinitely (floor/friction won't stop them)

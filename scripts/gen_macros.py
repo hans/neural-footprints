@@ -1,5 +1,7 @@
 """Read pipeline result JSONs and emit LaTeX macros for the paper."""
+
 import sys, os, json
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import numpy as np
@@ -9,16 +11,20 @@ encoding = load_results(snakemake.input.encoding)
 rsa = load_results(snakemake.input.rsa)
 dynamics = load_results(snakemake.input.dynamics)
 pca = load_results(snakemake.input.pca)
+residualized_pca = load_results(snakemake.input.residualized_pca)
 config = snakemake.config
 
 # --- helpers ---
+
 
 def fmt(value, decimals=2):
     """Format a number, stripping trailing zeros."""
     return f"{value:.{decimals}f}"
 
+
 def pct(value):
     return f"{value * 100:.1f}"
+
 
 def latex_int(n):
     """Format integer with LaTeX thousands separators: 49152 -> '49{,}152'."""
@@ -30,10 +36,13 @@ def latex_int(n):
     parts.append(s)
     return "{,}".join(reversed(parts))
 
+
 macros = {}
+
 
 def add(name, value):
     macros[name] = value
+
 
 # --- config ---
 add("nScenes", str(config["n_scenes"]))
@@ -47,9 +56,13 @@ add("rsaSubsample", str(config["rsa_subsample"]))
 image_size = config["image_size"]
 n_objects = config["n_objects"]
 n_brain_frames = 3  # initial / early / late, all full RGBA+depth+seg
-d_render = n_brain_frames * image_size * image_size * 12  # 3 frames × (RGBA(4) + depth(4) + seg(4)) raw bytes, each cast to float32
-d_physics_per_obj = 16  # pos(3) + orn(4) + lin_vel(3) + ang_vel(3) + mass(1) + friction(1) + x_accel(1)
-d_config_per_obj = 9    # shape_is_box(1) + radius(1) + half_extents(3) + color(4)
+d_render = (
+    n_brain_frames * image_size * image_size * 12
+)  # 3 frames × (RGBA(4) + depth(4) + seg(4)) raw bytes, each cast to float32
+d_physics_per_obj = (
+    16  # pos(3) + orn(4) + lin_vel(3) + ang_vel(3) + mass(1) + friction(1) + x_accel(1)
+)
+d_config_per_obj = 9  # shape_is_box(1) + radius(1) + half_extents(3) + color(4)
 d_physics = d_physics_per_obj * n_objects
 d_config = d_config_per_obj * n_objects
 d_total = d_render + d_physics + d_config
@@ -71,6 +84,32 @@ add("encodingRsqPixel", fmt(np.mean(r2_pixel), 4))
 add("encodingRsqCombined", fmt(np.mean(r2_combined), 4))
 add("encodingDeltaRsq", fmt(np.mean(delta_r2), 4))
 add("controlAccuracy", pct(encoding["control_accuracy"]))
+
+
+# --- encoding null distribution macros ---
+def _maybe_fmt(value, decimals=4):
+    if value is None:
+        return "N/A"
+    try:
+        if np.isnan(value):
+            return "N/A"
+    except (TypeError, ValueError):
+        pass
+    return fmt(value, decimals)
+
+
+for prefix, latex_name in [
+    ("physics", "encodingRsqPhysicsNull"),
+    ("combined", "encodingRsqCombinedNull"),
+    ("delta", "encodingDeltaRsqNull"),
+]:
+    add(f"{latex_name}Lo", _maybe_fmt(encoding.get(f"null_{prefix}_ci_lo")))
+    add(f"{latex_name}Hi", _maybe_fmt(encoding.get(f"null_{prefix}_ci_hi")))
+    add(f"{latex_name}Mean", _maybe_fmt(encoding.get(f"null_{prefix}_mean")))
+    add(
+        f"{latex_name}PValue",
+        _maybe_fmt(encoding.get(f"null_{prefix}_pvalue"), decimals=3),
+    )
 
 # --- RSA ---
 add("rsaCorrNeuralPixel", fmt(rsa["corr_neural_X"], 4))
@@ -109,6 +148,27 @@ for k, acc in zip(pc_counts, decode_accs):
         add("pcaDecodeThresholdAcc", pct(acc))
         add("pcaDecodeThresholdVar", pct(cumvar[k - 1]))
         break
+
+# --- residualized PCA (motion decodability is a render confound) ---
+# All-PC motion-direction decoding accuracy per residualization condition.
+_resid_pca_macros = [
+    ("raw", "pcaMotionRawAllPC"),
+    ("resid_X", "pcaMotionResidXAllPC"),
+    ("resid_XS", "pcaMotionResidXSAllPC"),
+    ("pixel", "pcaMotionPixelAllPC"),
+]
+for cond, latex_name in _resid_pca_macros:
+    block = residualized_pca.get(cond)
+    if block is None:
+        continue
+    motion_accs = block["decode_accs_per_target"]["motion_dir"]
+    add(latex_name, pct(motion_accs[-1]))
+
+if "residual_variance_fraction_XS" in residualized_pca:
+    add(
+        "pcaResidVarKeptXS",
+        pct(residualized_pca["residual_variance_fraction_XS"]),
+    )
 
 # --- evaluation summary ---
 evaluation = load_results(snakemake.input.evaluation)
